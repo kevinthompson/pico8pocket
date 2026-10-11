@@ -1,6 +1,7 @@
 ---
 name: pico8pocket-performance
 description: Measure and optimize Pico8Pocket's frame time on the Analogue Pocket (RV32 openfpgaOS) - reading the profiler overlay, reproducing a slow scene, counting RV32 instructions, BRAM placement and the frame-skip scheduler. Use when a cart runs slowly on the Pocket, when the user sends overlay screenshots, or before changing the interpreter, drawing or audio hot paths.
+argument-hint: "[harness: path or host:path of the os25 harness, if any]"
 ---
 
 # Pico8Pocket performance
@@ -81,6 +82,14 @@ description: Measure and optimize Pico8Pocket's frame time on the Analogue Pocke
   frame hash plus callgrind instructions per frame.
   `make celeste-baseline` records the baseline.
 - Carts live only in `assets/cards/`, which is gitignored; never commit them.
+  A fresh workspace has none, and the Lexaloffle site may be unreachable
+  from a cloud session, so ask the user for their cards zip (68 carts as of
+  2026-10-11) before measuring or comparing frames. Celeste 2 needs
+  companion carts that the zip does not include.
+- **Which carts matter:** Celeste 2 is the priority test cart, then
+  Kiloman, Moss Moss and Tetyis. Bunny Envmap is a tech demo: list its
+  numbers, but don't investigate or optimise for its regressions.
+  Backrooms fails on `main` as well.
 - The cost figure moves by about 1.5% with binary layout alone, because Lua's
   string hash seed depends on addresses. Do not chase changes smaller than
   that.
@@ -116,3 +125,27 @@ description: Measure and optimize Pico8Pocket's frame time on the Analogue Pocke
   line numbers, and that save states still replay (`make test` covers both).
 - Ship a test zip and ask the user for overlay screenshots of the same scene.
   Host numbers are estimates.
+
+## Simulated runs: the os25 harness
+
+The user has a cycle-level simulator of the Pocket's os25 CPU and memory,
+the os25 harness, with an experimental pico8pocket workload. It lives only
+on the user's own machine with its own skill, deliberately kept out of
+this repository. Take its location from the **harness** argument (a path
+or `host:path`); if it wasn't given, ask the user rather than searching
+for it. What to know before quoting it:
+
+- Every number from it is **simulated**. Say so each time.
+- It compiles its own bare-metal build from this repo's sources rather
+  than running the shipped `app.elf`, and it models **os25**, while this
+  core ships on **os20**. It doesn't model the display, the frame-skip
+  scheduler or OS scheduling, so it can't explain an F or R change on the
+  overlay by itself.
+- Repeated runs of one build give identical numbers, but code layout and
+  Lua's string hash seed move a build's cost by about ±6%. It rules out
+  big regressions and confirms big wins; it can't settle a 1 to 3% change.
+- A full run over all the carts takes about half an hour per build.
+- PR #10 (inlined Lua calls) against `main`, 2026-10-11: Celeste 2's tower
+  room was about 1% cheaper (28.1 vs 28.3 ms a frame), frames and audio
+  identical. In the first 14 carts of the cross-cart run the median change
+  was +0.1%; Boulder Run was the largest gain (−5.5%).
