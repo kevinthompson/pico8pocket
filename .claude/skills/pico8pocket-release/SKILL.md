@@ -93,6 +93,8 @@ renames. `Cores/zenibako.pico8b` only shows that some B core is installed.
 - Develop on the session's designated branch. After its PR merges, restart
   the branch from `origin/main`. The user may also ask for a new branch per
   change.
+- PR descriptions: start with an empty `## Summary` section for the user
+  to fill in, then a `---` divider, then the full agent-written details.
 - Check that a PR is still open before pushing to its branch. The user
   merges on their own schedule, and commits pushed after the merge never
   reach `main`; put them on a new branch from `main` instead.
