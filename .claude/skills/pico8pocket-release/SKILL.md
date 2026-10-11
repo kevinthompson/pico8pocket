@@ -1,6 +1,7 @@
 ---
 name: pico8pocket-release
 description: Build, package and hand Pico8Pocket test builds to the user for Analogue Pocket testing, including side-by-side A/B cores, the SD-card layout, the platform banner and the PR/CodeRabbit review flow. Use whenever producing a zip for the user, changing packaging or core metadata, or opening and merging PRs in this repo.
+argument-hint: "[card: SD mount path, e.g. /Volumes/Pocket]"
 ---
 
 # Pico8Pocket builds, device testing and PRs
@@ -55,24 +56,25 @@ scripts/variant-core.sh releases/pico8pocket-v<VER>.zip b "Test build B" b.zip
 - Name the variants A and B, say exactly what differs, and ask for the same
   scene's overlay from each. One screenshot can catch a spike, so don't
   call a regression from a single device overlay; ask for the A/B pair.
-- To install both from a Mac (the files the two zips share are identical,
-  so order doesn't matter):
+- To install both from a Mac, set `$CARD` to the card's mount path from the
+  **card** argument, asking the user if it wasn't given. The files the two
+  zips share are identical, so order doesn't matter:
   ```sh
-  unzip -o pico8-zenibako-<VER>-A-<topic>.zip -d /Volumes/Pocket
-  unzip -o pico8-zenibako-<VER>-B-<topic>.zip -d /Volumes/Pocket
-  dot_clean -m /Volumes/Pocket/Assets /Volumes/Pocket/Cores /Volumes/Pocket/Platforms
-  diskutil unmount /Volumes/Pocket
+  unzip -o pico8-zenibako-<VER>-A-<topic>.zip -d "$CARD"
+  unzip -o pico8-zenibako-<VER>-B-<topic>.zip -d "$CARD"
+  dot_clean -m "$CARD/Assets" "$CARD/Cores" "$CARD/Platforms"
+  diskutil unmount "$CARD"
   ```
   If the unmount is "dissented by" a `com.apple.Virtualization` process,
   the Claude desktop app has the card open for a session that read it;
-  once the copy is done, `diskutil unmount force /Volumes/Pocket` is safe.
+  once the copy is done, `diskutil unmount force "$CARD"` is safe.
 
 ## Checking what is on a card
 
 `core.json` carries the same version for every build of a release, so it
 can't tell builds apart. Compare each core's elf with the same-named elf
 in its candidate zip (`unzip -p ZIP Assets/pico8/common/NAME.elf | cmp -
-/Volumes/Pocket/Assets/pico8/common/NAME.elf`): `pico8pocket.elf` for the
+"$CARD"/Assets/pico8/common/NAME.elf`): `pico8pocket.elf` for the
 main core and `pico8pocketb.elf` for B, which `scripts/variant-core.sh`
 renames. `Cores/zenibako.pico8b` only shows that some B core is installed.
 

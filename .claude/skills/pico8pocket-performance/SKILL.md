@@ -1,6 +1,7 @@
 ---
 name: pico8pocket-performance
 description: Measure and optimize Pico8Pocket's frame time on the Analogue Pocket (RV32 openfpgaOS) - reading the profiler overlay, reproducing a slow scene, counting RV32 instructions, BRAM placement and the frame-skip scheduler. Use when a cart runs slowly on the Pocket, when the user sends overlay screenshots, or before changing the interpreter, drawing or audio hot paths.
+argument-hint: "[harness: path or host:path of the os25 harness, if any]"
 ---
 
 # Pico8Pocket performance
@@ -129,9 +130,10 @@ description: Measure and optimize Pico8Pocket's frame time on the Analogue Pocke
 
 The user has a cycle-level simulator of the Pocket's os25 CPU and memory,
 the os25 harness, with an experimental pico8pocket workload. It lives only
-on the user's Mac mini with its own skill, deliberately kept out of this
-repository; a session on the MacBook reaches it with `ssh mac-mini`. What
-to know before quoting it:
+on the user's own machine with its own skill, deliberately kept out of
+this repository. Take its location from the **harness** argument (a path
+or `host:path`); if it wasn't given, ask the user rather than searching
+for it. What to know before quoting it:
 
 - Every number from it is **simulated**. Say so each time.
 - It compiles its own bare-metal build from this repo's sources rather
