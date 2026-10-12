@@ -341,7 +341,15 @@ static int service_savestate(p8p_runtime_t *runtime, int running,
         /* Sleep may be followed by power-off: get cartdata to the card. */
         p8p_runtime_flush_cartdata(runtime);
         result = p8p_state_serialize(cart_hash, runtime, &blob, &size);
-        if (result != 0 || p8p_platform_savestate_save(blob, size) != 0) {
+        if (result == 0) {
+            /* The Pocket reads back the whole declared size, so declare
+             * just this state's size for the hand-over, then the maximum
+             * again for the next request. */
+            p8p_platform_savestate_enable(size);
+            result = p8p_platform_savestate_save(blob, size);
+            p8p_platform_savestate_enable(P8P_STATE_BLOB_MAX);
+        }
+        if (result != 0) {
             printf("pico8pocket: native save state refused (%d)\n", result);
             p8p_platform_savestate_finish(0);
         }

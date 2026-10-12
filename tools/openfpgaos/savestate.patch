@@ -28,10 +28,10 @@ index afe7214..4fd576a 100644
                                           * title/Goddard Mario head).  Truecolor
 diff --git a/src/firmware/api/of_savestate.h b/src/firmware/api/of_savestate.h
 new file mode 100644
-index 0000000..69d665c
+index 0000000..58e3c83
 --- /dev/null
 +++ b/src/firmware/api/of_savestate.h
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,133 @@
 +//------------------------------------------------------------------------------
 +// SPDX-License-Identifier: Apache-2.0
 +// SPDX-FileType: SOURCE
@@ -63,10 +63,18 @@ index 0000000..69d665c
 + *       break;
 + *   }
 + *
-+ * Sleep is a save followed by power-off; wake reboots the core and issues a
-+ * load once the app is running, so call of_savestate_enable() early and poll
-+ * from the first frame.  Requests the app never answers are refused by the OS
-+ * (saves at once when save states are not enabled; loads after 30 s).
++ * Sleep is a save followed by power-off.  On wake the Pocket reloads the core
++ * and pushes the state back at once -- measured on hardware, the blob and the
++ * load request are already there when the OS starts, long before any app.
++ * The OS holds that request for the app, so call of_savestate_enable() early
++ * and poll from the first frame.  Requests the app never answers are refused
++ * by the OS (saves at once when save states are not enabled; loads after
++ * 30 s).
++ *
++ * The Pocket reads back the whole declared size on every save.  To keep
++ * saves short, declare the real size just for the hand-over:
++ * of_savestate_enable(n) before of_savestate_save(buf, n), then the maximum
++ * again afterwards.
 + *
 + * The core's core.json must also set "sleep_supported": true for the Pocket
 + * to offer sleep.
@@ -259,10 +267,10 @@ index e3ffd49..a684c7d 100644
   * cannot survive a warm reset.  PRESERVES the nonvolatile presave + save
 diff --git a/src/firmware/os/hal/savestate.h b/src/firmware/os/hal/savestate.h
 new file mode 100644
-index 0000000..25ac349
+index 0000000..4d30e55
 --- /dev/null
 +++ b/src/firmware/os/hal/savestate.h
-@@ -0,0 +1,29 @@
+@@ -0,0 +1,30 @@
 +//------------------------------------------------------------------------------
 +// SPDX-License-Identifier: Apache-2.0
 +// SPDX-FileType: SOURCE
@@ -287,8 +295,9 @@ index 0000000..25ac349
 +int  of_savestate_load(void *buf, uint32_t cap);
 +void of_savestate_finish(int ok);
 +
-+/* Called from the 1 kHz kernel tick: denies requests that no app will
-+ * answer (save states never enabled, or a load nobody picks up). */
++/* Called from of_check_shutdown() -- the timer IRQ and every busy-wait
++ * spin, so at no fixed rate: denies requests that no app will answer (save
++ * states never enabled, or a load nobody picks up in time). */
 +void of_savestate_tick(void);
 +
 +#endif /* OFOS_SAVESTATE_H */
@@ -341,7 +350,7 @@ index 0000000..b0b20e6
 +void of_savestate_finish(int ok) { (void)ok; }
 +void of_savestate_tick(void) {}
 diff --git a/src/firmware/os/targets/pocket/file.c b/src/firmware/os/targets/pocket/file.c
-index 97b7f99..9462416 100644
+index 97b7f99..9f73aa6 100644
 --- a/src/firmware/os/targets/pocket/file.c
 +++ b/src/firmware/os/targets/pocket/file.c
 @@ -16,6 +16,7 @@
@@ -356,7 +365,7 @@ index 97b7f99..9462416 100644
   * per PMA — but the bridge must own the CRAM0 mux before the Pocket
   * nonvolatile exit writeback reads the save window. */
  void of_check_shutdown(void) {
-+    /* Same 1 kHz tick: deny save-state requests nobody will answer. */
++    /* Deny save-state requests nobody will answer (time-based inside). */
 +    of_savestate_tick();
 +
      if (SYS_SHUTDOWN & SHUTDOWN_PENDING) {
@@ -389,10 +398,10 @@ index 4be128f..1dcdf7b 100644
          cram0_release_to_bridge();
 diff --git a/src/firmware/os/targets/pocket/savestate.c b/src/firmware/os/targets/pocket/savestate.c
 new file mode 100644
-index 0000000..1baa53b
+index 0000000..b262687
 --- /dev/null
 +++ b/src/firmware/os/targets/pocket/savestate.c
-@@ -0,0 +1,345 @@
+@@ -0,0 +1,348 @@
 +//------------------------------------------------------------------------------
 +// SPDX-License-Identifier: Apache-2.0
 +// SPDX-FileType: SOURCE
@@ -460,7 +469,7 @@ index 0000000..1baa53b
 +static volatile uint32_t ss_max_payload;
 +static volatile int      ss_pending;
 +static volatile uint32_t ss_seen;          /* last request toggles consumed */
-+static volatile uint32_t ss_load_wait_ms;
++static volatile uint32_t ss_load_t0_ms;   /* of_timer_get_ms() when a load was seen */
 +
 +static inline uint32_t ss_irq_save(void) {
 +    uint32_t prev;
@@ -526,7 +535,7 @@ index 0000000..1baa53b
 +            ss_complete(SS_LOAD, 0);
 +    } else {
 +        ss_pending = SS_LOAD;
-+        ss_load_wait_ms = 0;
++        ss_load_t0_ms = of_timer_get_ms();
 +    }
 +}
 +
@@ -551,7 +560,10 @@ index 0000000..1baa53b
 +        if (ss_pending == SS_SAVE) {
 +            ss_complete(SS_SAVE, 0);           /* no app support: deny now */
 +            ss_pending = SS_NONE;
-+        } else if (++ss_load_wait_ms >= SS_LOAD_PICKUP_TIMEOUT_MS) {
++        } else if ((uint32_t)(of_timer_get_ms() - ss_load_t0_ms) >=
++                   SS_LOAD_PICKUP_TIMEOUT_MS) {
++            /* Wall-clock, not a call count: this runs from the timer IRQ
++             * AND from every spin of of_timer_delay_us(), far above 1 kHz. */
 +            ss_complete(SS_LOAD, 0);           /* wake, but no app took it */
 +            ss_pending = SS_NONE;
 +        }
@@ -903,7 +915,7 @@ index bae3186..fad2960 100644
  set_global_assignment -name VERILOG_FILE io_sdram.v
  set_global_assignment -name QIP_FILE megafunctions/mf_pllbase.qip
 diff --git a/src/fpga/targets/pocket/core_top.v b/src/fpga/targets/pocket/core_top.v
-index cc6a012..ac51a47 100644
+index cc6a012..4df610a 100644
 --- a/src/fpga/targets/pocket/core_top.v
 +++ b/src/fpga/targets/pocket/core_top.v
 @@ -787,10 +787,19 @@ wire        bridge_wr_issue = !cram0_mode_74a &&
@@ -928,7 +940,7 @@ index cc6a012..ac51a47 100644
                                        bridge_cram0_wr_pulse &&
                                        bridge_wr_fifo_full &&
                                        !bridge_wr_issue;
-@@ -1926,6 +1935,78 @@ end
+@@ -1926,6 +1935,79 @@ end
      wire            savestate_load_ok;
      wire            savestate_load_err;
  
@@ -954,7 +966,8 @@ index cc6a012..ac51a47 100644
 +        .SS_MAX_SIZE    (32'h0010_0000)
 +    ) isavestate (
 +        .clk_74a                ( clk_74a ),
-+        .reset_n                ( reset_n_apf ),
++        .por_n                  ( pll_ram_locked_74a ),
++        .core_reset_n           ( reset_n_apf ),
 +        .savestate_start        ( savestate_start ),
 +        .savestate_start_ack    ( savestate_start_ack ),
 +        .savestate_start_busy   ( savestate_start_busy ),
@@ -1007,7 +1020,7 @@ index cc6a012..ac51a47 100644
      wire            osnotify_inmenu;
  
      // CPU-side signals (in clk_ram_controller domain)
-@@ -2044,7 +2125,8 @@ always @(posedge clk_74a) begin
+@@ -2044,7 +2126,8 @@ always @(posedge clk_74a) begin
          // SDRAM-leg counter removed with bridge_to_sdram; brg_wcnt_sdram stays 0.
          // F6 sticky: a CRAM0-range bridge write while cram0_mode_74a=1
          // (CPU owns the mux) is dropped by the bridge_wr_accept gate.
@@ -1017,7 +1030,7 @@ index cc6a012..ac51a47 100644
              brg_cram0_drop_cpu_owned <= 1'b1;
          if (bridge_wr_overrun_pulse)
              brg_cram0_drop_overrun <= 1'b1;
-@@ -2598,6 +2680,9 @@ assign video_hs = vidout_hs;
+@@ -2598,6 +2681,9 @@ assign video_hs = vidout_hs;
          .INCLUDE_PARAM_TRI(`ifdef INCLUDE_PARAM_TRI 1 `else 0 `endif),
          .INCLUDE_VERT_TRI(`ifdef INCLUDE_VERT_TRI 1 `else 0 `endif),
          .INCLUDE_PARAM_TRI_RECS(`ifdef INCLUDE_PARAM_TRI_RECS 1 `else 0 `endif),
@@ -1027,7 +1040,7 @@ index cc6a012..ac51a47 100644
          .INCLUDE_COLUMN_LIST(`ifdef INCLUDE_COLUMN_LIST 1 `else 0 `endif),
          .INCLUDE_COMPACT_SPAN(`ifdef INCLUDE_COMPACT_SPAN 1 `else 0 `endif),
          // Fast texture memory advertisement (HW_FEATURES bit 25).  The CRAM1
-@@ -2784,6 +2869,17 @@ assign video_hs = vidout_hs;
+@@ -2784,6 +2870,17 @@ assign video_hs = vidout_hs;
          // Shutdown handshake
          .shutdown_pending(shutdown_pending_cpu),
          .shutdown_ack(shutdown_ack_cpu),
@@ -1047,10 +1060,10 @@ index cc6a012..ac51a47 100644
          .link_irq(link_irq),
 diff --git a/src/fpga/targets/pocket/savestate_ctrl.v b/src/fpga/targets/pocket/savestate_ctrl.v
 new file mode 100644
-index 0000000..775b829
+index 0000000..3576e56
 --- /dev/null
 +++ b/src/fpga/targets/pocket/savestate_ctrl.v
-@@ -0,0 +1,203 @@
+@@ -0,0 +1,252 @@
 +//------------------------------------------------------------------------------
 +// SPDX-License-Identifier: Apache-2.0
 +// SPDX-FileType: SOURCE
@@ -1077,6 +1090,18 @@ index 0000000..775b829
 +// The order of operations above matches agg23's openFPGA-NES
 +// save_state_controller.sv, a shipping Pocket core with sleep support.
 +//
++// Wake: the Pocket reloads the bitstream and pushes the blob and its 0xA4
++// at once.  Measured on hardware, both are already there when the OS
++// starts -- long before a soft-CPU core has an app that could restore
++// anything.  So while no app has registered (cpu_size == 0, its reset
++// value) or the core is still in APF reset, a load is acknowledged and
++// reported ok at once -- the blob is already on its way into CRAM0, whose
++// bridge path depends on neither -- and load_req_tgl is left flipped, so
++// the OS finds the request pending when it boots and the app applies it
++// when it starts.  A save in that state is refused.  This block stays
++// alive through APF reset (por_n is its only reset); entering reset from a
++// running core (Reset Enter) clears any stale request and the counters.
++//
 +// Bridge reads/writes inside the blob window are counted (rd_words,
 +// wr_words) so firmware can tell when the host has finished pulling the
 +// blob (and so keep CRAM0 on the bridge side until then) and whether a
@@ -1091,7 +1116,8 @@ index 0000000..775b829
 +    parameter [31:0] SS_MAX_SIZE    = 32'h0010_0000   // 1 MB blob window
 +) (
 +    input  wire        clk_74a,
-+    input  wire        reset_n,
++    input  wire        por_n,           // power-on reset only (PLL lock)
++    input  wire        core_reset_n,    // APF reset (clk_74a domain)
 +
 +    // core_bridge_cmd side
 +    input  wire        savestate_start,
@@ -1146,6 +1172,9 @@ index 0000000..775b829
 +                           ? SS_MAX_SIZE : {size_s2[31:2], 2'b00};
 +assign savestate_size = size_clamped;
 +
++// An app that can answer requests itself: out of reset and registered.
++wire app_ready = core_reset_n && (size_s2 != 32'd0);
++
 +// CPU -> 74a toggles.  The err bits are written in the same store as the
 +// toggle; they are sampled two cycles after the synchronized toggle edge,
 +// by which time their own synchronizer has settled too.
@@ -1160,13 +1189,14 @@ index 0000000..775b829
 +reg [1:0] start_done_pipe, load_done_pipe;
 +reg start_prev, load_prev;
 +reg bridge_rd_prev;
++reg core_reset_n_d;
 +
 +wire in_window = (bridge_addr[31:24] == SS_BRIDGE_ADDR[31:24]) &&
 +                 (bridge_addr[23:0]  >= SS_BRIDGE_ADDR[23:0])  &&
 +                 (bridge_addr[23:0]  <  SS_BRIDGE_ADDR[23:0] + SS_MAX_SIZE[23:0]);
 +
-+always @(posedge clk_74a or negedge reset_n) begin
-+    if (!reset_n) begin
++always @(posedge clk_74a or negedge por_n) begin
++    if (!por_n) begin
 +        savestate_start_ack  <= 1'b0;
 +        savestate_start_busy <= 1'b0;
 +        savestate_start_ok   <= 1'b0;
@@ -1187,7 +1217,10 @@ index 0000000..775b829
 +        clear_d              <= 1'b0;
 +        start_done_pipe      <= 2'b00;
 +        load_done_pipe       <= 2'b00;
++        core_reset_n_d       <= 1'b0;
 +    end else begin
++        core_reset_n_d <= core_reset_n;
++
 +        start_prev     <= savestate_start;
 +        load_prev      <= savestate_load;
 +        bridge_rd_prev <= bridge_rd;
@@ -1207,7 +1240,13 @@ index 0000000..775b829
 +            savestate_start_err  <= 1'b0;
 +            savestate_load_ok    <= 1'b0;
 +            savestate_load_err   <= 1'b0;
-+            start_req_tgl        <= ~start_req_tgl;
++            if (app_ready) begin
++                start_req_tgl    <= ~start_req_tgl;
++            end else begin
++                // Nobody to serialize anything: refuse.
++                savestate_start_busy <= 1'b0;
++                savestate_start_err  <= 1'b1;
++            end
 +            rd_words             <= 32'd0;
 +        end else if (!savestate_start) begin
 +            savestate_start_ack  <= 1'b0;
@@ -1228,6 +1267,11 @@ index 0000000..775b829
 +            savestate_start_ok   <= 1'b0;
 +            savestate_start_err  <= 1'b0;
 +            load_req_tgl         <= ~load_req_tgl;
++            if (!app_ready) begin
++                // Wake: accepted now, restored once the app is up.
++                savestate_load_busy <= 1'b0;
++                savestate_load_ok   <= 1'b1;
++            end
 +        end else if (!savestate_load) begin
 +            savestate_load_ack   <= 1'b0;
 +        end
@@ -1238,8 +1282,26 @@ index 0000000..775b829
 +            savestate_load_err   <=  load_err_s;
 +        end
 +
++        // ---- Reset Enter from a running core: drop stale state ----
++        // (Placed before the counters so a blob pushed in reset still
++        // counts; requests arriving in the same cycle cannot happen, the
++        // bridge is busy with the 0x0010 command.)
++        if (core_reset_n_d && !core_reset_n) begin
++            savestate_start_busy <= 1'b0;
++            savestate_start_ok   <= 1'b0;
++            savestate_start_err  <= 1'b0;
++            savestate_load_busy  <= 1'b0;
++            savestate_load_ok    <= 1'b0;
++            savestate_load_err   <= 1'b0;
++            start_req_tgl        <= 1'b0;
++            load_req_tgl         <= 1'b0;
++        end
++
 +        // ---- Blob-window traffic counters ----
-+        if (clear_s ^ clear_d) begin
++        if (core_reset_n_d && !core_reset_n) begin
++            rd_words <= 32'd0;
++            wr_words <= 32'd0;
++        end else if (clear_s ^ clear_d) begin
 +            rd_words <= 32'd0;
 +            wr_words <= 32'd0;
 +        end else begin
@@ -1254,6 +1316,20 @@ index 0000000..775b829
 +endmodule
 +
 +`default_nettype wire
+diff --git a/src/fpga/targets/pocket/seeds/os20.seed b/src/fpga/targets/pocket/seeds/os20.seed
+index bb95160..45a4fb7 100644
+--- a/src/fpga/targets/pocket/seeds/os20.seed
++++ b/src/fpga/targets/pocket/seeds/os20.seed
+@@ -1 +1 @@
+-33
++8
+diff --git a/src/fpga/targets/pocket/seeds/os20.seed.src b/src/fpga/targets/pocket/seeds/os20.seed.src
+index 20ebfc1..a9c37c5 100644
+--- a/src/fpga/targets/pocket/seeds/os20.seed.src
++++ b/src/fpga/targets/pocket/seeds/os20.seed.src
+@@ -1 +1 @@
+-f45446600f5733a77cfec79e96f99b91
++d40a5d1611e9d4491b2277b77b1a7234
 diff --git a/src/fpga/targets/pocket/variants/os20.mk b/src/fpga/targets/pocket/variants/os20.mk
 index a7323e9..c414557 100644
 --- a/src/fpga/targets/pocket/variants/os20.mk
@@ -1324,10 +1400,10 @@ index 4e90b37..4b8ce47 100644
  	@printf "\n=== Pocket bridge command FSM ===\n"
 diff --git a/src/fpga/test/tb_savestate.v b/src/fpga/test/tb_savestate.v
 new file mode 100644
-index 0000000..dcbf839
+index 0000000..5f1a603
 --- /dev/null
 +++ b/src/fpga/test/tb_savestate.v
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,154 @@
 +//------------------------------------------------------------------------------
 +// SPDX-License-Identifier: Apache-2.0
 +// SPDX-FileType: SOURCE
@@ -1340,6 +1416,8 @@ index 0000000..dcbf839
 +
 +module tb_savestate (
 +    input  wire        clk,
++    input  wire        por_n,
++    output wire        core_reset_n,
 +
 +    input  wire [31:0] bridge_addr,
 +    input  wire        bridge_rd,
@@ -1361,6 +1439,7 @@ index 0000000..dcbf839
 +);
 +
 +wire        reset_n;
++assign      core_reset_n = reset_n;
 +wire        shutdown_pending;
 +wire        osnotify_inmenu;
 +wire        dataslot_requestread, dataslot_requestwrite, dataslot_update;
@@ -1447,7 +1526,8 @@ index 0000000..dcbf839
 +
 +savestate_ctrl ss (
 +    .clk_74a               (clk),
-+    .reset_n               (1'b1),
++    .por_n                 (por_n),
++    .core_reset_n          (reset_n),
 +    .savestate_start       (savestate_start),
 +    .savestate_start_ack   (savestate_start_ack),
 +    .savestate_start_busy  (savestate_start_busy),
@@ -1480,10 +1560,10 @@ index 0000000..dcbf839
 +endmodule
 diff --git a/src/fpga/test/tb_savestate_main.cpp b/src/fpga/test/tb_savestate_main.cpp
 new file mode 100644
-index 0000000..6ca02c2
+index 0000000..afa30cb
 --- /dev/null
 +++ b/src/fpga/test/tb_savestate_main.cpp
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,236 @@
 +//------------------------------------------------------------------------------
 +// SPDX-License-Identifier: Apache-2.0
 +// SPDX-FileType: SOURCE
@@ -1555,7 +1635,90 @@ index 0000000..6ca02c2
 +    tb->bridge_wr_data = 0; tb->cpu_start_done_tgl = 0; tb->cpu_start_err = 0;
 +    tb->cpu_load_done_tgl = 0; tb->cpu_load_err = 0; tb->cpu_clear_tgl = 0;
 +    tb->cpu_size = 0;
-+    ticks(16);
++    tb->por_n = 0; ticks(4);
++    tb->por_n = 1; ticks(16);
++}
++
++/* Wake: the bitstream has just loaded and the core is still in APF reset
++ * (no Reset Exit yet) when the host pushes the blob and asks for a load. */
++static void test_wake_in_reset() {
++    std::printf("test_wake_in_reset:\n");
++    check_eq("core-in-reset-at-power-up", tb->core_reset_n, 0);
++    check_eq("save-in-reset-acked", host_cmd(0x00A0, 1) != 0xDEAD, 1);
++    check_eq("save-in-reset-refused", host_cmd(0x00A0, 0), 3);
++    check_eq("save-in-reset-no-request", tb->start_req_tgl, 0);
++    for (uint32_t i = 0; i < 5; i++) write32(BLOB + i * 4, 0xB10B0000u | i);
++    check_eq("blob-words-counted-in-reset", tb->wr_words, 5);
++    check_eq("load-in-reset-acked", host_cmd(0x00A4, 1) != 0xDEAD, 1);
++    check_eq("load-in-reset-reports-ok", host_cmd(0x00A4, 0), 2);
++    check_eq("load-left-pending-for-os", tb->load_req_tgl, 1);
++
++    check_eq("reset-exit", host_cmd(0x0011, 0), 0);
++    ticks(8);
++    check_eq("core-running", tb->core_reset_n, 1);
++    check_eq("pending-load-survives-reset-exit", tb->load_req_tgl, 1);
++    check_eq("blob-count-survives-reset-exit", tb->wr_words, 5);
++    /* The OS answers the pending load; the host already has its ok. */
++    cpu_complete_load(false);
++    tb->cpu_clear_tgl ^= 1; ticks(8);
++    check_eq("os-answer-keeps-request-level", tb->load_req_tgl, 1);
++    check_eq("os-clear-zeroes-count", tb->wr_words, 0);
++    check_eq("load-ok-still-reported-after-boot", host_cmd(0x00A4, 0), 2);
++
++    /* Warm-reset back to a clean, running core for the tests below. */
++    host_cmd(0x0010, 0); ticks(8);
++    host_cmd(0x0011, 0); ticks(8);
++}
++
++/* Wake with reset already released but the OS and app not up yet (no size
++ * registered): the load is answered at once and left pending. */
++static void test_wake_before_app() {
++    std::printf("test_wake_before_app:\n");
++    host_cmd(0x0010, 0); ticks(8);
++    host_cmd(0x0011, 0); ticks(8);
++    tb->cpu_size = 0; tb->cpu_clear_tgl = 0; tb->cpu_load_done_tgl = 0;
++    tb->cpu_start_done_tgl = 0; ticks(16);
++    host_cmd(0x0010, 0); ticks(8);        // settle any toggle edges
++    host_cmd(0x0011, 0); ticks(8);
++    check_eq("core-running-no-app", tb->core_reset_n, 1);
++    check_eq("save-before-app-refused", (host_cmd(0x00A0, 1), host_cmd(0x00A0, 0)), 3);
++    check_eq("save-before-app-no-request", tb->start_req_tgl, 0);
++    for (uint32_t i = 0; i < 7; i++) write32(BLOB + i * 4, 0xFEED0000u | i);
++    host_cmd(0x00A4, 1);
++    check_eq("load-before-app-ok-at-once", host_cmd(0x00A4, 0), 2);
++    check_eq("load-before-app-left-pending", tb->load_req_tgl, 1);
++    check_eq("load-before-app-blob-counted", tb->wr_words, 7);
++    /* App registers later; the pending request and count must hold. */
++    tb->cpu_size = 0x40020; ticks(16);
++    check_eq("pending-survives-app-register", tb->load_req_tgl, 1);
++    check_eq("count-survives-app-register", tb->wr_words, 7);
++    check_eq("ok-still-reported", host_cmd(0x00A4, 0), 2);
++    cpu_complete_load(false);
++    tb->cpu_clear_tgl ^= 1; ticks(8);
++    /* With an app registered, the next load waits for the CPU again. */
++    host_cmd(0x00A4, 1);
++    check_eq("load-with-app-is-busy", host_cmd(0x00A4, 0), 1);
++    cpu_complete_load(false);
++    check_eq("load-with-app-ok-after-cpu", host_cmd(0x00A4, 0), 2);
++    tb->cpu_size = 0x40000; ticks(8);
++}
++
++/* Reset Enter from a running core drops stale requests and counters, so
++ * the OS does not see a phantom load after a warm reset. */
++static void test_warm_reset() {
++    std::printf("test_warm_reset:\n");
++    write32(BLOB, 1);
++    host_cmd(0x00A4, 1);                  // left unanswered (busy)
++    check_eq("reset-enter", host_cmd(0x0010, 0), 0);
++    ticks(8);
++    check_eq("core-back-in-reset", tb->core_reset_n, 0);
++    check_eq("load-req-cleared", tb->load_req_tgl, 0);
++    check_eq("start-req-cleared", tb->start_req_tgl, 0);
++    check_eq("wr-words-cleared", tb->wr_words, 0);
++    check_eq("load-result-cleared", host_cmd(0x00A4, 0), 0);
++    check_eq("reset-exit-again", host_cmd(0x0011, 0), 0);
++    ticks(8);
++    check_eq("still-no-phantom-load", tb->load_req_tgl, 0);
 +}
 +
 +static void test_query() {
@@ -1627,9 +1790,12 @@ index 0000000..6ca02c2
 +    tb = new Vtb_savestate;
 +    std::printf("=== savestate_ctrl + core_bridge_cmd ===\n");
 +    init();
++    test_wake_in_reset();
 +    test_query();
 +    test_save();
 +    test_load();
++    test_wake_before_app();
++    test_warm_reset();
 +    std::printf("\n=== Results: %d passed, %d failed ===\n", passes, fails);
 +    delete tb;
 +    return fails == 0 ? 0 : 1;
