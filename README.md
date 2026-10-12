@@ -89,9 +89,9 @@ started and how you can help improve it.
   newline correctly. This fixes minified cartridges such as Moss Moss where a
   nested one-line `if` previously swallowed the following movement code into
   the wrong branch.
-- The interpreter is tuned for the Pocket's 100 MHz RV32 CPU (no
-  double-precision FPU, 8 KB instruction cache, 14 KB of zero-wait BRAM that
-  holds the dispatch loop). z8lua is patched (`patches/`) to keep the program
+- The interpreter is tuned for os20's dual-issue 90 MHz RV32 CPU (no
+  double-precision FPU, 32 KiB instruction and 64 KiB data caches, 14 KiB of
+  zero-wait BRAM that holds the dispatch loop). z8lua is patched (`patches/`) to keep the program
   counter in a register, check its service hook only at jumps and calls,
   cache the hash slot of every constant-name table access, compare numbers,
   strings and nil inline, follow `__index` chains for `_ENV` objects, call

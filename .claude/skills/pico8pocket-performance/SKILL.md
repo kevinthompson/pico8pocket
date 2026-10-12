@@ -1,15 +1,17 @@
 ---
 name: pico8pocket-performance
 description: Measure and optimize Pico8Pocket's frame time on the Analogue Pocket (RV32 openfpgaOS) - reading the profiler overlay, reproducing a slow scene, counting RV32 instructions, BRAM placement and the frame-skip scheduler. Use when a cart runs slowly on the Pocket, when the user sends overlay screenshots, or before changing the interpreter, drawing or audio hot paths.
-argument-hint: "[harness: path or host:path of the os25 harness, if any]"
+argument-hint: "[harness: path or host:path of openfpga-os25-harness with os20 support]"
 ---
 
 # Pico8Pocket performance
 
 ## The hardware, and what that implies
 
-- VexiiRiscv rv32imafc at about 100 MHz: 8 KB instruction cache, 32 KB data
-  cache, single-precision FPU only. `double` arithmetic is software-emulated
+- The pinned `os20` platform is dual-issue VexiiRiscv rv32imafc at 90 MHz:
+  32 KiB instruction cache, 64 KiB data cache, single-precision FPU only.
+  Read `docs/architecture.md` and `scripts/fetch-deps.sh` for the current
+  hardware configuration and runtime pins. `double` arithmetic is software-emulated
   at hundreds of instructions per operation, so keep it off per-call paths
   (`time()` used to divide in double; see `api_time`).
 - 14,336 bytes of zero-wait BRAM for code (`APP_BRAM` in
@@ -23,9 +25,9 @@ argument-hint: "[harness: path or host:path of the os25 harness, if any]"
   An overflow fails the link ("region APP_BRAM overflowed").
 - Changing `vm_fasttext.h` does not trigger a rebuild. Run
   `rm -rf .obj/pico8pocket` before `make package`.
-- Measured: the I-cache is not the bottleneck. Three quarters of fetched
-  instructions come from BRAM, and simulated misses cost about 0.2 ms per
-  frame. Frame time tracks RV32 instruction count.
+- Use os20 RTL frame cycles for performance decisions. Historical cache shares
+  and QEMU instruction counts describe their sampled scene, ELF and platform;
+  they do not establish a universal bottleneck or predict dual-issue frame time.
 
 ## Reading the overlay (Select + X)
 
@@ -59,13 +61,14 @@ argument-hint: "[harness: path or host:path of the os25 harness, if any]"
    ```
    Subtract a 0-frame run to remove load cost. For update-only cost, use
    `nodraw` instead of `draw`.
-3. **Pocket-accurate counts:**
+3. **Optional RV32 instruction diagnostics:**
    ```sh
    tools/rv32-profile/profile.sh CART "<setup lua>" 30 20
    ```
-   It builds the runtime with the Pocket's flags (picolibc, QEMU user mode)
-   and prints RV32 instructions per frame, the top functions and I-cache
-   misses. It takes about a minute.
+   This is a separate picolibc/QEMU build. It prints executed instructions
+   and top functions, with a legacy 8 KiB I-cache model; the shipped core has
+   a 32 KiB I-cache. Treat these counts as diagnostics, not os20 cycle timing
+   or proof of hardware build parity. Prefer the os20 harness below for timing.
    - x86 counts can mislead. x86 spills registers that RV32 keeps, so
      dispatch-loop changes may be invisible on x86 and real on RV32, or the
      reverse.
@@ -90,11 +93,18 @@ argument-hint: "[harness: path or host:path of the os25 harness, if any]"
   Kiloman, Moss Moss and Tetyis. Bunny Envmap is a tech demo: list its
   numbers, but don't investigate or optimise for its regressions.
   Backrooms fails on `main` as well.
-- The cost figure moves by about 1.5% with binary layout alone, because Lua's
-  string hash seed depends on addresses. Do not chase changes smaller than
-  that.
+- For A/B traces, fix the **final** Lua hash seed using the harness's
+  `--hash-seed 0x5eed1234`. Confirm `PICOSEED 1592594996` in native/QEMU logs.
+  Overriding `luai_makeseed()` alone leaves address mixing in `makeseed(L)`.
+  Production seeding stays unchanged. Fixed seeding removes that confounder;
+  code placement can still change cycles, so record exact ELF/layout and use
+  matching routes and replay windows rather than a blanket noise threshold.
 
-## Where the time goes (Celeste 2 tower room, about 1.6M RV32 instructions per frame)
+## Historical RV32 diagnostic profile (Celeste 2 tower room)
+
+The roughly 1.6M instructions per frame below came from a separate diagnostic
+build, not a calibrated os20 frame-time breakdown. Reprofile the selected scene
+and exact binary before treating these shares as current hardware costs.
 
 - **Interpreter loop:** about half the frame. Dispatch is 11 instructions per
   Lua instruction. Constant-key table access (`GETTABUP`/`GETTABLE`) uses
@@ -121,31 +131,75 @@ argument-hint: "[harness: path or host:path of the os25 harness, if any]"
   - Fuzz anything with edge cases (fill patterns with camera, clip and
     palette, for example) using a small generated cart run through both
     scanners.
+- The legacy scanner comparison does not verify the final Lua seed and compares
+  frame hashes, not independent palette/PCM bytes. Use matching fixed-seed os20
+  cases for the affected carts and compare pixels, display palettes, PCM and
+  pair counts independently. Require repeated native/QEMU output, same-ELF
+  RTL output/memory oracles, scanout and a corrupted-pixel negative control.
+  Export raw channels before claiming byte identity; hashes alone do not prove it.
+  Standard `pico8/run.py` has no raw-channel exporter or cross-case compare action.
+  Use a separately reviewed collector for byte comparisons; otherwise report
+  output-hash agreement and leave byte identity unverified.
 - For interpreter changes, also check that runtime error messages keep their
   line numbers, and that save states still replay (`make test` covers both).
 - Ship a test zip and ask the user for overlay screenshots of the same scene.
   Host numbers are estimates.
 
-## Simulated runs: the os25 harness
+## Simulated runs: use the os20 adapter
 
-The user has a cycle-level simulator of the Pocket's os25 CPU and memory,
-the os25 harness, with an experimental pico8pocket workload. It lives only
-on the user's own machine with its own skill, deliberately kept out of
-this repository. Take its location from the **harness** argument (a path
-or `host:path`); if it wasn't given, ask the user rather than searching
-for it. What to know before quoting it:
+Use `openfpga-os25-harness` with os20 support (introduced in `7e747e7`).
+Take its location from the **harness** argument or session context, then
+`OS25_HARNESS_ROOT` or the known sibling checkout. Ask only if it is unavailable.
+Read its `AGENTS.md` and `pico8/README.md`; keep cases private and isolated.
 
-- Every number from it is **simulated**. Say so each time.
-- It compiles its own bare-metal build from this repo's sources rather
-  than running the shipped `app.elf`, and it models **os25**, while this
-  core ships on **os20**. It doesn't model the display, the frame-skip
-  scheduler or OS scheduling, so it can't explain an F or R change on the
-  overlay by itself.
-- Repeated runs of one build give identical numbers, but code layout and
-  Lua's string hash seed move a build's cost by about ±6%. It rules out
-  big regressions and confirms big wins; it can't settle a 1 to 3% change.
-- A full run over all the carts takes about half an hour per build.
-- PR #10 (inlined Lua calls) against `main`, 2026-10-11: Celeste 2's tower
-  room was about 1% cheaper (28.1 vs 28.3 ms a frame), frames and audio
-  identical. In the first 14 carts of the cross-cart run the median change
-  was +0.1%; Boulder Run was the largest gain (−5.5%).
+From the harness root, verify an existing platform before using it. If
+`build/platforms/os20` does not exist, run
+`python3 pico8/cpu_platform.py build --jobs 4` once, then verify it. For an
+existing directory without `platform.json`, preserve and inspect the failure
+logs; use the documented `rtl` resume action if CPU generation succeeded.
+Do not rebuild or replace a completed platform or historical cases.
+
+```sh
+python3 pico8/cpu_platform.py verify
+# Create each baseline/candidate under its own name:
+python3 pico8/run.py create --source SOURCE --archive CARTS_ZIP \
+  --name NEW_CASE --platform os20 --hash-seed 0x5eed1234 --measure-frames 12
+python3 pico8/run.py build --case EXACT_CASE
+python3 pico8/run.py native --case EXACT_CASE --cart CART_ID
+python3 pico8/run.py capture --case EXACT_CASE --cart CART_ID
+python3 pico8/run.py replay --case EXACT_CASE --cart CART_ID
+python3 pico8/run.py replay --case EXACT_CASE --cart CART_ID --traffic scanout
+python3 pico8/run.py replay --case EXACT_CASE --cart CART_ID --negative
+python3 pico8/run.py report --case EXACT_CASE
+```
+
+- Always pass `--platform os20`: the CLI and Python API defaults remain os25.
+  Require `case.json` to record `platform_name=os20`, `clock_hz=90000000` and
+  matching CPU/simulator provenance. RTL must emit `PICOCPU 90000000` after
+  reading the actual MMIO register. Compare A/B on the same platform, seed,
+  input/setup, frame window, audio model, compiler and BRAM placement.
+  Inspect `capture.json` for both `passed=true` and `native_output_equal=true`;
+  QEMU repeatability can pass even when native output differs. Resolve cart IDs
+  from each case inventory. A runtime change uses separate source snapshots;
+  an authorized cart-code change uses distinct, recorded cart archives.
+- Reach the user's scene with `--setup`, `--input`, `--warmup-frames` and
+  `--trace-frames`; record whether it was recreated or imported from an actual
+  save. A scripted route may stay on a title screen. Use requested carts and
+  affected scenes before commissioning another full sweep.
+  The standard CLI has no save-import option; setup/input recreate a scene.
+  Claim an actual save import only with separately validated import evidence.
+- Report **simulated** frame time and runtime capacity using the recorded
+  clock: `90000000 / mean_cycles`, capped at target FPS for the estimate.
+  Preserve historical os25 results with their original CPU and 100 MHz clock;
+  they cannot be converted to os20 by rescaling clock alone.
+- This matches the documented os20 CPU configuration, not proven complete
+  hardware parity. The platform is pinned to OS `8318f25`; Diablo's shipped
+  bitstream has no source-generation manifest. Record compiler, libc, flags,
+  alignment and BRAM layout against the intended device ELF: the harness's
+  GCC13/bounded allocator build can differ from the actual SDK build.
+- Runtime replay excludes presentation, adaptive frame skipping, OS/SD and
+  live display/audio scheduling; caches start cold and PCM consumption is fixed.
+  Require hardware evidence for device FPS or full parity claims. Butterscotch's
+  os25 calibration does not calibrate Pico8Pocket on os20.
+- Existing single-lane os25 cache/pipeline observers are not validated for
+  dual-issue os20. Distinguish instruction shares from cycle/frame-time shares.

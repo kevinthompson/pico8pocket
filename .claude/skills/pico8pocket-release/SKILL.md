@@ -22,6 +22,24 @@ argument-hint: "[card: SD mount path, e.g. /Volumes/Pocket]"
 - Public zips never contain carts. `make package-local` bundles local carts
   and is for private use only.
 
+## Match simulator evidence to the device build
+
+- The pinned shipped platform is `os20`: dual-issue RV32 at 90 MHz, with
+  32 KiB I-cache and 64 KiB D-cache (`docs/architecture.md`). Performance
+  acceptance uses the separate os20 adapter in `openfpga-os25-harness`, with
+  explicit `--platform os20` and a verified final Lua seed; follow
+  `../pico8pocket-performance/SKILL.md`. The harness still defaults to os25.
+- Record source revision, ELF SHA-256, compiler version/flags, libc, alignment
+  and BRAM size for the packaged hardware build. Compare the bitstream, OS and
+  loader hashes with the pins in `scripts/fetch-deps.sh`; a core name or version
+  alone does not identify the installed binary.
+- The os20 simulator matches the documented CPU profile but uses its own
+  runtime/checkpoint build. Exact equivalence to Diablo's shipped bitstream
+  source is unproven, and presentation, adaptive skipping, OS/SD and live audio
+  scheduling are omitted. Report simulated results separately from device FPS;
+  require the same scene's device A/B evidence for a hardware performance claim.
+  The Butterscotch os25 calibration cannot establish Pico8Pocket os20 parity.
+
 ## SD-card layout (core zenibako.pico8, platform pico8)
 
 ```text
