@@ -1,0 +1,1636 @@
+diff --git a/src/firmware/api/of.h b/src/firmware/api/of.h
+index 89b48c9..a5d3d15 100644
+--- a/src/firmware/api/of.h
++++ b/src/firmware/api/of.h
+@@ -78,6 +78,7 @@ extern "C" {
+ #include "of_caps.h"
+ #include "of_services.h"
+ #include "of_config.h"
++#include "of_savestate.h"
+ #include "of_launch.h"
+ /* Note: of_gpu.h is intentionally NOT included here -- it has per-app
+  * static state (ring buffer pointers) and must be included from exactly
+diff --git a/src/firmware/api/of_caps.h b/src/firmware/api/of_caps.h
+index afe7214..4fd576a 100644
+--- a/src/firmware/api/of_caps.h
++++ b/src/firmware/api/of_caps.h
+@@ -200,6 +200,11 @@ extern "C" {
+                                          * cone (EXCLUDE_GPU_LIGHT) while the
+                                          * rest of the transform front-end is
+                                          * live.  Tracks INCLUDE_GPU_LIGHT. */
++#define OF_HW_SAVESTATE     (1u << 31)  /* APF save states + sleep/wake: the
++                                         * bitstream answers the Pocket's
++                                         * 0x00A0/0x00A4 commands and the OS
++                                         * exposes of_savestate_* (see
++                                         * of_savestate.h). */
+ #define OF_HW_GPU_COMBINE   (1 << 27)   /* GPU full texel*C+D color combiner
+                                          * (HILITE/specular class, e.g. the SM64
+                                          * title/Goddard Mario head).  Truecolor
+diff --git a/src/firmware/api/of_savestate.h b/src/firmware/api/of_savestate.h
+new file mode 100644
+index 0000000..69d665c
+--- /dev/null
++++ b/src/firmware/api/of_savestate.h
+@@ -0,0 +1,125 @@
++//------------------------------------------------------------------------------
++// SPDX-License-Identifier: Apache-2.0
++// SPDX-FileType: SOURCE
++//------------------------------------------------------------------------------
++
++/*
++ * openfpgaOS Save States -- Analogue Pocket sleep/wake and "Memories"
++ *
++ * The Pocket saves and restores a core through two host commands; on
++ * bitstreams with OF_HW_SAVESTATE the OS forwards them to the app.  The app
++ * decides what a state contains: the OS only moves an opaque blob (up to the
++ * size the app declared) between the app and the Pocket, adding a header
++ * with a CRC and the instance's game id, so a corrupt state or one from
++ * another game is refused instead of restored.
++ *
++ * Usage, once per frame at a point where the app's state is consistent:
++ *
++ *   of_savestate_enable(MY_MAX_STATE);           // once, at startup
++ *   ...
++ *   switch (of_savestate_poll()) {
++ *   case OF_SAVESTATE_SAVE:
++ *       n = serialize(buf, sizeof buf);
++ *       if (n > 0) of_savestate_save(buf, n);     // reports ok to the Pocket
++ *       else       of_savestate_finish(0);        // refuse this one
++ *       break;
++ *   case OF_SAVESTATE_LOAD:
++ *       n = of_savestate_load(buf, sizeof buf);   // < 0: already refused
++ *       if (n > 0) of_savestate_finish(restore(buf, n) == 0);
++ *       break;
++ *   }
++ *
++ * Sleep is a save followed by power-off; wake reboots the core and issues a
++ * load once the app is running, so call of_savestate_enable() early and poll
++ * from the first frame.  Requests the app never answers are refused by the OS
++ * (saves at once when save states are not enabled; loads after 30 s).
++ *
++ * The core's core.json must also set "sleep_supported": true for the Pocket
++ * to offer sleep.
++ *
++ * Contract while enabled: of_savestate_poll() may hand CRAM0 back to the
++ * bridge, so do not keep pointers into the CRAM0 app-DMA pool across it.
++ * of_savestate_save() blocks until the Pocket has read the blob (normally a
++ * fraction of a second; the game is paused in the Pocket menu meanwhile).
++ */
++
++#ifndef OF_SAVESTATE_H
++#define OF_SAVESTATE_H
++
++#include <stdint.h>
++#include <stddef.h>
++#include "of_services.h"
++#include "of_error.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#define OF_SAVESTATE_NONE  0
++#define OF_SAVESTATE_SAVE  1   /* the Pocket wants a state: of_savestate_save() */
++#define OF_SAVESTATE_LOAD  2   /* a state is waiting: of_savestate_load() */
++
++/* Largest app payload a single state may hold (1 MB window minus header). */
++#define OF_SAVESTATE_MAX_PAYLOAD (0x100000u - 32u)
++
++#ifndef OF_PC
++
++#define OF_SAVESTATE_SVC_FIELD_INDEX(field) \
++    ((uint32_t)((offsetof(struct of_services_table, field) - \
++                 offsetof(struct of_services_table, video_init)) / sizeof(void *)))
++#define OF_SAVESTATE_SVC_HAS(field) \
++    (OF_SVC->count > OF_SAVESTATE_SVC_FIELD_INDEX(field) && OF_SVC->field)
++
++/* Declare the largest state this app will produce and start answering the
++ * Pocket.  0 turns save states off again.  OF_ERR_NOT_SUPPORTED on
++ * bitstreams/OS images without the feature. */
++static inline int of_savestate_enable(uint32_t max_size) {
++    if (!OF_SAVESTATE_SVC_HAS(savestate_enable))
++        return OF_ERR_NOT_SUPPORTED;
++    return OF_SVC->savestate_enable(max_size);
++}
++
++/* OF_SAVESTATE_NONE / _SAVE / _LOAD.  Call once per frame. */
++static inline int of_savestate_poll(void) {
++    if (!OF_SAVESTATE_SVC_HAS(savestate_poll))
++        return OF_SAVESTATE_NONE;
++    return OF_SVC->savestate_poll();
++}
++
++/* Answer a pending save with the app's state.  Returns 0 or an OF_ERR_*. */
++static inline int of_savestate_save(const void *blob, uint32_t len) {
++    if (!OF_SAVESTATE_SVC_HAS(savestate_save))
++        return OF_ERR_NOT_SUPPORTED;
++    return OF_SVC->savestate_save(blob, len);
++}
++
++/* Copy a pending load's payload into buf.  Returns its length, or an
++ * OF_ERR_* (in which case the OS has already told the Pocket it failed).
++ * On success the app must call of_savestate_finish() after restoring. */
++static inline int of_savestate_load(void *buf, uint32_t cap) {
++    if (!OF_SAVESTATE_SVC_HAS(savestate_load))
++        return OF_ERR_NOT_SUPPORTED;
++    return OF_SVC->savestate_load(buf, cap);
++}
++
++/* Report the outcome of the pending request (ok = 0 refuses / fails it). */
++static inline void of_savestate_finish(int ok) {
++    if (OF_SAVESTATE_SVC_HAS(savestate_finish))
++        OF_SVC->savestate_finish(ok);
++}
++
++#else /* OF_PC */
++
++static inline int  of_savestate_enable(uint32_t max_size) { (void)max_size; return OF_ERR_NOT_SUPPORTED; }
++static inline int  of_savestate_poll(void) { return OF_SAVESTATE_NONE; }
++static inline int  of_savestate_save(const void *blob, uint32_t len) { (void)blob; (void)len; return OF_ERR_NOT_SUPPORTED; }
++static inline int  of_savestate_load(void *buf, uint32_t cap) { (void)buf; (void)cap; return OF_ERR_NOT_SUPPORTED; }
++static inline void of_savestate_finish(int ok) { (void)ok; }
++
++#endif /* OF_PC */
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* OF_SAVESTATE_H */
+diff --git a/src/firmware/api/of_services.h b/src/firmware/api/of_services.h
+index e7cbf3a..c4788f8 100644
+--- a/src/firmware/api/of_services.h
++++ b/src/firmware/api/of_services.h
+@@ -328,6 +328,14 @@ struct of_services_table {
+      * dock/undock happens at runtime, so re-check across frames.
+      * Always 1 on console targets (MiSTer). */
+     int       (*input_is_docked)(void);
++
++    /* -- Save states / sleep (append-only) --
++     * Pocket bitstreams with OF_HW_SAVESTATE.  See of_savestate.h. */
++    int       (*savestate_enable)(uint32_t max_size);
++    int       (*savestate_poll)(void);
++    int       (*savestate_save)(const void *blob, uint32_t len);
++    int       (*savestate_load)(void *buf, uint32_t cap);
++    void      (*savestate_finish)(int ok);
+ };
+ 
+ #ifndef OF_PC
+diff --git a/src/firmware/os/.contract.md5 b/src/firmware/os/.contract.md5
+index 2fe3793..be0d73b 100644
+--- a/src/firmware/os/.contract.md5
++++ b/src/firmware/os/.contract.md5
+@@ -1 +1 @@
+-89f1f5b700d11a4b83f8a801403cc4fc
++1af049c3cef1db17d713bfba392f6381
+diff --git a/src/firmware/os/Makefile b/src/firmware/os/Makefile
+index 2c66dd9..7c926c6 100644
+--- a/src/firmware/os/Makefile
++++ b/src/firmware/os/Makefile
+@@ -152,6 +152,7 @@ TARGET_SRCS = $(TARGET_DIR)/video.c \
+               $(TARGET_DIR)/audio.c \
+               $(TARGET_DIR)/input.c \
+               $(TARGET_DIR)/save.c \
++              $(TARGET_DIR)/savestate.c \
+               $(TARGET_DIR)/file.c \
+               $(TARGET_DIR)/analogizer.c \
+               $(TARGET_DIR)/terminal.c \
+diff --git a/src/firmware/os/hal/file.h b/src/firmware/os/hal/file.h
+index 4b60e4f..4681ba1 100644
+--- a/src/firmware/os/hal/file.h
++++ b/src/firmware/os/hal/file.h
+@@ -201,6 +201,10 @@ int of_file_async_poll(void);
+ /* Check if an async read is currently in flight. */
+ int of_file_async_busy(void);
+ 
++/* Nonzero when no async transfer or deferred bounce copy is pending
++ * (Pocket; other targets do not implement it). */
++int of_file_cram0_quiet(void);
++
+ /* App-visible CRAM0 staging memory for async file reads.  This prevents apps
+  * from hardcoding CRAM0 addresses while keeping the bridge DMA target in the
+  * region the hardware supports. */
+diff --git a/src/firmware/os/hal/regs.h b/src/firmware/os/hal/regs.h
+index 58b77c3..1dca2a7 100644
+--- a/src/firmware/os/hal/regs.h
++++ b/src/firmware/os/hal/regs.h
+@@ -517,6 +517,27 @@
+ #define   CRAM0_MODE_BRIDGE (0u << 0)   /* bridge drives CRAM0 controller (default) */
+ #define   CRAM0_MODE_CPU    (1u << 0)   /* CPU's CDC drives CRAM0 controller */
+ 
++/* APF save states / sleep (HW_FEATURES bit 31, OF_HW_SAVESTATE).  The
++ * bitstream's savestate_ctrl acknowledges the host's 0x00A0 / 0x00A4
++ * commands and reports busy; firmware completes them here.  Blob window:
++ * CRAM0 offset 6 MB (bridge 0x20600000), 1 MB.  Registers read 0 on
++ * bitstreams without the feature. */
++#define SS_STATUS           REG32(0x4E000004u)  /* R: request toggles */
++#define   SS_STATUS_START_REQ   (1u << 0)   /* toggles on each host save request */
++#define   SS_STATUS_LOAD_REQ    (1u << 1)   /* toggles on each host load request */
++#define   SS_STATUS_IN_MENU     (1u << 2)   /* host OS menu open (0x00B0) */
++#define SS_CTRL             REG32(0x4E000004u)  /* W: complete / clear */
++#define   SS_CTRL_SAVE_DONE     (1u << 0)
++#define   SS_CTRL_LOAD_DONE     (1u << 1)
++#define   SS_CTRL_SAVE_ERR      (1u << 2)
++#define   SS_CTRL_LOAD_ERR      (1u << 3)
++#define   SS_CTRL_CLEAR_COUNTS  (1u << 4)
++#define SS_SIZE             REG32(0x4E000008u)  /* RW: blob bytes the host reads */
++#define SS_RD_WORDS         REG32(0x4E00000Cu)  /* R: host reads in window (quasi-static) */
++#define SS_WR_WORDS         REG32(0x4E000010u)  /* R: host writes in window (quasi-static) */
++#define SS_CRAM0_OFFSET     0x00600000u
++#define SS_WINDOW_SIZE      0x00100000u
++
+ /* ======================================================================
+  * Link Cable (0x4D000000)
+  * ====================================================================== */
+diff --git a/src/firmware/os/hal/save.h b/src/firmware/os/hal/save.h
+index e3ffd49..a684c7d 100644
+--- a/src/firmware/os/hal/save.h
++++ b/src/firmware/os/hal/save.h
+@@ -29,6 +29,10 @@ void of_save_init(void);
+ void of_save_begin_cpu(void);
+ void of_save_end_cpu(void);
+ 
++/* Nonzero while some caller holds CPU ownership of CRAM0 (e.g. an open
++ * nonvolatile file).  Pocket only. */
++int of_save_cpu_held(void);
++
+ /* Core-exit security wipe: zero the non-save CRAM0 regions (stale boot
+  * staging, DMA scratch, app file-staging pool) so transient loaded data
+  * cannot survive a warm reset.  PRESERVES the nonvolatile presave + save
+diff --git a/src/firmware/os/hal/savestate.h b/src/firmware/os/hal/savestate.h
+new file mode 100644
+index 0000000..25ac349
+--- /dev/null
++++ b/src/firmware/os/hal/savestate.h
+@@ -0,0 +1,29 @@
++//------------------------------------------------------------------------------
++// SPDX-License-Identifier: Apache-2.0
++// SPDX-FileType: SOURCE
++//------------------------------------------------------------------------------
++
++/*
++ * openfpgaOS Save-State HAL (APF sleep/wake + "Memories").
++ *
++ * The app owns the content of a save state; the OS moves it between the app
++ * and the host.  See api/of_savestate.h for the app-facing contract.
++ * Targets without hardware support implement every call as "not supported".
++ */
++
++#ifndef OFOS_SAVESTATE_H
++#define OFOS_SAVESTATE_H
++
++#include <stdint.h>
++
++int  of_savestate_enable(uint32_t max_size);
++int  of_savestate_poll(void);
++int  of_savestate_save(const void *blob, uint32_t len);
++int  of_savestate_load(void *buf, uint32_t cap);
++void of_savestate_finish(int ok);
++
++/* Called from the 1 kHz kernel tick: denies requests that no app will
++ * answer (save states never enabled, or a load nobody picks up). */
++void of_savestate_tick(void);
++
++#endif /* OFOS_SAVESTATE_H */
+diff --git a/src/firmware/os/kernel/services_table.c b/src/firmware/os/kernel/services_table.c
+index 5d084ef..5e4c454 100644
+--- a/src/firmware/os/kernel/services_table.c
++++ b/src/firmware/os/kernel/services_table.c
+@@ -26,6 +26,7 @@
+ #include "../hal/hal.h"
+ #include "../hal/regs.h"
+ #include "../hal/file.h"
++#include "../hal/savestate.h"
+ 
+ /* ======================================================================
+  * Wrappers for SDK/HAL signature mismatches
+@@ -281,6 +282,13 @@ void services_table_init(void) {
+ 
+     /* Dock state */
+     svc->input_is_docked = of_input_is_docked;
++
++    /* Save states / sleep */
++    svc->savestate_enable = of_savestate_enable;
++    svc->savestate_poll   = of_savestate_poll;
++    svc->savestate_save   = of_savestate_save;
++    svc->savestate_load   = of_savestate_load;
++    svc->savestate_finish = of_savestate_finish;
+ }
+ 
+ void services_table_set_smp_bank(const void *base, uint32_t size) {
+diff --git a/src/firmware/os/targets/mister/savestate.c b/src/firmware/os/targets/mister/savestate.c
+new file mode 100644
+index 0000000..b0b20e6
+--- /dev/null
++++ b/src/firmware/os/targets/mister/savestate.c
+@@ -0,0 +1,16 @@
++//------------------------------------------------------------------------------
++// SPDX-License-Identifier: Apache-2.0
++// SPDX-FileType: SOURCE
++//------------------------------------------------------------------------------
++
++/* No APF save-state host on this target: every call reports "not supported". */
++
++#include "savestate.h"
++#include "of_error.h"
++
++int  of_savestate_enable(uint32_t max_size) { (void)max_size; return OF_ERR_NOT_SUPPORTED; }
++int  of_savestate_poll(void) { return 0; }
++int  of_savestate_save(const void *blob, uint32_t len) { (void)blob; (void)len; return OF_ERR_NOT_SUPPORTED; }
++int  of_savestate_load(void *buf, uint32_t cap) { (void)buf; (void)cap; return OF_ERR_NOT_SUPPORTED; }
++void of_savestate_finish(int ok) { (void)ok; }
++void of_savestate_tick(void) {}
+diff --git a/src/firmware/os/targets/pocket/file.c b/src/firmware/os/targets/pocket/file.c
+index 97b7f99..9462416 100644
+--- a/src/firmware/os/targets/pocket/file.c
++++ b/src/firmware/os/targets/pocket/file.c
+@@ -16,6 +16,7 @@
+ #include "cache.h"
+ #include "regs.h"
+ #include "save.h"
++#include "savestate.h"
+ #include "terminal.h"
+ #include <string.h>
+ 
+@@ -217,6 +218,9 @@ void of_file_init(void) {
+  * per PMA — but the bridge must own the CRAM0 mux before the Pocket
+  * nonvolatile exit writeback reads the save window. */
+ void of_check_shutdown(void) {
++    /* Same 1 kHz tick: deny save-state requests nobody will answer. */
++    of_savestate_tick();
++
+     if (SYS_SHUTDOWN & SHUTDOWN_PENDING) {
+         /* Security wipe: scrub the non-save CRAM0 regions (stale boot copy of
+          * os.bin, DMA scratch, app file-staging pool) so transient loaded data
+@@ -1332,3 +1336,9 @@ void of_file_async_tick(void) {
+ int of_file_async_busy(void) {
+     return async_state.active;
+ }
++
++/* No async transfer in flight and no deferred bounce copy pending: nothing
++ * will touch CRAM0 until the next file call. */
++int of_file_cram0_quiet(void) {
++    return !async_state.active && !async_state.copy_pending;
++}
+diff --git a/src/firmware/os/targets/pocket/save.c b/src/firmware/os/targets/pocket/save.c
+index 4be128f..1dcdf7b 100644
+--- a/src/firmware/os/targets/pocket/save.c
++++ b/src/firmware/os/targets/pocket/save.c
+@@ -200,6 +200,10 @@ void of_save_begin_cpu(void) {
+     cram0_acquire_cpu();
+ }
+ 
++int of_save_cpu_held(void) {
++    return cram0_cpu_hold_count != 0;
++}
++
+ void of_save_end_cpu(void) {
+     if (cram0_cpu_hold_count == 0) {
+         cram0_release_to_bridge();
+diff --git a/src/firmware/os/targets/pocket/savestate.c b/src/firmware/os/targets/pocket/savestate.c
+new file mode 100644
+index 0000000..1baa53b
+--- /dev/null
++++ b/src/firmware/os/targets/pocket/savestate.c
+@@ -0,0 +1,345 @@
++//------------------------------------------------------------------------------
++// SPDX-License-Identifier: Apache-2.0
++// SPDX-FileType: SOURCE
++//------------------------------------------------------------------------------
++
++/*
++ * openfpgaOS Save-State HAL — Pocket (APF sleep/wake + "Memories").
++ *
++ * Bitstreams with HW_FEATURES bit 31 answer the host's 0x00A0 (save) and
++ * 0x00A4 (load) commands in hardware (savestate_ctrl.v): acknowledge at once,
++ * report busy, and flip a request toggle in SS_STATUS.  Firmware finishes the
++ * request through SS_CTRL.  The blob travels through a 1 MB CRAM0 window at
++ * offset 6 MB (bridge 0x20600000):
++ *
++ *   Save: app hands us its state -> we write [header][payload] to the window,
++ *         give CRAM0 to the bridge, report ok, and hold CRAM0 on the bridge
++ *         side until the host has read SS_SIZE bytes (SS_RD_WORDS).
++ *   Load: the host has already written the blob into the window before its
++ *         0x00A4 (bridge writes there are queued even while the CPU owns
++ *         CRAM0).  We drain the write FIFO, validate the header + CRC and
++ *         hand the payload to the app, which reports success with
++ *         of_savestate_finish().
++ *
++ * The host reads a fixed SS_SIZE (header + the app's declared maximum), so the
++ * header carries the real payload length.  It also carries the instance's
++ * game id so a state from another game is refused rather than restored.
++ */
++
++#include "savestate.h"
++#include "save.h"
++#include "file.h"
++#include "regs.h"
++#include "timer.h"
++#include "of_caps.h"
++#include "of_error.h"
++
++#define SS_MAGIC            0x5353464Fu   /* "OFSS" */
++#define SS_VERSION          1u
++#define SS_HEADER_BYTES     32u
++#define SS_BLOB             ((volatile uint32_t *)(uintptr_t)(OF_TARGET_CRAM0_BASE + SS_CRAM0_OFFSET))
++
++/* How long to keep CRAM0 on the bridge waiting for the host to pull a saved
++ * blob, and how long an unanswered load may wait for the app to start and
++ * pick it up (wake: the app has to boot first). */
++#define SS_HOST_READ_TIMEOUT_MS  10000u
++#define SS_LOAD_PICKUP_TIMEOUT_MS 30000u
++#define SS_DRAIN_TIMEOUT_MS      2000u
++
++enum { SS_NONE = 0, SS_SAVE = 1, SS_LOAD = 2 };
++
++typedef struct {
++    uint32_t magic;
++    uint32_t version;
++    uint32_t game_id;
++    uint32_t payload_len;
++    uint32_t payload_crc;
++    uint32_t reserved[3];
++} ss_header_t;
++
++_Static_assert(sizeof(ss_header_t) == SS_HEADER_BYTES, "header size");
++_Static_assert(SS_CRAM0_OFFSET >= OF_TARGET_CRAM0_APP_DMA_OFFSET + OF_TARGET_CRAM0_APP_DMA_SIZE,
++               "save-state window overlaps the app DMA pool");
++
++static volatile int      ss_enabled;
++static volatile uint32_t ss_max_payload;
++static volatile int      ss_pending;
++static volatile uint32_t ss_seen;          /* last request toggles consumed */
++static volatile uint32_t ss_load_wait_ms;
++
++static inline uint32_t ss_irq_save(void) {
++    uint32_t prev;
++    __asm__ volatile("csrrci %0, mstatus, 0x8" : "=r"(prev) :: "memory");
++    return prev & 0x8u;
++}
++
++static inline void ss_irq_restore(uint32_t prev) {
++    if (prev)
++        __asm__ volatile("csrsi mstatus, 0x8" ::: "memory");
++}
++
++static int ss_present(void) {
++    return hw_feature_present(OF_HW_SAVESTATE);
++}
++
++/* Quasi-static counters from clk_74a: read until two reads agree. */
++static uint32_t ss_read_stable(volatile uint32_t *reg) {
++    uint32_t a = *reg, b = *reg;
++    while (a != b) {
++        a = b;
++        b = *reg;
++    }
++    return a;
++}
++
++static uint32_t crc32_update(uint32_t crc, uint8_t byte) {
++    crc ^= byte;
++    for (int k = 0; k < 8; k++)
++        crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
++    return crc;
++}
++
++static uint32_t crc32_buf(const uint8_t *p, uint32_t len) {
++    uint32_t crc = 0xFFFFFFFFu;
++    while (len--)
++        crc = crc32_update(crc, *p++);
++    return ~crc;
++}
++
++/* Complete the pending request (caller holds IRQs off or owns ss_pending). */
++static void ss_complete(int kind, int ok) {
++    if (kind == SS_SAVE)
++        SS_CTRL = SS_CTRL_SAVE_DONE | (ok ? 0u : SS_CTRL_SAVE_ERR);
++    else if (kind == SS_LOAD)
++        SS_CTRL = SS_CTRL_LOAD_DONE | (ok ? 0u : SS_CTRL_LOAD_ERR) |
++                  SS_CTRL_CLEAR_COUNTS;
++}
++
++/* Pick up a new host request, if any.  Saves win over loads when both
++ * toggled (the host never issues them together). */
++static void ss_sample(void) {
++    uint32_t now = SS_STATUS & (SS_STATUS_START_REQ | SS_STATUS_LOAD_REQ);
++    uint32_t changed = now ^ ss_seen;
++    if (!changed)
++        return;
++    ss_seen = now;
++    if (ss_pending != SS_NONE)
++        ss_complete(ss_pending, 0);   /* superseded */
++    if (changed & SS_STATUS_START_REQ) {
++        ss_pending = SS_SAVE;
++        if (changed & SS_STATUS_LOAD_REQ)
++            ss_complete(SS_LOAD, 0);
++    } else {
++        ss_pending = SS_LOAD;
++        ss_load_wait_ms = 0;
++    }
++}
++
++/* Wait for any in-flight async file transfer (and its deferred bounce copy)
++ * so nothing flips CRAM0 to the CPU behind our back. */
++static void ss_quiesce_files(void) {
++    while (of_file_async_busy() || !of_file_cram0_quiet())
++        of_file_async_poll();
++}
++
++static int ss_cram0_parkable(void) {
++    return !of_save_cpu_held() && of_file_cram0_quiet() && !of_file_async_busy();
++}
++
++void of_savestate_tick(void) {
++    if (!ss_present())
++        return;
++    ss_sample();
++    if (ss_pending == SS_NONE)
++        return;
++    if (!ss_enabled) {
++        if (ss_pending == SS_SAVE) {
++            ss_complete(SS_SAVE, 0);           /* no app support: deny now */
++            ss_pending = SS_NONE;
++        } else if (++ss_load_wait_ms >= SS_LOAD_PICKUP_TIMEOUT_MS) {
++            ss_complete(SS_LOAD, 0);           /* wake, but no app took it */
++            ss_pending = SS_NONE;
++        }
++    }
++}
++
++int of_savestate_enable(uint32_t max_size) {
++    if (!ss_present())
++        return OF_ERR_NOT_SUPPORTED;
++    if (max_size > SS_WINDOW_SIZE - SS_HEADER_BYTES)
++        return OF_ERR_INVALID_PARAM;
++
++    uint32_t irq = ss_irq_save();
++    if (max_size == 0) {
++        ss_enabled = 0;
++        ss_max_payload = 0;
++        SS_SIZE = 0;
++    } else {
++        ss_max_payload = max_size;
++        SS_SIZE = SS_HEADER_BYTES + ((max_size + 3u) & ~3u);
++        ss_enabled = 1;
++    }
++    ss_irq_restore(irq);
++    return 0;
++}
++
++int of_savestate_poll(void) {
++    if (!ss_present() || !ss_enabled)
++        return SS_NONE;
++
++    uint32_t irq = ss_irq_save();
++    ss_sample();
++    int pending = ss_pending;
++    ss_irq_restore(irq);
++
++    /* Called at the app's frame boundary, where no file operation is in
++     * progress: park CRAM0 on the bridge so a blob the host pushes for a
++     * load lands straight in CRAM0 instead of waiting in the 4 KB FIFO. */
++    if ((CRAM0_MODE & CRAM0_MODE_CPU) && ss_cram0_parkable()) {
++        fence();
++        CRAM0_MODE = CRAM0_MODE_BRIDGE;
++        for (volatile int s = 0; s < 8; s++) {}
++    }
++    return pending;
++}
++
++static void ss_write_words(uint32_t word_off, const uint8_t *src, uint32_t len) {
++    volatile uint32_t *dst = SS_BLOB + word_off;
++    uint32_t i = 0;
++    for (; i + 4u <= len; i += 4u)
++        *dst++ = (uint32_t)src[i] | ((uint32_t)src[i + 1] << 8) |
++                 ((uint32_t)src[i + 2] << 16) | ((uint32_t)src[i + 3] << 24);
++    if (i < len) {
++        uint32_t w = 0;
++        for (uint32_t k = 0; i + k < len; k++)
++            w |= (uint32_t)src[i + k] << (8u * k);
++        *dst = w;
++    }
++}
++
++static void ss_read_words(uint32_t word_off, uint8_t *dst, uint32_t len) {
++    volatile const uint32_t *src = SS_BLOB + word_off;
++    uint32_t i = 0;
++    for (; i + 4u <= len; i += 4u) {
++        uint32_t w = *src++;
++        dst[i] = (uint8_t)w;
++        dst[i + 1] = (uint8_t)(w >> 8);
++        dst[i + 2] = (uint8_t)(w >> 16);
++        dst[i + 3] = (uint8_t)(w >> 24);
++    }
++    if (i < len) {
++        uint32_t w = *src;
++        for (uint32_t k = 0; i + k < len; k++)
++            dst[i + k] = (uint8_t)(w >> (8u * k));
++    }
++}
++
++int of_savestate_save(const void *blob, uint32_t len) {
++    if (!ss_present())
++        return OF_ERR_NOT_SUPPORTED;
++    if (ss_pending != SS_SAVE)
++        return OF_ERR_INVALID_STATE;
++    if (!blob || len == 0 || len > ss_max_payload) {
++        of_savestate_finish(0);
++        return OF_ERR_INVALID_PARAM;
++    }
++
++    ss_quiesce_files();
++
++    ss_header_t h = {
++        .magic = SS_MAGIC,
++        .version = SS_VERSION,
++        .game_id = SYS_GAME_ID,
++        .payload_len = len,
++        .payload_crc = crc32_buf((const uint8_t *)blob, len),
++    };
++
++    of_save_begin_cpu();
++    fence();
++    ss_write_words(0, (const uint8_t *)&h, sizeof(h));
++    ss_write_words(SS_HEADER_BYTES / 4u, (const uint8_t *)blob, len);
++    fence();
++    of_save_end_cpu();
++
++    /* The host reads the blob only after it sees "ok", and only while the
++     * bridge owns CRAM0.  Hand it over and keep it there until all SS_SIZE
++     * bytes have gone out (or the host gives up). */
++    uint32_t prev_mode = CRAM0_MODE & CRAM0_MODE_CPU;
++    CRAM0_MODE = CRAM0_MODE_BRIDGE;
++    for (volatile int s = 0; s < 8; s++) {}
++
++    uint32_t want_words = SS_SIZE / 4u;
++    uint32_t irq = ss_irq_save();
++    ss_complete(SS_SAVE, 1);
++    ss_pending = SS_NONE;
++    ss_irq_restore(irq);
++
++    uint32_t t0 = of_timer_get_ms();
++    while (ss_read_stable(&SS_RD_WORDS) < want_words &&
++           (uint32_t)(of_timer_get_ms() - t0) < SS_HOST_READ_TIMEOUT_MS) {
++        /* Spin: the app is paused here, so nothing else can claim CRAM0. */
++    }
++
++    if (prev_mode && of_save_cpu_held()) {
++        CRAM0_MODE = CRAM0_MODE_CPU;
++        for (volatile int s = 0; s < 8; s++) {}
++    }
++    return 0;
++}
++
++int of_savestate_load(void *buf, uint32_t cap) {
++    if (!ss_present())
++        return OF_ERR_NOT_SUPPORTED;
++    if (ss_pending != SS_LOAD)
++        return OF_ERR_INVALID_STATE;
++
++    ss_quiesce_files();
++
++    /* Let any blob words still queued in the bridge write FIFO land. */
++    CRAM0_MODE = CRAM0_MODE_BRIDGE;
++    for (volatile int s = 0; s < 8; s++) {}
++    uint32_t t0 = of_timer_get_ms();
++    while (!(DS_STATUS & DS_STATUS_WR_IDLE) &&
++           (uint32_t)(of_timer_get_ms() - t0) < SS_DRAIN_TIMEOUT_MS) {}
++
++    uint32_t got_words = ss_read_stable(&SS_WR_WORDS);
++    ss_header_t h;
++    int rc = 0;
++
++    of_save_begin_cpu();
++    fence();
++    ss_read_words(0, (uint8_t *)&h, sizeof(h));
++    if (h.magic != SS_MAGIC || h.version != SS_VERSION)
++        rc = OF_ERR_IO;
++    else if (h.game_id != SYS_GAME_ID)
++        rc = OF_ERR_DENIED;
++    else if (h.payload_len == 0 || h.payload_len > cap ||
++             h.payload_len > SS_WINDOW_SIZE - SS_HEADER_BYTES)
++        rc = OF_ERR_BAD_RANGE;
++    else if (got_words < (SS_HEADER_BYTES + h.payload_len + 3u) / 4u)
++        rc = OF_ERR_IO;                       /* blob arrived short */
++    else
++        ss_read_words(SS_HEADER_BYTES / 4u, (uint8_t *)buf, h.payload_len);
++    fence();
++    of_save_end_cpu();
++
++    if (rc == 0 && crc32_buf((const uint8_t *)buf, h.payload_len) != h.payload_crc)
++        rc = OF_ERR_IO;
++
++    if (rc != 0) {
++        of_savestate_finish(0);
++        return rc;
++    }
++    return (int)h.payload_len;
++}
++
++void of_savestate_finish(int ok) {
++    if (!ss_present())
++        return;
++    uint32_t irq = ss_irq_save();
++    if (ss_pending != SS_NONE) {
++        ss_complete(ss_pending, ok);
++        ss_pending = SS_NONE;
++    }
++    ss_irq_restore(irq);
++}
+diff --git a/src/firmware/os/targets/sim/savestate.c b/src/firmware/os/targets/sim/savestate.c
+new file mode 100644
+index 0000000..b0b20e6
+--- /dev/null
++++ b/src/firmware/os/targets/sim/savestate.c
+@@ -0,0 +1,16 @@
++//------------------------------------------------------------------------------
++// SPDX-License-Identifier: Apache-2.0
++// SPDX-FileType: SOURCE
++//------------------------------------------------------------------------------
++
++/* No APF save-state host on this target: every call reports "not supported". */
++
++#include "savestate.h"
++#include "of_error.h"
++
++int  of_savestate_enable(uint32_t max_size) { (void)max_size; return OF_ERR_NOT_SUPPORTED; }
++int  of_savestate_poll(void) { return 0; }
++int  of_savestate_save(const void *blob, uint32_t len) { (void)blob; (void)len; return OF_ERR_NOT_SUPPORTED; }
++int  of_savestate_load(void *buf, uint32_t cap) { (void)buf; (void)cap; return OF_ERR_NOT_SUPPORTED; }
++void of_savestate_finish(int ok) { (void)ok; }
++void of_savestate_tick(void) {}
+diff --git a/src/fpga/common/axi_periph_slave.v b/src/fpga/common/axi_periph_slave.v
+index ff24cc2..9eff412 100644
+--- a/src/fpga/common/axi_periph_slave.v
++++ b/src/fpga/common/axi_periph_slave.v
+@@ -107,7 +107,13 @@ module axi_periph_slave #(
+     parameter INCLUDE_COMBINE = 1,
+     // Param-span/tri Q29 dynamic-scale caps (bit 18, OF_HW_GPU_PARAM_SPAN_Q29_SCALE).
+     // Tracks gpu_core's INCLUDE_PARAM_SPAN_Q29; os30/SM64 clears it (Q29 cone folded).
+-    parameter INCLUDE_PARAM_SPAN_Q29 = 1
++    parameter INCLUDE_PARAM_SPAN_Q29 = 1,
++    // APF save states / sleep (HW_FEATURES bit 31, OF_HW_SAVESTATE).  Must
++    // track a savestate_ctrl instance in the target's core_top: the block
++    // answers bridge commands 0x00A0/0x00A4 and the OS completes them
++    // through the SS_* registers in the CRAM0 page (0x4E000004..0x10).
++    // Default 0: the registers read 0 and their logic folds away.
++    parameter INCLUDE_SAVESTATE = 0
+ ) (
+     input wire clk,
+     input wire reset_n,
+@@ -353,6 +359,21 @@ module axi_periph_slave #(
+     input wire         shutdown_pending,
+     output reg         shutdown_ack,
+ 
++    // Save-state handshake with savestate_ctrl (clk_74a side).  Request
++    // toggles are synchronized here; the word counters are quasi-static
++    // (firmware reads them twice until two reads agree).  Targets without
++    // INCLUDE_SAVESTATE leave the inputs unconnected / tied 0.
++    input wire         ss_start_req_tgl,
++    input wire         ss_load_req_tgl,
++    input wire  [31:0] ss_rd_words,
++    input wire  [31:0] ss_wr_words,
++    output reg         ss_start_done_tgl,
++    output reg         ss_start_err,
++    output reg         ss_load_done_tgl,
++    output reg         ss_load_err,
++    output reg         ss_clear_tgl,
++    output reg  [31:0] ss_size,
++
+     // Hardware timer interrupt
+     output wire        timer_irq,
+     output wire        uart_rx_irq,
+@@ -795,7 +816,8 @@ localparam [31:0] FEAT_LINK = 32'h0000_0000;
+ localparam [31:0] HW_CONTRACT_REV = 32'd2;
+ 
+ localparam [31:0] HW_FEATURES_RESOLVED =
+-    32'h0000_0001      // bit 0  OF_HW_MIXER: a 32-voice mixer is available (SET on
++    ((INCLUDE_SAVESTATE != 0) ? 32'h8000_0000 : 32'h0000_0000) // bit 31 OF_HW_SAVESTATE
++    | 32'h0000_0001      // bit 0  OF_HW_MIXER: a 32-voice mixer is available (SET on
+                        //        every target; SW-backed when bit 1 is clear)
+     | 32'h0000_0010    // GPU span renderer
+     | 32'h0003_E000    // GPU persp + fragpipe + param span/list/z caps (bits 13..17)
+@@ -1973,10 +1995,31 @@ wire [31:0] uart_rdata = (req_addr[3:2] == 2'b00) ?
+ wire [31:0] audio_rdata = (req_addr[4:2] == 3'd0) ? {21'b0, audio_fifo_full, audio_fifo_level} :
+                           32'h0;
+ 
+-/* CRAM0 ownership mode read decode:
+- *   0x00: {31'b0, cram0_mode} — current owner (0=bridge, 1=CPU). */
+-wire [31:0] cram0_mode_rdata = (req_addr[3:2] == 2'd0) ? {31'b0, cram0_mode} :
+-                               32'h0;
++/* CRAM0 page read decode:
++ *   0x00: {31'b0, cram0_mode} — current owner (0=bridge, 1=CPU).
++ *   Save-state registers (INCLUDE_SAVESTATE; read 0 otherwise):
++ *   0x04: SS_STATUS {22'b0, load_done_tgl, start_done_tgl, 5'b0,
++ *                    os_inmenu, load_req_tgl, start_req_tgl}
++ *   0x08: SS_SIZE   blob size in bytes the host reads on save (0 = max)
++ *   0x0C: SS_RD_WORDS  host bridge reads in the blob window since the
++ *                      last save request (quasi-static: read until equal)
++ *   0x10: SS_WR_WORDS  host bridge writes in the blob window since the
++ *                      last SS_CTRL clear (quasi-static: read until equal) */
++reg [2:0] ss_start_req_sync, ss_load_req_sync;
++always @(posedge clk) begin
++    ss_start_req_sync <= {ss_start_req_sync[1:0], ss_start_req_tgl};
++    ss_load_req_sync  <= {ss_load_req_sync[1:0],  ss_load_req_tgl};
++end
++wire [31:0] ss_status_rdata = {22'b0, ss_load_done_tgl, ss_start_done_tgl, 5'b0,
++                               os_inmenu_s, ss_load_req_sync[2], ss_start_req_sync[2]};
++wire [31:0] cram0_mode_rdata =
++      (req_addr[4:2] == 3'd0) ? {31'b0, cram0_mode}
++    : (INCLUDE_SAVESTATE == 0) ? 32'h0
++    : (req_addr[4:2] == 3'd1) ? ss_status_rdata
++    : (req_addr[4:2] == 3'd2) ? ss_size
++    : (req_addr[4:2] == 3'd3) ? ss_rd_words
++    : (req_addr[4:2] == 3'd4) ? ss_wr_words
++    :                           32'h0;
+ 
+ /* Mixer (0x4B) read decode.  The read mux fans in
+  *   - control regs (group/master/voice_group/ctrl/irq)
+@@ -2205,6 +2248,12 @@ always @(posedge clk or posedge reset) begin
+ 
+         sysreg_wr_fire <= 0;
+         cram0_mode <= 1'b0;     // bridge owns CRAM0 at reset
++        ss_start_done_tgl <= 1'b0;
++        ss_start_err      <= 1'b0;
++        ss_load_done_tgl  <= 1'b0;
++        ss_load_err       <= 1'b0;
++        ss_clear_tgl      <= 1'b0;
++        ss_size           <= 32'd0;
+         uart_tx_fifo_we  <= 0;
+         uart_tx_fifo_din <= 0;
+         link_reg_wr <= 0;
+@@ -2434,8 +2483,28 @@ always @(posedge clk or posedge reset) begin
+                         audio_sample_wr   <= 1'b1;
+                         audio_sample_data <= req_wdata;
+                     end
+-                    if (req_is_cram0 && req_addr[3:2] == 2'd0)
++                    if (req_is_cram0 && req_addr[4:2] == 3'd0)
+                         cram0_mode <= req_wdata[0];
++                    /* SS_CTRL (0x4E000004), INCLUDE_SAVESTATE only:
++                     *   bit0 complete the pending save (bit2 = error)
++                     *   bit1 complete the pending load (bit3 = error)
++                     *   bit4 zero the blob-window word counters
++                     * The err bit is latched with its toggle; savestate_ctrl
++                     * samples it after the synchronized toggle edge. */
++                    if ((INCLUDE_SAVESTATE != 0) && req_is_cram0 && req_addr[4:2] == 3'd1) begin
++                        if (req_wdata[0]) begin
++                            ss_start_err      <= req_wdata[2];
++                            ss_start_done_tgl <= ~ss_start_done_tgl;
++                        end
++                        if (req_wdata[1]) begin
++                            ss_load_err       <= req_wdata[3];
++                            ss_load_done_tgl  <= ~ss_load_done_tgl;
++                        end
++                        if (req_wdata[4])
++                            ss_clear_tgl      <= ~ss_clear_tgl;
++                    end
++                    if ((INCLUDE_SAVESTATE != 0) && req_is_cram0 && req_addr[4:2] == 3'd2)
++                        ss_size <= req_wdata;
+                     if (req_is_link) begin
+                         link_reg_wr    <= 1'b1;
+                         link_reg_addr  <= req_addr[6:2];
+diff --git a/src/fpga/targets/pocket/ap_core.qsf b/src/fpga/targets/pocket/ap_core.qsf
+index bae3186..fad2960 100644
+--- a/src/fpga/targets/pocket/ap_core.qsf
++++ b/src/fpga/targets/pocket/ap_core.qsf
+@@ -788,6 +788,7 @@ set_global_assignment -name QIP_FILE apf/apf.qip
+ set_global_assignment -name QIP_FILE apf/mf_ddio_bidir_12.qip
+ set_global_assignment -name VERILOG_FILE core_top.v
+ set_global_assignment -name VERILOG_FILE core_bridge_cmd.v
++set_global_assignment -name VERILOG_FILE savestate_ctrl.v
+ set_global_assignment -name MIF_FILE firmware.mif
+ set_global_assignment -name VERILOG_FILE io_sdram.v
+ set_global_assignment -name QIP_FILE megafunctions/mf_pllbase.qip
+diff --git a/src/fpga/targets/pocket/core_top.v b/src/fpga/targets/pocket/core_top.v
+index cc6a012..ac51a47 100644
+--- a/src/fpga/targets/pocket/core_top.v
++++ b/src/fpga/targets/pocket/core_top.v
+@@ -787,10 +787,19 @@ wire        bridge_wr_issue = !cram0_mode_74a &&
+                               !bridge_wr_fifo_empty &&
+                               !bridge_wr_inflight &&
+                               !ctrl_word_busy;
+-wire        bridge_wr_accept = !cram0_mode_74a &&
++// Save-state blob writes (CRAM0 6 MB+, INCLUDE_SAVESTATE) arrive whenever the
++// host chooses, not inside a firmware-requested transfer, so they are queued
++// even while the CPU owns CRAM0; the FIFO drains once firmware hands CRAM0
++// back.  Everything else keeps the old "drop while CPU-owned" behaviour.
++`ifdef INCLUDE_SAVESTATE
++wire        bridge_ss_window = (bridge_addr[23:20] >= 4'h6) && (bridge_addr[23:20] < 4'h7);
++`else
++wire        bridge_ss_window = 1'b0;
++`endif
++wire        bridge_wr_accept = (!cram0_mode_74a || bridge_ss_window) &&
+                                bridge_cram0_wr_pulse &&
+                                (!bridge_wr_fifo_full || bridge_wr_issue);
+-wire        bridge_wr_overrun_pulse = !cram0_mode_74a &&
++wire        bridge_wr_overrun_pulse = (!cram0_mode_74a || bridge_ss_window) &&
+                                       bridge_cram0_wr_pulse &&
+                                       bridge_wr_fifo_full &&
+                                       !bridge_wr_issue;
+@@ -1926,6 +1935,78 @@ end
+     wire            savestate_load_ok;
+     wire            savestate_load_err;
+ 
++    // Save-state CPU handshake (savestate_ctrl <-> axi_periph_slave).
++    wire            ss_start_req_tgl;
++    wire            ss_load_req_tgl;
++    wire    [31:0]  ss_rd_words;
++    wire    [31:0]  ss_wr_words;
++    wire            ss_start_done_tgl_cpu;
++    wire            ss_start_err_cpu;
++    wire            ss_load_done_tgl_cpu;
++    wire            ss_load_err_cpu;
++    wire            ss_clear_tgl_cpu;
++    wire    [31:0]  ss_size_cpu;
++
++`ifdef INCLUDE_SAVESTATE
++    // APF save states + sleep/wake.  The blob lives in CRAM0 at bridge
++    // address 0x20600000 (CRAM0 offset 6 MB, above the app DMA pool), so the
++    // existing bridge <-> CRAM0 path carries it both ways.  See
++    // savestate_ctrl.v for the protocol.
++    savestate_ctrl #(
++        .SS_BRIDGE_ADDR (32'h2060_0000),
++        .SS_MAX_SIZE    (32'h0010_0000)
++    ) isavestate (
++        .clk_74a                ( clk_74a ),
++        .reset_n                ( reset_n_apf ),
++        .savestate_start        ( savestate_start ),
++        .savestate_start_ack    ( savestate_start_ack ),
++        .savestate_start_busy   ( savestate_start_busy ),
++        .savestate_start_ok     ( savestate_start_ok ),
++        .savestate_start_err    ( savestate_start_err ),
++        .savestate_load         ( savestate_load ),
++        .savestate_load_ack     ( savestate_load_ack ),
++        .savestate_load_busy    ( savestate_load_busy ),
++        .savestate_load_ok      ( savestate_load_ok ),
++        .savestate_load_err     ( savestate_load_err ),
++        .savestate_supported    ( savestate_supported ),
++        .savestate_addr         ( savestate_addr ),
++        .savestate_size         ( savestate_size ),
++        .savestate_maxloadsize  ( savestate_maxloadsize ),
++        .bridge_addr            ( bridge_addr ),
++        .bridge_rd              ( bridge_rd ),
++        .bridge_wr              ( bridge_wr ),
++        .cpu_start_done_tgl     ( ss_start_done_tgl_cpu ),
++        .cpu_start_err          ( ss_start_err_cpu ),
++        .cpu_load_done_tgl      ( ss_load_done_tgl_cpu ),
++        .cpu_load_err           ( ss_load_err_cpu ),
++        .cpu_clear_tgl          ( ss_clear_tgl_cpu ),
++        .cpu_size               ( ss_size_cpu ),
++        .start_req_tgl          ( ss_start_req_tgl ),
++        .load_req_tgl           ( ss_load_req_tgl ),
++        .rd_words               ( ss_rd_words ),
++        .wr_words               ( ss_wr_words )
++    );
++`else
++    // No save-state support: report "unsupported" to the host (the values
++    // these wires had when they were left undriven).
++    assign savestate_supported   = 1'b0;
++    assign savestate_addr        = 32'd0;
++    assign savestate_size        = 32'd0;
++    assign savestate_maxloadsize = 32'd0;
++    assign savestate_start_ack   = 1'b0;
++    assign savestate_start_busy  = 1'b0;
++    assign savestate_start_ok    = 1'b0;
++    assign savestate_start_err   = 1'b0;
++    assign savestate_load_ack    = 1'b0;
++    assign savestate_load_busy   = 1'b0;
++    assign savestate_load_ok     = 1'b0;
++    assign savestate_load_err    = 1'b0;
++    assign ss_start_req_tgl      = 1'b0;
++    assign ss_load_req_tgl       = 1'b0;
++    assign ss_rd_words           = 32'd0;
++    assign ss_wr_words           = 32'd0;
++`endif
++
+     wire            osnotify_inmenu;
+ 
+     // CPU-side signals (in clk_ram_controller domain)
+@@ -2044,7 +2125,8 @@ always @(posedge clk_74a) begin
+         // SDRAM-leg counter removed with bridge_to_sdram; brg_wcnt_sdram stays 0.
+         // F6 sticky: a CRAM0-range bridge write while cram0_mode_74a=1
+         // (CPU owns the mux) is dropped by the bridge_wr_accept gate.
+-        if (bridge_cram0_wr_pulse && cram0_mode_74a)
++        // Save-state window writes are queued, not dropped (see above).
++        if (bridge_cram0_wr_pulse && cram0_mode_74a && !bridge_ss_window)
+             brg_cram0_drop_cpu_owned <= 1'b1;
+         if (bridge_wr_overrun_pulse)
+             brg_cram0_drop_overrun <= 1'b1;
+@@ -2598,6 +2680,9 @@ assign video_hs = vidout_hs;
+         .INCLUDE_PARAM_TRI(`ifdef INCLUDE_PARAM_TRI 1 `else 0 `endif),
+         .INCLUDE_VERT_TRI(`ifdef INCLUDE_VERT_TRI 1 `else 0 `endif),
+         .INCLUDE_PARAM_TRI_RECS(`ifdef INCLUDE_PARAM_TRI_RECS 1 `else 0 `endif),
++        // Save states / sleep (HW_FEATURES bit 31) — tracks the
++        // savestate_ctrl instance above.
++        .INCLUDE_SAVESTATE(`ifdef INCLUDE_SAVESTATE 1 `else 0 `endif),
+         .INCLUDE_COLUMN_LIST(`ifdef INCLUDE_COLUMN_LIST 1 `else 0 `endif),
+         .INCLUDE_COMPACT_SPAN(`ifdef INCLUDE_COMPACT_SPAN 1 `else 0 `endif),
+         // Fast texture memory advertisement (HW_FEATURES bit 25).  The CRAM1
+@@ -2784,6 +2869,17 @@ assign video_hs = vidout_hs;
+         // Shutdown handshake
+         .shutdown_pending(shutdown_pending_cpu),
+         .shutdown_ack(shutdown_ack_cpu),
++        // Save-state handshake (savestate_ctrl)
++        .ss_start_req_tgl(ss_start_req_tgl),
++        .ss_load_req_tgl(ss_load_req_tgl),
++        .ss_rd_words(ss_rd_words),
++        .ss_wr_words(ss_wr_words),
++        .ss_start_done_tgl(ss_start_done_tgl_cpu),
++        .ss_start_err(ss_start_err_cpu),
++        .ss_load_done_tgl(ss_load_done_tgl_cpu),
++        .ss_load_err(ss_load_err_cpu),
++        .ss_clear_tgl(ss_clear_tgl_cpu),
++        .ss_size(ss_size_cpu),
+         .timer_irq(timer_irq),
+         .uart_rx_irq(),
+         .link_irq(link_irq),
+diff --git a/src/fpga/targets/pocket/savestate_ctrl.v b/src/fpga/targets/pocket/savestate_ctrl.v
+new file mode 100644
+index 0000000..775b829
+--- /dev/null
++++ b/src/fpga/targets/pocket/savestate_ctrl.v
+@@ -0,0 +1,203 @@
++//------------------------------------------------------------------------------
++// SPDX-License-Identifier: Apache-2.0
++// SPDX-FileType: SOURCE
++//------------------------------------------------------------------------------
++
++//
++// APF save-state handshake (clk_74a domain).
++//
++// The Pocket's sleep/wake and "Memories" both use the bridge commands
++// 0x00A0 (Savestate: Start/Query) and 0x00A4 (Savestate: Load/Query),
++// decoded by core_bridge_cmd.  This block answers them for a soft-CPU
++// core: the hardware acknowledges each request at once and reports busy,
++// the OS does the actual work (serialize the app into / out of the CRAM0
++// blob window) and reports ok or err back through a toggle.
++//
++//   Save: host 0xA0+start -> ack, busy -> CPU sees start_req_tgl flip,
++//         writes the blob to CRAM0 at SS_CRAM0_OFFSET, hands CRAM0 to the
++//         bridge, then toggles start_done (err bit alongside) -> ok/err.
++//         Host then reads savestate_size bytes from savestate_addr.
++//   Load: host writes the blob to savestate_addr FIRST, then 0xA4+load
++//         -> ack, busy -> CPU sees load_req_tgl flip, reads the blob,
++//         toggles load_done -> ok/err.
++//
++// The order of operations above matches agg23's openFPGA-NES
++// save_state_controller.sv, a shipping Pocket core with sleep support.
++//
++// Bridge reads/writes inside the blob window are counted (rd_words,
++// wr_words) so firmware can tell when the host has finished pulling the
++// blob (and so keep CRAM0 on the bridge side until then) and whether a
++// pushed blob arrived whole.  The counters are quasi-static from the CPU
++// side: firmware reads them twice until two reads agree.
++//
++
++`default_nettype none
++
++module savestate_ctrl #(
++    parameter [31:0] SS_BRIDGE_ADDR = 32'h2060_0000,  // CRAM0 bridge window
++    parameter [31:0] SS_MAX_SIZE    = 32'h0010_0000   // 1 MB blob window
++) (
++    input  wire        clk_74a,
++    input  wire        reset_n,
++
++    // core_bridge_cmd side
++    input  wire        savestate_start,
++    output reg         savestate_start_ack,
++    output reg         savestate_start_busy,
++    output reg         savestate_start_ok,
++    output reg         savestate_start_err,
++
++    input  wire        savestate_load,
++    output reg         savestate_load_ack,
++    output reg         savestate_load_busy,
++    output reg         savestate_load_ok,
++    output reg         savestate_load_err,
++
++    output wire        savestate_supported,
++    output wire [31:0] savestate_addr,
++    output wire [31:0] savestate_size,
++    output wire [31:0] savestate_maxloadsize,
++
++    // APF bridge (for blob-window traffic counters)
++    input  wire [31:0] bridge_addr,
++    input  wire        bridge_rd,
++    input  wire        bridge_wr,
++
++    // CPU side (raw clk_cpu signals; synchronized here)
++    input  wire        cpu_start_done_tgl,
++    input  wire        cpu_start_err,
++    input  wire        cpu_load_done_tgl,
++    input  wire        cpu_load_err,
++    input  wire        cpu_clear_tgl,       // zero both window counters
++    input  wire [31:0] cpu_size,            // quasi-static; 0 = SS_MAX_SIZE
++
++    // To CPU (synchronized on the CPU side)
++    output reg         start_req_tgl,
++    output reg         load_req_tgl,
++    output reg  [31:0] rd_words,
++    output reg  [31:0] wr_words
++);
++
++assign savestate_supported   = 1'b1;
++assign savestate_addr        = SS_BRIDGE_ADDR;
++assign savestate_maxloadsize = SS_MAX_SIZE;
++
++// Size is written by the OS when an app registers, long before any host
++// request, so a plain multi-bit 2FF sync is safe (quasi-static, like RTC).
++reg [31:0] size_s1, size_s2;
++always @(posedge clk_74a) begin
++    size_s1 <= cpu_size;
++    size_s2 <= size_s1;
++end
++wire [31:0] size_clamped = (size_s2 == 32'd0 || size_s2 > SS_MAX_SIZE)
++                           ? SS_MAX_SIZE : {size_s2[31:2], 2'b00};
++assign savestate_size = size_clamped;
++
++// CPU -> 74a toggles.  The err bits are written in the same store as the
++// toggle; they are sampled two cycles after the synchronized toggle edge,
++// by which time their own synchronizer has settled too.
++wire start_done_s, load_done_s, clear_s, start_err_s, load_err_s;
++synch_3 #(.WIDTH(5)) sync_cpu (
++    {cpu_start_done_tgl, cpu_load_done_tgl, cpu_clear_tgl, cpu_start_err, cpu_load_err},
++    {start_done_s,       load_done_s,       clear_s,       start_err_s,   load_err_s},
++    clk_74a
++);
++
++reg start_done_d, load_done_d, clear_d;
++reg [1:0] start_done_pipe, load_done_pipe;
++reg start_prev, load_prev;
++reg bridge_rd_prev;
++
++wire in_window = (bridge_addr[31:24] == SS_BRIDGE_ADDR[31:24]) &&
++                 (bridge_addr[23:0]  >= SS_BRIDGE_ADDR[23:0])  &&
++                 (bridge_addr[23:0]  <  SS_BRIDGE_ADDR[23:0] + SS_MAX_SIZE[23:0]);
++
++always @(posedge clk_74a or negedge reset_n) begin
++    if (!reset_n) begin
++        savestate_start_ack  <= 1'b0;
++        savestate_start_busy <= 1'b0;
++        savestate_start_ok   <= 1'b0;
++        savestate_start_err  <= 1'b0;
++        savestate_load_ack   <= 1'b0;
++        savestate_load_busy  <= 1'b0;
++        savestate_load_ok    <= 1'b0;
++        savestate_load_err   <= 1'b0;
++        start_req_tgl        <= 1'b0;
++        load_req_tgl         <= 1'b0;
++        rd_words             <= 32'd0;
++        wr_words             <= 32'd0;
++        start_prev           <= 1'b0;
++        load_prev            <= 1'b0;
++        bridge_rd_prev       <= 1'b0;
++        start_done_d         <= 1'b0;
++        load_done_d          <= 1'b0;
++        clear_d              <= 1'b0;
++        start_done_pipe      <= 2'b00;
++        load_done_pipe       <= 2'b00;
++    end else begin
++        start_prev     <= savestate_start;
++        load_prev      <= savestate_load;
++        bridge_rd_prev <= bridge_rd;
++        start_done_d   <= start_done_s;
++        load_done_d    <= load_done_s;
++        clear_d        <= clear_s;
++
++        // Edge of a CPU toggle -> act two cycles later (err settled).
++        start_done_pipe <= {start_done_pipe[0], start_done_s ^ start_done_d};
++        load_done_pipe  <= {load_done_pipe[0],  load_done_s  ^ load_done_d};
++
++        // ---- Save (0xA0 + start) ----
++        if (savestate_start && !start_prev) begin
++            savestate_start_ack  <= 1'b1;
++            savestate_start_busy <= 1'b1;
++            savestate_start_ok   <= 1'b0;
++            savestate_start_err  <= 1'b0;
++            savestate_load_ok    <= 1'b0;
++            savestate_load_err   <= 1'b0;
++            start_req_tgl        <= ~start_req_tgl;
++            rd_words             <= 32'd0;
++        end else if (!savestate_start) begin
++            savestate_start_ack  <= 1'b0;
++        end
++
++        if (start_done_pipe[1] && savestate_start_busy) begin
++            savestate_start_busy <= 1'b0;
++            savestate_start_ok   <= ~start_err_s;
++            savestate_start_err  <=  start_err_s;
++        end
++
++        // ---- Load (0xA4 + load) ----
++        if (savestate_load && !load_prev) begin
++            savestate_load_ack   <= 1'b1;
++            savestate_load_busy  <= 1'b1;
++            savestate_load_ok    <= 1'b0;
++            savestate_load_err   <= 1'b0;
++            savestate_start_ok   <= 1'b0;
++            savestate_start_err  <= 1'b0;
++            load_req_tgl         <= ~load_req_tgl;
++        end else if (!savestate_load) begin
++            savestate_load_ack   <= 1'b0;
++        end
++
++        if (load_done_pipe[1] && savestate_load_busy) begin
++            savestate_load_busy  <= 1'b0;
++            savestate_load_ok    <= ~load_err_s;
++            savestate_load_err   <=  load_err_s;
++        end
++
++        // ---- Blob-window traffic counters ----
++        if (clear_s ^ clear_d) begin
++            rd_words <= 32'd0;
++            wr_words <= 32'd0;
++        end else begin
++            if (bridge_rd && !bridge_rd_prev && in_window)
++                rd_words <= rd_words + 32'd1;
++            if (bridge_wr && in_window)
++                wr_words <= wr_words + 32'd1;
++        end
++    end
++end
++
++endmodule
++
++`default_nettype wire
+diff --git a/src/fpga/targets/pocket/variants/os20.mk b/src/fpga/targets/pocket/variants/os20.mk
+index a7323e9..c414557 100644
+--- a/src/fpga/targets/pocket/variants/os20.mk
++++ b/src/fpga/targets/pocket/variants/os20.mk
+@@ -5,5 +5,5 @@
+ # re-derives timers at boot.  CPU adds the 4/32 store buffer
+ # (configs/os20.cfg).  The dual-issue wall needs ~11.2 ns, so 96 MHz
+ # could never truly close; 90 MHz targets real closure margin.
+-DEFS := INCLUDE_ANALOGIZER INCLUDE_HW_MIXER INCLUDE_TRANSLUC \
++DEFS := INCLUDE_ANALOGIZER INCLUDE_HW_MIXER INCLUDE_TRANSLUC INCLUDE_SAVESTATE \
+         INCLUDE_PALETTE INCLUDE_4PLAYER INCLUDE_CLK90
+diff --git a/src/fpga/test/Makefile b/src/fpga/test/Makefile
+index 4e90b37..4b8ce47 100644
+--- a/src/fpga/test/Makefile
++++ b/src/fpga/test/Makefile
+@@ -141,6 +141,22 @@ BRIDGE_CMD_DIR = obj_dir_bridge_cmd
+ BRIDGE_CMD_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
+                    -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL
+ 
++# ============================================================
++# Pocket save-state handshake — savestate_ctrl answering the host's
++# 0x00A0 / 0x00A4 commands through the real core_bridge_cmd FSM.
++# ============================================================
++SAVESTATE_SRCS = \
++	tb_savestate.v \
++	altsyncram_stub.v \
++	$(TARGET_DIR)/core_bridge_cmd.v \
++	$(TARGET_DIR)/savestate_ctrl.v \
++	$(TARGET_DIR)/apf/mf_datatable.v \
++	$(TARGET_DIR)/apf/common.v
++
++SAVESTATE_CPP = tb_savestate_main.cpp
++SAVESTATE_TOP = tb_savestate
++SAVESTATE_DIR = obj_dir_savestate
++
+ # ============================================================
+ # Pocket bridge RX CDC — phase sweep of the REAL io_bridge_peripheral.
+ # bridge_spiclk and clk_74a are both 74.25 MHz with a power-up-latched
+@@ -615,10 +631,10 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
+ # Targets
+ # ============================================================
+ .PHONY: all sdram sdram-serialize sdram-native2 sdram-wcont0 sdram-all sdram-cont sram scanout scanout-lean analogchain gpu gpu-persp gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-os30 gpu-acceptance-zraw gpu-acceptance-burst2 gpu-acceptance-all gpu-acceptance-nomac gpu-elab-nomac-noclip gpu-chain \
+-        gpu-wrpath gpu-wstall scanout-race scanout-race-pocket axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter system system-mister run run-sram build clean \
++        gpu-wrpath gpu-wstall scanout-race scanout-race-pocket axi-periph bridge-cmd savestate bridge-rx audio audio-mixer arbiter system system-mister run run-sram build clean \
+         cram1-tex-chain cram1-cmap-chain gpu-cram1-repro
+ 
+-all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter hps-bridge hps-mouse hps-keyboard skid ddr3-fb
++all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd savestate bridge-rx audio audio-mixer arbiter hps-bridge hps-mouse hps-keyboard skid ddr3-fb
+ 
+ .PHONY: cpu-target-port gpu-math lsu-coalescer-proof
+ cpu-target-port: obj_dir_cpu_port/Vcpu_target_port obj_dir_cpu_port_per/Vcpu_target_port_per
+@@ -1407,6 +1423,16 @@ $(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP): $(AXI_PERIPH_SRCS) $(AXI_PERIPH_CPP)
+ 		-I$(COMMON_DIR) \
+ 		$(AXI_PERIPH_SRCS) $(AXI_PERIPH_CPP)
+ 
++# --- Pocket save-state handshake ---
++savestate: $(SAVESTATE_DIR)/V$(SAVESTATE_TOP)
++	@printf "\n=== Pocket save-state handshake ===\n"
++	./$(SAVESTATE_DIR)/V$(SAVESTATE_TOP)
++
++$(SAVESTATE_DIR)/V$(SAVESTATE_TOP): $(SAVESTATE_SRCS) $(SAVESTATE_CPP)
++	$(VERILATOR) $(VERILATOR_FLAGS) $(BRIDGE_CMD_FLAGS) \
++		--top-module $(SAVESTATE_TOP) --Mdir $(SAVESTATE_DIR) \
++		$(SAVESTATE_SRCS) $(SAVESTATE_CPP)
++
+ # --- Pocket bridge command FSM ---
+ bridge-cmd: $(BRIDGE_CMD_DIR)/V$(BRIDGE_CMD_TOP)
+ 	@printf "\n=== Pocket bridge command FSM ===\n"
+diff --git a/src/fpga/test/tb_savestate.v b/src/fpga/test/tb_savestate.v
+new file mode 100644
+index 0000000..dcbf839
+--- /dev/null
++++ b/src/fpga/test/tb_savestate.v
+@@ -0,0 +1,150 @@
++//------------------------------------------------------------------------------
++// SPDX-License-Identifier: Apache-2.0
++// SPDX-FileType: SOURCE
++//------------------------------------------------------------------------------
++
++// core_bridge_cmd + savestate_ctrl: the APF save-state handshake as the
++// Pocket host drives it (0x00A0 / 0x00A4), with the CPU side as tb inputs.
++
++`default_nettype none
++
++module tb_savestate (
++    input  wire        clk,
++
++    input  wire [31:0] bridge_addr,
++    input  wire        bridge_rd,
++    output wire [31:0] bridge_rd_data,
++    input  wire        bridge_wr,
++    input  wire [31:0] bridge_wr_data,
++
++    input  wire        cpu_start_done_tgl,
++    input  wire        cpu_start_err,
++    input  wire        cpu_load_done_tgl,
++    input  wire        cpu_load_err,
++    input  wire        cpu_clear_tgl,
++    input  wire [31:0] cpu_size,
++
++    output wire        start_req_tgl,
++    output wire        load_req_tgl,
++    output wire [31:0] rd_words,
++    output wire [31:0] wr_words
++);
++
++wire        reset_n;
++wire        shutdown_pending;
++wire        osnotify_inmenu;
++wire        dataslot_requestread, dataslot_requestwrite, dataslot_update;
++wire [15:0] dataslot_requestread_id, dataslot_requestwrite_id, dataslot_update_id;
++wire [31:0] dataslot_requestwrite_size, dataslot_update_size;
++wire        dataslot_allcomplete;
++wire [31:0] rtc_epoch_seconds, rtc_date_bcd, rtc_time_bcd;
++wire        rtc_valid;
++wire        target_dataslot_ack, target_dataslot_done;
++wire [2:0]  target_dataslot_err;
++wire [31:0] datatable_q;
++
++wire        savestate_supported;
++wire [31:0] savestate_addr, savestate_size, savestate_maxloadsize;
++wire        savestate_start, savestate_start_ack, savestate_start_busy,
++            savestate_start_ok, savestate_start_err;
++wire        savestate_load, savestate_load_ack, savestate_load_busy,
++            savestate_load_ok, savestate_load_err;
++
++core_bridge_cmd dut (
++    .clk                (clk),
++    .reset_n            (reset_n),
++    .bridge_endian_little(1'b0),
++    .bridge_addr        (bridge_addr),
++    .bridge_rd          (bridge_rd),
++    .bridge_rd_data     (bridge_rd_data),
++    .bridge_wr          (bridge_wr),
++    .bridge_wr_data     (bridge_wr_data),
++    .shutdown_pending   (shutdown_pending),
++    .shutdown_ack_s     (1'b1),
++    .status_boot_done   (1'b1),
++    .status_setup_done  (1'b0),
++    .status_running     (1'b1),
++    .dataslot_requestread    (dataslot_requestread),
++    .dataslot_requestread_id (dataslot_requestread_id),
++    .dataslot_requestread_ack(1'b1),
++    .dataslot_requestread_ok (1'b1),
++    .dataslot_requestwrite     (dataslot_requestwrite),
++    .dataslot_requestwrite_id  (dataslot_requestwrite_id),
++    .dataslot_requestwrite_size(dataslot_requestwrite_size),
++    .dataslot_requestwrite_ack (1'b1),
++    .dataslot_requestwrite_ok  (1'b1),
++    .dataslot_update      (dataslot_update),
++    .dataslot_update_id   (dataslot_update_id),
++    .dataslot_update_size (dataslot_update_size),
++    .dataslot_allcomplete (dataslot_allcomplete),
++    .rtc_epoch_seconds (rtc_epoch_seconds),
++    .rtc_date_bcd      (rtc_date_bcd),
++    .rtc_time_bcd      (rtc_time_bcd),
++    .rtc_valid         (rtc_valid),
++    .savestate_supported   (savestate_supported),
++    .savestate_addr        (savestate_addr),
++    .savestate_size        (savestate_size),
++    .savestate_maxloadsize (savestate_maxloadsize),
++    .osnotify_inmenu (osnotify_inmenu),
++    .savestate_start     (savestate_start),
++    .savestate_start_ack (savestate_start_ack),
++    .savestate_start_busy(savestate_start_busy),
++    .savestate_start_ok  (savestate_start_ok),
++    .savestate_start_err (savestate_start_err),
++    .savestate_load     (savestate_load),
++    .savestate_load_ack (savestate_load_ack),
++    .savestate_load_busy(savestate_load_busy),
++    .savestate_load_ok  (savestate_load_ok),
++    .savestate_load_err (savestate_load_err),
++    .target_dataslot_read       (1'b0),
++    .target_dataslot_write      (1'b0),
++    .target_dataslot_getfile    (1'b0),
++    .target_dataslot_openfile   (1'b0),
++    .target_dataslot_ack  (target_dataslot_ack),
++    .target_dataslot_done (target_dataslot_done),
++    .target_dataslot_err  (target_dataslot_err),
++    .target_dataslot_id        (16'b0),
++    .target_dataslot_slotoffset(32'b0),
++    .target_dataslot_bridgeaddr(32'b0),
++    .target_dataslot_length    (32'b0),
++    .target_buffer_param_struct(32'b0),
++    .target_buffer_resp_struct (32'b0),
++    .datatable_addr (10'b0),
++    .datatable_wren (1'b0),
++    .datatable_data (32'b0),
++    .datatable_q    (datatable_q)
++);
++
++savestate_ctrl ss (
++    .clk_74a               (clk),
++    .reset_n               (1'b1),
++    .savestate_start       (savestate_start),
++    .savestate_start_ack   (savestate_start_ack),
++    .savestate_start_busy  (savestate_start_busy),
++    .savestate_start_ok    (savestate_start_ok),
++    .savestate_start_err   (savestate_start_err),
++    .savestate_load        (savestate_load),
++    .savestate_load_ack    (savestate_load_ack),
++    .savestate_load_busy   (savestate_load_busy),
++    .savestate_load_ok     (savestate_load_ok),
++    .savestate_load_err    (savestate_load_err),
++    .savestate_supported   (savestate_supported),
++    .savestate_addr        (savestate_addr),
++    .savestate_size        (savestate_size),
++    .savestate_maxloadsize (savestate_maxloadsize),
++    .bridge_addr           (bridge_addr),
++    .bridge_rd             (bridge_rd),
++    .bridge_wr             (bridge_wr),
++    .cpu_start_done_tgl    (cpu_start_done_tgl),
++    .cpu_start_err         (cpu_start_err),
++    .cpu_load_done_tgl     (cpu_load_done_tgl),
++    .cpu_load_err          (cpu_load_err),
++    .cpu_clear_tgl         (cpu_clear_tgl),
++    .cpu_size              (cpu_size),
++    .start_req_tgl         (start_req_tgl),
++    .load_req_tgl          (load_req_tgl),
++    .rd_words              (rd_words),
++    .wr_words              (wr_words)
++);
++
++endmodule
+diff --git a/src/fpga/test/tb_savestate_main.cpp b/src/fpga/test/tb_savestate_main.cpp
+new file mode 100644
+index 0000000..6ca02c2
+--- /dev/null
++++ b/src/fpga/test/tb_savestate_main.cpp
+@@ -0,0 +1,150 @@
++//------------------------------------------------------------------------------
++// SPDX-License-Identifier: Apache-2.0
++// SPDX-FileType: SOURCE
++//------------------------------------------------------------------------------
++
++// Drives the Pocket host side of the save-state commands the way agg23's
++// openFPGA-NES expects them: save = 0xA0 start, poll 0xA0 until ok, read the
++// blob; load = write the blob, 0xA4 load, poll 0xA4 until ok.
++
++#include "Vtb_savestate.h"
++#include <verilated.h>
++#include <cstdio>
++#include <cstdint>
++
++static Vtb_savestate *tb;
++static int passes = 0, fails = 0;
++
++static constexpr uint32_t HOST_CMD = 0xF8000000u;
++static constexpr uint32_t HOST_P20 = 0xF8000020u;
++static constexpr uint32_t HOST_R40 = 0xF8000040u;
++static constexpr uint32_t HOST_R44 = 0xF8000044u;
++static constexpr uint32_t HOST_R48 = 0xF8000048u;
++static constexpr uint32_t BLOB     = 0x20600000u;
++
++static void tick() {
++    tb->clk = 0; tb->eval();
++    tb->clk = 1; tb->eval();
++}
++static void ticks(int n) { while (n-- > 0) tick(); }
++
++static void check_eq(const char *tag, uint32_t got, uint32_t expect) {
++    if (got == expect) { passes++; std::printf("  OK  %s\n", tag); }
++    else { fails++; std::printf("  FAIL %s got=0x%08x exp=0x%08x\n", tag, got, expect); }
++}
++
++static void write32(uint32_t addr, uint32_t data) {
++    tb->bridge_addr = addr; tb->bridge_wr_data = data;
++    tb->bridge_wr = 1; tick(); tb->bridge_wr = 0; tick();
++}
++static uint32_t read32(uint32_t addr) {
++    tb->bridge_addr = addr; tb->bridge_rd = 1; tick();
++    tb->bridge_rd = 0; tick();
++    return tb->bridge_rd_data;
++}
++
++/* Issue a host command and wait for its "OK" status word; returns the
++ * 16-bit result code (0xFFFF = unknown command, 0xDEAD = timed out). */
++static uint32_t host_cmd(uint16_t cmd, uint32_t p20) {
++    write32(HOST_P20, p20);
++    write32(HOST_CMD, 0x434D0000u | cmd);
++    for (int i = 0; i < 200; i++) {
++        uint32_t st = read32(HOST_CMD);
++        if ((st >> 16) == 0x4F4B) return st & 0xFFFF;
++        tick();
++    }
++    return 0xDEAD;
++}
++
++/* CPU side: flip a toggle after a realistic CDC distance. */
++static void cpu_complete_save(bool err) {
++    tb->cpu_start_err = err; tb->cpu_start_done_tgl ^= 1; ticks(12);
++}
++static void cpu_complete_load(bool err) {
++    tb->cpu_load_err = err; tb->cpu_load_done_tgl ^= 1; ticks(12);
++}
++
++static void init() {
++    tb->clk = 0; tb->bridge_addr = 0; tb->bridge_rd = 0; tb->bridge_wr = 0;
++    tb->bridge_wr_data = 0; tb->cpu_start_done_tgl = 0; tb->cpu_start_err = 0;
++    tb->cpu_load_done_tgl = 0; tb->cpu_load_err = 0; tb->cpu_clear_tgl = 0;
++    tb->cpu_size = 0;
++    ticks(16);
++}
++
++static void test_query() {
++    std::printf("test_query:\n");
++    check_eq("A0-query-result-idle", host_cmd(0x00A0, 0), 0);
++    check_eq("A0-supported", read32(HOST_R40), 1);
++    check_eq("A0-addr", read32(HOST_R44), BLOB);
++    check_eq("A0-size-defaults-to-max", read32(HOST_R48), 0x100000);
++    check_eq("A4-query-result-idle", host_cmd(0x00A4, 0), 0);
++    check_eq("A4-maxloadsize", read32(HOST_R48), 0x100000);
++    tb->cpu_size = 0x12345; ticks(8);
++    host_cmd(0x00A0, 0);
++    check_eq("A0-size-from-cpu-word-aligned", read32(HOST_R48), 0x12344);
++    tb->cpu_size = 0x200000; ticks(8);
++    host_cmd(0x00A0, 0);
++    check_eq("A0-size-clamped-to-window", read32(HOST_R48), 0x100000);
++    tb->cpu_size = 0x40000; ticks(8);
++}
++
++static void test_save() {
++    std::printf("test_save:\n");
++    uint32_t req0 = tb->start_req_tgl;
++    host_cmd(0x00A0, 1);
++    check_eq("start-req-toggled", tb->start_req_tgl, req0 ^ 1);
++    check_eq("poll-busy", host_cmd(0x00A0, 0), 1);
++    ticks(50);
++    check_eq("still-busy-until-cpu", host_cmd(0x00A0, 0), 1);
++    cpu_complete_save(false);
++    check_eq("poll-ok", host_cmd(0x00A0, 0), 2);
++    check_eq("size-reported", read32(HOST_R48), 0x40000);
++
++    for (uint32_t i = 0; i < 4; i++) read32(BLOB + i * 4);
++    read32(0x205FFFFCu);                  // below the window
++    read32(0x20700000u);                  // above the window
++    check_eq("rd-words-counts-window-only", tb->rd_words, 4);
++
++    // A second save resets the result and the read counter.
++    host_cmd(0x00A0, 1);
++    check_eq("second-save-busy", host_cmd(0x00A0, 0), 1);
++    check_eq("rd-words-reset-on-save", tb->rd_words, 0);
++    cpu_complete_save(true);
++    check_eq("cpu-denied-save-reports-err", host_cmd(0x00A0, 0), 3);
++    check_eq("toggles-without-request-ignored", (cpu_complete_save(false), host_cmd(0x00A0, 0)), 3);
++}
++
++static void test_load() {
++    std::printf("test_load:\n");
++    tb->cpu_clear_tgl ^= 1; ticks(8);
++    check_eq("clear-zeroes-wr-words", tb->wr_words, 0);
++    for (uint32_t i = 0; i < 3; i++) write32(BLOB + i * 4, 0xC0DE0000u | i);
++    write32(0x20500000u, 1);              // app DMA pool, not the blob
++    check_eq("wr-words-counts-window-only", tb->wr_words, 3);
++
++    uint32_t req0 = tb->load_req_tgl;
++    host_cmd(0x00A4, 1);
++    check_eq("load-req-toggled", tb->load_req_tgl, req0 ^ 1);
++    check_eq("load-poll-busy", host_cmd(0x00A4, 0), 1);
++    check_eq("save-result-cleared-by-load", host_cmd(0x00A0, 0), 0);
++    cpu_complete_load(false);
++    check_eq("load-poll-ok", host_cmd(0x00A4, 0), 2);
++
++    host_cmd(0x00A4, 1);
++    cpu_complete_load(true);
++    check_eq("load-err", host_cmd(0x00A4, 0), 3);
++}
++
++int main(int argc, char **argv) {
++    Verilated::commandArgs(argc, argv);
++    tb = new Vtb_savestate;
++    std::printf("=== savestate_ctrl + core_bridge_cmd ===\n");
++    init();
++    test_query();
++    test_save();
++    test_load();
++    std::printf("\n=== Results: %d passed, %d failed ===\n", passes, fails);
++    delete tb;
++    return fails == 0 ? 0 : 1;
++}

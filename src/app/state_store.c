@@ -333,6 +333,92 @@ int p8p_state_load_file(const char *path, const p8p_cart_hash_t *cart_hash,
     return result;
 }
 
+/* Native (APF) save states: one self-contained blob instead of a record in
+ * the store, so the Pocket's Memories and sleep can hold it. */
+#define BLOB_MAGIC 0x53533850u /* P8SS */
+#define BLOB_VERSION 1u
+#define BLOB_HEADER_SIZE 40u
+
+int p8p_state_serialize(const p8p_cart_hash_t *cart_hash,
+                        p8p_runtime_t *runtime, uint8_t **blob,
+                        uint32_t *size) {
+    void *raw = NULL;
+    size_t raw_size = 0;
+    mz_ulong compressed_size;
+    uint8_t *out;
+
+    if (!cart_hash || !runtime || !blob || !size)
+        return -1;
+    *blob = NULL;
+    *size = 0;
+    if (p8p_runtime_save_state(runtime, &raw, &raw_size) != 0)
+        return -2;
+    compressed_size = mz_compressBound(raw_size);
+    out = (uint8_t *)malloc(BLOB_HEADER_SIZE + (size_t)compressed_size);
+    if (!out) {
+        free(raw);
+        return -3;
+    }
+    if (mz_compress2(out + BLOB_HEADER_SIZE, &compressed_size,
+                     (const unsigned char *)raw, raw_size,
+                     MZ_BEST_SPEED) != MZ_OK) {
+        free(out);
+        free(raw);
+        return -4;
+    }
+    if (compressed_size > P8P_STATE_BLOB_MAX - BLOB_HEADER_SIZE) {
+        free(out);
+        free(raw);
+        return -5;
+    }
+    memset(out, 0, BLOB_HEADER_SIZE);
+    write_u32(out, BLOB_MAGIC);
+    write_u32(out + 4, BLOB_VERSION);
+    write_u32(out + 8, (uint32_t)raw_size);
+    write_u32(out + 12, (uint32_t)compressed_size);
+    write_u32(out + 16,
+              (uint32_t)mz_crc32(0, (const unsigned char *)raw, raw_size));
+    memcpy(out + 24, cart_hash->bytes, sizeof(cart_hash->bytes));
+    free(raw);
+    *blob = out;
+    *size = BLOB_HEADER_SIZE + (uint32_t)compressed_size;
+    return 0;
+}
+
+int p8p_state_deserialize(const p8p_cart_hash_t *cart_hash,
+                          p8p_runtime_t *runtime, const uint8_t *blob,
+                          uint32_t size) {
+    uint32_t raw_size;
+    uint32_t compressed_size;
+    mz_ulong output_size;
+    uint8_t *raw;
+    int result;
+
+    if (!cart_hash || !runtime || !blob || size < BLOB_HEADER_SIZE)
+        return -1;
+    if (read_u32(blob) != BLOB_MAGIC || read_u32(blob + 4) != BLOB_VERSION)
+        return -2;
+    if (memcmp(blob + 24, cart_hash->bytes, sizeof(cart_hash->bytes)) != 0)
+        return -3;
+    raw_size = read_u32(blob + 8);
+    compressed_size = read_u32(blob + 12);
+    if (compressed_size > size - BLOB_HEADER_SIZE || !raw_size ||
+        raw_size > 16u * 1024u * 1024u)
+        return -4;
+    raw = (uint8_t *)malloc(raw_size);
+    if (!raw)
+        return -5;
+    output_size = raw_size;
+    if (mz_uncompress(raw, &output_size, blob + BLOB_HEADER_SIZE,
+                      compressed_size) != MZ_OK || output_size != raw_size ||
+        mz_crc32(0, raw, raw_size) != read_u32(blob + 16))
+        result = -6;
+    else
+        result = p8p_runtime_load_state(runtime, raw, raw_size);
+    free(raw);
+    return result;
+}
+
 int p8p_state_delete_file(const char *path, const p8p_cart_hash_t *cart_hash) {
     uint8_t *store = NULL;
     uint32_t offset;

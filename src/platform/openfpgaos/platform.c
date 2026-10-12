@@ -3,6 +3,14 @@
 #include "p8p/runtime.h"
 
 #include "of.h"
+/* Save states need a runtime built from our openfpgaOS fork; the Diablo
+ * runtime's SDK has no of_savestate.h and keeps the no-op fallbacks. */
+#if defined(__has_include)
+#if __has_include("of_savestate.h")
+#include "of_savestate.h"
+#define P8P_HAVE_OF_SAVESTATE 1
+#endif
+#endif
 
 #include <stdint.h>
 #include <string.h>
@@ -357,3 +365,54 @@ void p8p_platform_sleep_us(uint32_t microseconds) {
 void p8p_platform_exit(void) {
     of_exit();
 }
+
+#ifdef P8P_HAVE_OF_SAVESTATE
+int p8p_platform_savestate_enable(uint32_t max_size) {
+    return of_savestate_enable(max_size);
+}
+
+int p8p_platform_savestate_poll(void) {
+    switch (of_savestate_poll()) {
+    case OF_SAVESTATE_SAVE: return P8P_SAVESTATE_SAVE;
+    case OF_SAVESTATE_LOAD: return P8P_SAVESTATE_LOAD;
+    default: return P8P_SAVESTATE_NONE;
+    }
+}
+
+int p8p_platform_savestate_save(const void *blob, uint32_t size) {
+    return of_savestate_save(blob, size);
+}
+
+int p8p_platform_savestate_load(void *buffer, uint32_t capacity) {
+    return of_savestate_load(buffer, capacity);
+}
+
+void p8p_platform_savestate_finish(int ok) {
+    of_savestate_finish(ok);
+}
+#else
+int p8p_platform_savestate_enable(uint32_t max_size) {
+    (void)max_size;
+    return -1;
+}
+
+int p8p_platform_savestate_poll(void) {
+    return P8P_SAVESTATE_NONE;
+}
+
+int p8p_platform_savestate_save(const void *blob, uint32_t size) {
+    (void)blob;
+    (void)size;
+    return -1;
+}
+
+int p8p_platform_savestate_load(void *buffer, uint32_t capacity) {
+    (void)buffer;
+    (void)capacity;
+    return -1;
+}
+
+void p8p_platform_savestate_finish(int ok) {
+    (void)ok;
+}
+#endif

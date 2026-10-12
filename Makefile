@@ -1,5 +1,5 @@
 PROJECT_ROOT := $(abspath $(CURDIR))
-SDK_ROOT     := $(PROJECT_ROOT)/.deps/diablo
+SDK_ROOT     ?= $(PROJECT_ROOT)/.deps/diablo
 FAKE08_ROOT  := $(PROJECT_ROOT)/.deps/fake-08
 APP_DIR      := $(PROJECT_ROOT)/src/app
 BUILD_DIR    := $(PROJECT_ROOT)/build
@@ -67,7 +67,7 @@ pocket-elf: deps
 		FAKE08_ROOT=$(FAKE08_ROOT)
 
 pocket: pocket-elf
-	@./scripts/assemble-pocket.sh
+	@SDK_ROOT=$(SDK_ROOT) ./scripts/assemble-pocket.sh
 
 validate: pocket
 	@./scripts/validate-pocket.sh

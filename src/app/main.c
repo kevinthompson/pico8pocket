@@ -9,6 +9,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int runtime_cartdata_load(void *userdata, const char *id,
@@ -320,6 +321,54 @@ static void draw_bringup_frame(uint8_t *fb, const p8p_cart_info_t *cart,
     fill_rect(fb, cursor_x - 1, cursor_y - 1, 3, 3, border);
 }
 
+/* Answer the Pocket's own save states (Memories, sleep/wake), outside the
+ * in-game menu's slots.  Returns 1 when a state was restored. */
+static int service_savestate(p8p_runtime_t *runtime, int running,
+                             const p8p_cart_hash_t *cart_hash) {
+    int request = p8p_platform_savestate_poll();
+    uint8_t *blob = NULL;
+    uint32_t size = 0;
+    int length;
+    int result;
+
+    if (request == P8P_SAVESTATE_NONE)
+        return 0;
+    if (!running) {
+        p8p_platform_savestate_finish(0);
+        return 0;
+    }
+    if (request == P8P_SAVESTATE_SAVE) {
+        /* Sleep may be followed by power-off: get cartdata to the card. */
+        p8p_runtime_flush_cartdata(runtime);
+        result = p8p_state_serialize(cart_hash, runtime, &blob, &size);
+        if (result != 0 || p8p_platform_savestate_save(blob, size) != 0) {
+            printf("pico8pocket: native save state refused (%d)\n", result);
+            p8p_platform_savestate_finish(0);
+        }
+        free(blob);
+        return 0;
+    }
+    blob = (uint8_t *)malloc(P8P_STATE_BLOB_MAX);
+    if (!blob) {
+        p8p_platform_savestate_finish(0);
+        return 0;
+    }
+    length = p8p_platform_savestate_load(blob, P8P_STATE_BLOB_MAX);
+    if (length <= 0) {
+        /* The OS has already reported the failure. */
+        printf("pico8pocket: native state rejected by OS (%d)\n", length);
+        free(blob);
+        return 0;
+    }
+    result = p8p_state_deserialize(cart_hash, runtime, blob,
+                                   (uint32_t)length);
+    free(blob);
+    if (result != 0)
+        printf("pico8pocket: native state load failed (%d)\n", result);
+    p8p_platform_savestate_finish(result == 0);
+    return result == 0;
+}
+
 int main(int argc, char **argv) {
     /* Slot 0 is the APF instance descriptor used to launch openfpgaOS. */
     const char *cart_path = "slot:4";
@@ -388,6 +437,7 @@ int main(int argc, char **argv) {
         if (runtime && p8p_runtime_load(runtime, &loaded_cart) == 0) {
             running = 1;
             p8p_cart_content_hash(&loaded_cart, &cart_hash);
+            p8p_platform_savestate_enable(P8P_STATE_BLOB_MAX);
             menu = p8p_menu_create(&settings, &cart_hash,
                                    p8p_cart_kind_name(cart.kind));
             p8p_runtime_set_service_hook(runtime, input_latch_service,
@@ -429,6 +479,11 @@ int main(int argc, char **argv) {
         int present_required = 1;
         enum p8p_system_input_action system_action;
 
+        if (service_savestate(runtime, running, &cart_hash) && menu_open) {
+            menu_open = 0;
+            suppress_buttons = previous_physical;
+            p8p_platform_audio_set_paused(0);
+        }
         input_latch_take(&input_latch, &physical_input);
         physical = physical_input.held;
         physical_pressed = physical_input.pressed |

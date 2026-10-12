@@ -53,6 +53,18 @@ int p8p_state_delete_file(const char *path, const p8p_cart_hash_t *cart_hash);
 int p8p_state_get_meta_file(const char *path,
                             const p8p_cart_hash_t *cart_hash,
                             p8p_state_meta_t *meta);
+
+/* In-memory states for the Pocket's own save states (Memories, sleep).
+ * The blob carries the cart hash and is at most P8P_STATE_BLOB_MAX bytes;
+ * free it with free(). */
+#define P8P_STATE_BLOB_MAX (256u * 1024u)
+int p8p_state_serialize(const p8p_cart_hash_t *cart_hash,
+                        p8p_runtime_t *runtime, uint8_t **blob,
+                        uint32_t *size);
+int p8p_state_deserialize(const p8p_cart_hash_t *cart_hash,
+                          p8p_runtime_t *runtime, const uint8_t *blob,
+                          uint32_t size);
+
 int p8p_store_read_config(void *data, size_t size);
 int p8p_store_write_config(const void *data, size_t size);
 int p8p_store_read_config_file(const char *path, void *data, size_t size);
