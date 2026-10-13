@@ -267,10 +267,10 @@ index e3ffd49..a684c7d 100644
   * cannot survive a warm reset.  PRESERVES the nonvolatile presave + save
 diff --git a/src/firmware/os/hal/savestate.h b/src/firmware/os/hal/savestate.h
 new file mode 100644
-index 0000000..4d30e55
+index 0000000..4a667c0
 --- /dev/null
 +++ b/src/firmware/os/hal/savestate.h
-@@ -0,0 +1,30 @@
+@@ -0,0 +1,35 @@
 +//------------------------------------------------------------------------------
 +// SPDX-License-Identifier: Apache-2.0
 +// SPDX-FileType: SOURCE
@@ -300,7 +300,121 @@ index 0000000..4d30e55
 + * states never enabled, or a load nobody picks up in time). */
 +void of_savestate_tick(void);
 +
++/* Nonzero when the host had already asked for a state load before the OS
++ * started (wake from sleep / Memory opened from the Pocket menu).  Valid
++ * once the hardware contract has been checked; 0 on targets without it. */
++int  of_savestate_boot_pending(void);
++
 +#endif /* OFOS_SAVESTATE_H */
+diff --git a/src/firmware/os/hal/terminal.h b/src/firmware/os/hal/terminal.h
+index 91d7d80..71db567 100644
+--- a/src/firmware/os/hal/terminal.h
++++ b/src/firmware/os/hal/terminal.h
+@@ -38,6 +38,11 @@ void of_term_init(void);
+ /* Print a single character (handles \n, \r, \b) */
+ void of_term_putchar(char c);
+ 
++/* While quiet, of_term_putchar/puts/printf draw nothing (the resume boot
++ * screen shows one line and no status chatter).  Pocket only; a no-op
++ * elsewhere. */
++void of_term_set_quiet(int on);
++
+ /* Print a null-terminated string */
+ void of_term_puts(const char *s);
+ 
+diff --git a/src/firmware/os/kernel/main.c b/src/firmware/os/kernel/main.c
+index f6ed575..da36dc6 100644
+--- a/src/firmware/os/kernel/main.c
++++ b/src/firmware/os/kernel/main.c
+@@ -11,6 +11,7 @@
+ 
+ #include "../hal/hal.h"
+ #include "../hal/memtest.h"
++#include "../hal/savestate.h"
+ #include "syscall.h"
+ #include "loader.h"
+ #include "caps_table.h"
+@@ -95,7 +96,16 @@ void os_finalize_memory(void *bss_start, void *bss_end) {
+ /* Draw boot logo. First call clears screen, subsequent calls just recolor. */
+ static int logo_drawn = 0;
+ 
++/* Set once the core/os pairing is verified: the host pushed a save state
++ * before we started (wake from sleep, or a Memory opened from the Pocket's
++ * menu), so this boot ends in the app picking up where it was.  The screen
++ * then shows a single "Resuming..." line -- no logo, no status lines --
++ * unless something fails, in which case the terminal is un-muted. */
++static int boot_resuming;
++
+ static void boot_logo(const char *color) {
++    if (boot_resuming)
++        return;                 /* the resume screen is one line, drawn once */
+     if (!logo_drawn) {
+         of_term_clear();
+         logo_drawn = 1;
+@@ -120,6 +130,7 @@ static void status_ok(void) {
+ }
+ 
+ static void status_fail(void) {
++    of_term_set_quiet(0);       /* a failed resume boot must be readable */
+     of_term_puts(" \033[91mFAIL\033[0m\n");
+ }
+ 
+@@ -451,6 +462,15 @@ void os_main(void) {
+         }
+     }
+ 
++    /* The save-state registers are safe to read now that the contract
++     * revision matches.  Swap the logo for the resume notice at once. */
++    if (of_savestate_boot_pending()) {
++        boot_resuming = 1;
++        of_term_clear();
++        of_term_puts("\033[H\033[0mResuming...");
++        of_term_set_quiet(1);
++    }
++
+     /* Physical-layer check the contract handshake can't make: controller
+      * interleave / DQ-capture mismatches and timing-marginal cores all
+      * present as scrambled memory.  Runs before the FS/app half of HAL
+@@ -635,8 +655,9 @@ void os_main(void) {
+     os_apply_instance_roots();
+ #endif
+ 
+-    /* Brief pause to show banner */
+-    of_timer_delay_ms(800);
++    /* Brief pause to show banner (not when resuming: get back to the game) */
++    if (!boot_resuming)
++        of_timer_delay_ms(800);
+     os_textguard_check("after config_load");
+ 
+     /* Load application ELF */
+@@ -764,7 +785,8 @@ void os_main(void) {
+             of_term_enable_uart_mirror();
+     }
+ 
+-    of_timer_delay_ms(300);
++    if (!boot_resuming)
++        of_timer_delay_ms(300);
+ 
+     /* Boot stage: blue logo = launching app. Save/restore cursor so
+      * the redraw (which jumps to 0,0) doesn't leave the cursor inside
+@@ -776,7 +798,8 @@ void os_main(void) {
+         boot_logo("\033[94m");  /* blue */
+         of_term_set_pos(saved_col, saved_row);
+     }
+-    of_timer_delay_ms(200);
++    if (!boot_resuming)
++        of_timer_delay_ms(200);
+ 
+     /* Boot is done — every init/probe sector op above ran fail-fast.
+      * From here on the target may treat transport timeouts as transient
+@@ -794,6 +817,7 @@ void os_main(void) {
+     of_video_console_reveal();
+     for (int i = 0; i < 50; i++) of_timer_delay_ms(100);
+ #endif
++    of_term_set_quiet(0);       /* the app (and any trap banner) may print */
+     elf_exec(&app, app_argc, app_argv);
+ 
+     /* Should never reach here */
 diff --git a/src/firmware/os/kernel/services_table.c b/src/firmware/os/kernel/services_table.c
 index 5d084ef..5e4c454 100644
 --- a/src/firmware/os/kernel/services_table.c
@@ -329,10 +443,10 @@ index 5d084ef..5e4c454 100644
  void services_table_set_smp_bank(const void *base, uint32_t size) {
 diff --git a/src/firmware/os/targets/mister/savestate.c b/src/firmware/os/targets/mister/savestate.c
 new file mode 100644
-index 0000000..b0b20e6
+index 0000000..9ef970b
 --- /dev/null
 +++ b/src/firmware/os/targets/mister/savestate.c
-@@ -0,0 +1,16 @@
+@@ -0,0 +1,17 @@
 +//------------------------------------------------------------------------------
 +// SPDX-License-Identifier: Apache-2.0
 +// SPDX-FileType: SOURCE
@@ -349,6 +463,55 @@ index 0000000..b0b20e6
 +int  of_savestate_load(void *buf, uint32_t cap) { (void)buf; (void)cap; return OF_ERR_NOT_SUPPORTED; }
 +void of_savestate_finish(int ok) { (void)ok; }
 +void of_savestate_tick(void) {}
++int  of_savestate_boot_pending(void) { return 0; }
+diff --git a/src/firmware/os/targets/mister/terminal.c b/src/firmware/os/targets/mister/terminal.c
+index 9a08e5c..6164db1 100644
+--- a/src/firmware/os/targets/mister/terminal.c
++++ b/src/firmware/os/targets/mister/terminal.c
+@@ -8,3 +8,5 @@
+  * same scanout/mixer RTL) — include the canonical implementation like the
+  * sim target does, so fixes propagate instead of silently diverging. */
+ #include "../pocket/terminal.c"
++
++void of_term_set_quiet(int on) { (void)on; }
+diff --git a/src/firmware/os/targets/pocket/boot/boot.c b/src/firmware/os/targets/pocket/boot/boot.c
+index cae8301..614629c 100644
+--- a/src/firmware/os/targets/pocket/boot/boot.c
++++ b/src/firmware/os/targets/pocket/boot/boot.c
+@@ -267,6 +267,15 @@ static void boot_fb_puts0(int row, const char *s) {
+     boot_fb_puts(0, row, s);
+ }
+ 
++/* The host pushed a save state before releasing us (wake from sleep, or a
++ * Memory opened from the Pocket menu): say "Resuming..." instead of the
++ * cold-boot text.  This ROM ships inside its own bitstream, so the register
++ * exists whenever the feature bit is set. */
++__attribute__((section(".text.boot"), noinline))
++static int boot_resume_pending(void) {
++    return (HW_FEATURES & (1u << 31)) && (SS_STATUS & SS_STATUS_LOAD_REQ);
++}
++
+ __attribute__((section(".text.boot"), noinline))
+ static void boot_warmup_note(const char *label, int hexcol, unsigned n) {
+     boot_fb_puts0(1, label);
+@@ -1032,7 +1041,7 @@ int main(void) {
+         for (int i = 0; i < (320 * 240) / 4; i++) p[i] = 0;
+     }
+ 
+-    boot_fb_puts0(0, "Booting...");
++    boot_fb_puts0(0, boot_resume_pending() ? "Resuming..." : "Booting...");
+ 
+     /* ── PHDP Discovery ─────────────────────────────────────────── */
+     int debug_mode = 0;
+@@ -1106,7 +1115,7 @@ int main(void) {
+ load_from_sd:
+     /* ── Standard SD card boot ──────────────────────────────────── */
+     boot_fb_clear_row(0);
+-    boot_fb_puts0(0, "Loading...");
++    boot_fb_puts0(0, boot_resume_pending() ? "Resuming..." : "Loading...");
+ 
+     pd_dbg_stage = 3;
+ 
 diff --git a/src/firmware/os/targets/pocket/file.c b/src/firmware/os/targets/pocket/file.c
 index 97b7f99..9f73aa6 100644
 --- a/src/firmware/os/targets/pocket/file.c
@@ -398,10 +561,10 @@ index 4be128f..1dcdf7b 100644
          cram0_release_to_bridge();
 diff --git a/src/firmware/os/targets/pocket/savestate.c b/src/firmware/os/targets/pocket/savestate.c
 new file mode 100644
-index 0000000..b262687
+index 0000000..e50477b
 --- /dev/null
 +++ b/src/firmware/os/targets/pocket/savestate.c
-@@ -0,0 +1,348 @@
+@@ -0,0 +1,352 @@
 +//------------------------------------------------------------------------------
 +// SPDX-License-Identifier: Apache-2.0
 +// SPDX-FileType: SOURCE
@@ -548,6 +711,10 @@ index 0000000..b262687
 +
 +static int ss_cram0_parkable(void) {
 +    return !of_save_cpu_held() && of_file_cram0_quiet() && !of_file_async_busy();
++}
++
++int of_savestate_boot_pending(void) {
++    return ss_present() && (SS_STATUS & SS_STATUS_LOAD_REQ) != 0;
 +}
 +
 +void of_savestate_tick(void) {
@@ -750,12 +917,32 @@ index 0000000..b262687
 +    }
 +    ss_irq_restore(irq);
 +}
+diff --git a/src/firmware/os/targets/pocket/terminal.c b/src/firmware/os/targets/pocket/terminal.c
+index 986117f..7373e25 100644
+--- a/src/firmware/os/targets/pocket/terminal.c
++++ b/src/firmware/os/targets/pocket/terminal.c
+@@ -563,7 +563,15 @@ void term_emit_char(char c) {
+     }
+ }
+ 
++static int term_quiet;
++
++void of_term_set_quiet(int on) {
++    term_quiet = on;
++}
++
+ void of_term_putchar(char c) {
++    if (term_quiet)
++        return;
+     switch (esc_state) {
+     case ESC_NONE:
+         if (c == '\033') {
 diff --git a/src/firmware/os/targets/sim/savestate.c b/src/firmware/os/targets/sim/savestate.c
 new file mode 100644
-index 0000000..b0b20e6
+index 0000000..9ef970b
 --- /dev/null
 +++ b/src/firmware/os/targets/sim/savestate.c
-@@ -0,0 +1,16 @@
+@@ -0,0 +1,17 @@
 +//------------------------------------------------------------------------------
 +// SPDX-License-Identifier: Apache-2.0
 +// SPDX-FileType: SOURCE
@@ -772,6 +959,17 @@ index 0000000..b0b20e6
 +int  of_savestate_load(void *buf, uint32_t cap) { (void)buf; (void)cap; return OF_ERR_NOT_SUPPORTED; }
 +void of_savestate_finish(int ok) { (void)ok; }
 +void of_savestate_tick(void) {}
++int  of_savestate_boot_pending(void) { return 0; }
+diff --git a/src/firmware/os/targets/sim/terminal.c b/src/firmware/os/targets/sim/terminal.c
+index 895e5a0..c9c43fe 100644
+--- a/src/firmware/os/targets/sim/terminal.c
++++ b/src/firmware/os/targets/sim/terminal.c
+@@ -6,3 +6,5 @@
+ 
+ /* sim target HAL shim — see targets/sim/target_platform.h */
+ #include "../pocket/terminal.c"
++
++void of_term_set_quiet(int on) { (void)on; }
 diff --git a/src/fpga/common/axi_periph_slave.v b/src/fpga/common/axi_periph_slave.v
 index ff24cc2..9eff412 100644
 --- a/src/fpga/common/axi_periph_slave.v
@@ -1317,19 +1515,19 @@ index 0000000..3576e56
 +
 +`default_nettype wire
 diff --git a/src/fpga/targets/pocket/seeds/os20.seed b/src/fpga/targets/pocket/seeds/os20.seed
-index bb95160..45a4fb7 100644
+index bb95160..00750ed 100644
 --- a/src/fpga/targets/pocket/seeds/os20.seed
 +++ b/src/fpga/targets/pocket/seeds/os20.seed
 @@ -1 +1 @@
 -33
-+8
++3
 diff --git a/src/fpga/targets/pocket/seeds/os20.seed.src b/src/fpga/targets/pocket/seeds/os20.seed.src
-index 20ebfc1..a9c37c5 100644
+index 20ebfc1..567fb97 100644
 --- a/src/fpga/targets/pocket/seeds/os20.seed.src
 +++ b/src/fpga/targets/pocket/seeds/os20.seed.src
 @@ -1 +1 @@
 -f45446600f5733a77cfec79e96f99b91
-+d40a5d1611e9d4491b2277b77b1a7234
++21f8efe60d54f99a6594c0c3c401fa96
 diff --git a/src/fpga/targets/pocket/variants/os20.mk b/src/fpga/targets/pocket/variants/os20.mk
 index a7323e9..c414557 100644
 --- a/src/fpga/targets/pocket/variants/os20.mk
