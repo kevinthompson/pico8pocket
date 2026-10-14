@@ -65,10 +65,10 @@ index 0000000..c5b70b3
 +#endif /* OF_HEAP_H */
 diff --git a/src/firmware/api/of_savestate.h b/src/firmware/api/of_savestate.h
 new file mode 100644
-index 0000000..58e3c83
+index 0000000..1d8b526
 --- /dev/null
 +++ b/src/firmware/api/of_savestate.h
-@@ -0,0 +1,133 @@
+@@ -0,0 +1,148 @@
 +//------------------------------------------------------------------------------
 +// SPDX-License-Identifier: Apache-2.0
 +// SPDX-FileType: SOURCE
@@ -108,10 +108,25 @@ index 0000000..58e3c83
 + * by the OS (saves at once when save states are not enabled; loads after
 + * 30 s).
 + *
-+ * The Pocket reads back the whole declared size on every save.  To keep
-+ * saves short, declare the real size just for the hand-over:
-+ * of_savestate_enable(n) before of_savestate_save(buf, n), then the maximum
-+ * again afterwards.
++ * The OS hands the Pocket only the state just saved (header + payload), not
++ * the maximum declared with of_savestate_enable(), so saves stay short and
++ * carry no stale bytes.  (Apps that declare the real size around each save,
++ * as pico8pocket and Butterscotch did before this, keep working.)
++ *
++ * Lessons from the first two ports (pico8pocket, Butterscotch/Undertale):
++ *  - The Pocket files Memories and the sleep state under whatever is loaded
++ *    in data slot 0.  A core that launches through a launcher/instance file
++ *    in slot 0 gets every game's Memories in one list, so put your own game
++ *    identity in the state, refuse a state from another game, and tell the
++ *    player why: the Pocket itself only says "Load failed".
++ *  - Refusing a save during sleep does not keep the Pocket awake: it powers
++ *    off anyway, and the next wake loads the previous sleep state.  Refuse
++ *    only what cannot be restored, and say so on screen.
++ *  - Set "sleep_supported" in core.json only when the runtime you ship has
++ *    this service (OF_HW_SAVESTATE); otherwise sleep turns into a cold boot.
++ *  - A save or load is refused with OF_ERR_BUSY if the file layer does not
++ *    go idle within two seconds (a streaming callback that keeps submitting
++ *    reads), rather than waiting forever.
 + *
 + * The core's core.json must also set "sleep_supported": true for the Pocket
 + * to offer sleep.
@@ -818,10 +833,10 @@ index 4be128f..1dcdf7b 100644
          cram0_release_to_bridge();
 diff --git a/src/firmware/os/targets/pocket/savestate.c b/src/firmware/os/targets/pocket/savestate.c
 new file mode 100644
-index 0000000..d85fd93
+index 0000000..f811d50
 --- /dev/null
 +++ b/src/firmware/os/targets/pocket/savestate.c
-@@ -0,0 +1,411 @@
+@@ -0,0 +1,425 @@
 +//------------------------------------------------------------------------------
 +// SPDX-License-Identifier: Apache-2.0
 +// SPDX-FileType: SOURCE
@@ -869,6 +884,7 @@ index 0000000..d85fd93
 +#define SS_HOST_READ_TIMEOUT_MS  10000u
 +#define SS_LOAD_PICKUP_TIMEOUT_MS 30000u
 +#define SS_DRAIN_TIMEOUT_MS      2000u
++#define SS_QUIESCE_TIMEOUT_MS    2000u
 +
 +enum { SS_NONE = 0, SS_SAVE = 1, SS_LOAD = 2 };
 +
@@ -995,10 +1011,18 @@ index 0000000..d85fd93
 +}
 +
 +/* Wait for any in-flight async file transfer (and its deferred bounce copy)
-+ * so nothing flips CRAM0 to the CPU behind our back. */
-+static void ss_quiesce_files(void) {
-+    while (of_file_async_busy() || !of_file_cram0_quiet())
++ * so nothing flips CRAM0 to the CPU behind our back.  Bounded: polling runs
++ * the app's completion callback, and a streaming app (music) may submit its
++ * next read from there, so the file layer need never go idle.  Returns 0 if
++ * it is still busy at the deadline; the caller then refuses the request. */
++static int ss_quiesce_files(void) {
++    uint32_t t0 = of_timer_get_ms();
++    while (of_file_async_busy() || !of_file_cram0_quiet()) {
++        if ((uint32_t)(of_timer_get_ms() - t0) >= SS_QUIESCE_TIMEOUT_MS)
++            return 0;
 +        of_file_async_poll();
++    }
++    return 1;
 +}
 +
 +static int ss_cram0_parkable(void) {
@@ -1110,7 +1134,10 @@ index 0000000..d85fd93
 +        return OF_ERR_INVALID_PARAM;
 +    }
 +
-+    ss_quiesce_files();
++    if (!ss_quiesce_files()) {
++        of_savestate_finish(0);
++        return OF_ERR_BUSY;
++    }
 +
 +    ss_header_t h = {
 +        .magic = SS_MAGIC,
@@ -1124,18 +1151,16 @@ index 0000000..d85fd93
 +    fence();
 +    ss_write_words(0, (const uint8_t *)&h, sizeof(h));
 +    ss_write_words(SS_HEADER_BYTES / 4u, (const uint8_t *)blob, len);
-+    /* The host reads SS_SIZE bytes whatever the payload length: zero the
-+     * rest so a state file never carries an earlier state's tail. */
-+    {
-+        uint32_t used = (SS_HEADER_BYTES + len + 3u) / 4u;
-+        uint32_t end = SS_SIZE / 4u;
-+        if (end > SS_WINDOW_SIZE / 4u)
-+            end = SS_WINDOW_SIZE / 4u;
-+        for (uint32_t w = used; w < end; w++)
-+            SS_BLOB[w] = 0;
-+    }
 +    fence();
 +    of_save_end_cpu();
++
++    /* The host reads exactly SS_SIZE bytes, whatever the payload length.
++     * Declare just this state (header + payload, word-rounded; ss_write_words
++     * zero-pads the last word) for the hand-over, so the Pocket reads and
++     * stores no stale tail and no more than it needs, then put back what the
++     * app declared for the next request.  Both ports did this by hand first. */
++    uint32_t declared_size = SS_SIZE;
++    SS_SIZE = SS_HEADER_BYTES + ((len + 3u) & ~3u);
 +
 +    /* The host reads the blob only after it sees "ok", and only while the
 +     * bridge owns CRAM0.  Hand it over and keep it there until all SS_SIZE
@@ -1159,6 +1184,7 @@ index 0000000..d85fd93
 +    /* "Blob ready" was already signalled once, before the host could read.
 +     * Report an incomplete read to the app without issuing a second toggle. */
 +    int result = ss_read_stable(&SS_RD_WORDS) >= want_words ? 0 : OF_ERR_TIMEOUT;
++    SS_SIZE = declared_size;
 +
 +    if (prev_mode && of_save_cpu_held()) {
 +        CRAM0_MODE = CRAM0_MODE_CPU;
@@ -1177,7 +1203,10 @@ index 0000000..d85fd93
 +        return OF_ERR_INVALID_PARAM;
 +    }
 +
-+    ss_quiesce_files();
++    if (!ss_quiesce_files()) {
++        of_savestate_finish(0);
++        return OF_ERR_BUSY;
++    }
 +
 +    /* Let any blob words still queued in the bridge write FIFO land. */
 +    CRAM0_MODE = CRAM0_MODE_BRIDGE;
@@ -1844,12 +1873,12 @@ index bb95160..48082f7 100644
 -33
 +12
 diff --git a/src/fpga/targets/pocket/seeds/os20.seed.src b/src/fpga/targets/pocket/seeds/os20.seed.src
-index 20ebfc1..29ee675 100644
+index 20ebfc1..922f53a 100644
 --- a/src/fpga/targets/pocket/seeds/os20.seed.src
 +++ b/src/fpga/targets/pocket/seeds/os20.seed.src
 @@ -1 +1 @@
 -f45446600f5733a77cfec79e96f99b91
-+c3d5e6f25119fae8e04d18cf4e9d2937
++8923930bafd8a135ea0431526fac5985
 diff --git a/src/fpga/targets/pocket/seeds/os25.seed b/src/fpga/targets/pocket/seeds/os25.seed
 index 209e3ef..d00491f 100644
 --- a/src/fpga/targets/pocket/seeds/os25.seed
@@ -1858,12 +1887,12 @@ index 209e3ef..d00491f 100644
 -20
 +1
 diff --git a/src/fpga/targets/pocket/seeds/os25.seed.src b/src/fpga/targets/pocket/seeds/os25.seed.src
-index 509ac88..b520578 100644
+index 509ac88..e190e44 100644
 --- a/src/fpga/targets/pocket/seeds/os25.seed.src
 +++ b/src/fpga/targets/pocket/seeds/os25.seed.src
 @@ -1 +1 @@
 -ea139d77fb2c43de094893a08965400f
-+6942beb93e4b0206d58c81f8c32ef03c
++f4f63c02694a8491cbedb440c7a77821
 diff --git a/src/fpga/targets/pocket/variants/os20.mk b/src/fpga/targets/pocket/variants/os20.mk
 index a7323e9..c414557 100644
 --- a/src/fpga/targets/pocket/variants/os20.mk
@@ -2166,7 +2195,7 @@ index 0000000..5f1a603
 +endmodule
 diff --git a/src/fpga/test/tb_savestate_main.cpp b/src/fpga/test/tb_savestate_main.cpp
 new file mode 100644
-index 0000000..ce7b0b1
+index 0000000..ef583f6
 --- /dev/null
 +++ b/src/fpga/test/tb_savestate_main.cpp
 @@ -0,0 +1,289 @@
@@ -2393,10 +2422,10 @@ index 0000000..ce7b0b1
 +
 +/* A fresh FPGA model per wake is important: toggling por_n alone does not
 + * recreate core_bridge_cmd's power-up initial state. Exercise the real
-+ * A4-in-reset -> app registration -> A0 protocol twice after wake. The
++ * A4-in-reset -> app registration -> A0 protocol over three wakes. The
 + * CPU serializer and host SD persistence are external to this RTL model. */
-+static void test_two_sleep_wake_cycles() {
-+    std::printf("test_two_sleep_wake_cycles:\n");
++static void test_sleep_wake_cycles() {
++    std::printf("test_sleep_wake_cycles:\n");
 +    uint32_t previous_words = 3;
 +    for (unsigned cycle = 0; cycle < 3; ++cycle) {
 +        delete tb;
@@ -2454,7 +2483,7 @@ index 0000000..ce7b0b1
 +    test_load();
 +    test_wake_before_app();
 +    test_warm_reset();
-+    test_two_sleep_wake_cycles();
++    test_sleep_wake_cycles();
 +    std::printf("\n=== Results: %d passed, %d failed ===\n", passes, fails);
 +    delete tb;
 +    return fails == 0 ? 0 : 1;
@@ -2782,12 +2811,76 @@ index 0000000..0b2ab37
 +
 +if __name__ == '__main__':
 +    unittest.main()
+diff --git a/tools/tests/test_savestate_quiesce.py b/tools/tests/test_savestate_quiesce.py
+new file mode 100644
+index 0000000..de3d6b3
+--- /dev/null
++++ b/tools/tests/test_savestate_quiesce.py
+@@ -0,0 +1,58 @@
++#!/usr/bin/env python3
++"""The Pocket save-state quiesce wait gives up instead of spinning forever.
++
++A streaming app's completion callback can submit its next read from inside
++of_file_async_poll(), so the file layer may never go idle. Extract the real
++ss_quiesce_files() and drive it with a file layer that stays busy, one that
++goes idle, and a timer that wraps.
++"""
++from pathlib import Path
++import subprocess
++import tempfile
++
++from test_async_save_abort import function
++
++ROOT = Path(__file__).resolve().parents[2]
++SOURCE = ROOT / "src/firmware/os/targets/pocket/savestate.c"
++
++
++def main():
++    source = SOURCE.read_text()
++    timeout = [l for l in source.splitlines() if "#define SS_QUIESCE_TIMEOUT_MS" in l][0]
++    body = r'''
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++''' + timeout + r'''
++static uint32_t clock_ms, polls, idle_after;
++static uint32_t of_timer_get_ms(void) { return clock_ms++; }
++static int of_file_async_busy(void) { return polls < idle_after; }
++static int of_file_cram0_quiet(void) { return 1; }
++static int of_file_async_poll(void) { ++polls; return 0; }
++''' + function(source, "ss_quiesce_files") + r'''
++static int run(uint32_t start, uint32_t busy_polls) {
++    clock_ms = start; polls = 0; idle_after = busy_polls;
++    return ss_quiesce_files();
++}
++int main(void) {
++    assert(run(0, 0) == 1 && polls == 0);               /* already idle */
++    assert(run(0, 100) == 1 && polls == 100);           /* goes idle in time */
++    assert(run(0, UINT32_MAX) == 0);                    /* never idle: gives up */
++    assert(polls < SS_QUIESCE_TIMEOUT_MS + 2u);
++    assert(run(UINT32_MAX - 10u, UINT32_MAX) == 0);      /* across timer wrap */
++    assert(polls < SS_QUIESCE_TIMEOUT_MS + 2u);
++    puts("PASS: quiesce waits for idle and gives up at its deadline");
++    return 0;
++}
++'''
++    with tempfile.TemporaryDirectory() as temp:
++        c = Path(temp) / "test.c"
++        exe = Path(temp) / "test"
++        c.write_text(body)
++        subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
++                        "-fsanitize=address,undefined", str(c), "-o", str(exe)], check=True)
++        subprocess.run([str(exe)], check=True)
++
++
++if __name__ == "__main__":
++    main()
 diff --git a/tools/tests/test_savestate_save_timeout.py b/tools/tests/test_savestate_save_timeout.py
 new file mode 100644
-index 0000000..d2efb19
+index 0000000..f1aabea
 --- /dev/null
 +++ b/tools/tests/test_savestate_save_timeout.py
-@@ -0,0 +1,175 @@
+@@ -0,0 +1,189 @@
 +#!/usr/bin/env python3
 +"""Run the actual Pocket save function with host timer/MMIO simulation."""
 +from pathlib import Path
@@ -2831,7 +2924,8 @@ index 0000000..d2efb19
 +static int completions, hold_count, initial_hold;
 +static int ss_present(void) { return 1; }
 +static void fence(void) {}
-+static void ss_quiesce_files(void) {}
++static int quiesce_ok = 1, refusals;
++static int ss_quiesce_files(void) { return quiesce_ok; }
 +static uint32_t ss_irq_save(void) { uint32_t p = mie; mie = 0; return p; }
 +static void ss_irq_restore(uint32_t p) { mie = p; }
 +static void of_save_begin_cpu(void) { ++hold_count; CRAM0_MODE = CRAM0_MODE_CPU; }
@@ -2841,7 +2935,10 @@ index 0000000..d2efb19
 +}
 +static int of_save_cpu_held(void) { return hold_count != 0; }
 +static void ss_complete(int kind, int ok) {
++    if (!ok) { assert(kind == SS_SAVE && !quiesce_ok); ++refusals; return; }
 +    assert(kind == SS_SAVE && ok == 1 && mie == 0);
++    /* The host is asked for this state only: header + padded payload. */
++    assert(SS_SIZE == SS_HEADER_BYTES + 8u);
 +    assert(CRAM0_MODE == CRAM0_MODE_BRIDGE);
 +    assert(hold_count == initial_hold);
 +    assert(window[0] == SS_MAGIC && window[3] == 7);
@@ -2927,11 +3024,11 @@ index 0000000..d2efb19
 +    assert(CRAM0_MODE == (held ? CRAM0_MODE_CPU : CRAM0_MODE_BRIDGE));
 +    assert(memcmp((uint8_t *)window + SS_HEADER_BYTES, payload, sizeof(payload)) == 0);
 +    assert(window[4] == crc32_buf(payload, sizeof(payload)));
-+    /* The host reads SS_SIZE bytes: everything after the payload up to
-+     * there is zeroed, and nothing beyond it is touched. */
++    /* The last payload word is zero-padded; nothing after the state is
++     * touched, and the app's declared size is back for the next request. */
 +    assert(((uint8_t *)window)[SS_HEADER_BYTES + sizeof(payload)] == 0);
-+    for (uint32_t w = 10; w < declared_size / 4u; w++) assert(window[w] == 0);
-+    for (uint32_t w = declared_size / 4u; w < 32; w++) assert(window[w] == 0xccccccccu);
++    for (uint32_t w = 10; w < 32; w++) assert(window[w] == 0xccccccccu);
++    assert(SS_SIZE == declared_size);
 +    if (expected == OF_ERR_TIMEOUT) assert(elapsed >= SS_HOST_READ_TIMEOUT_MS);
 +    else assert(elapsed < SS_HOST_READ_TIMEOUT_MS);
 +    /* An app reporting the returned error must not emit another toggle. */
@@ -2946,10 +3043,20 @@ index 0000000..d2efb19
 +    run(UINT32_MAX - 2500u, 3000, 10, 0, 1); /* success across timer wrap */
 +    run(UINT32_MAX - 2500u, 3000, 0, OF_ERR_TIMEOUT, 1);
 +    run(UINT32_MAX - 2500u, 3000, 9, OF_ERR_TIMEOUT, 0);
-+    declared_size = 56;                 /* a declared maximum above the payload */
-+    run(0, 3000, 14, 0, 0);             /* the zeroed tail is part of the read */
-+    run(0, 3000, 13, OF_ERR_TIMEOUT, 0);
++    declared_size = 56;                 /* a declared maximum above the payload: */
++    run(0, 3000, 10, 0, 0);             /* only the state itself is read */
++    run(0, 3000, 9, OF_ERR_TIMEOUT, 0);
 +    declared_size = 40;
++    {   /* File layer never idle: refused, CRAM0 untouched, no hand-over. */
++        const uint8_t payload[7] = {1,2,3,4,5,6,7};
++        memset(window, 0xcc, sizeof(window));
++        quiesce_ok = 0; ss_pending = SS_SAVE; ss_max_payload = 7; refusals = 0;
++        SS_SIZE = declared_size; completions = 0; hold_count = 0;
++        assert(of_savestate_save(payload, sizeof(payload)) == OF_ERR_BUSY);
++        assert(refusals == 1 && completions == 0 && ss_pending == SS_NONE);
++        assert(window[0] == 0xccccccccu && SS_SIZE == declared_size);
++        quiesce_ok = 1;
++    }
 +    puts("PASS: actual save complete/partial/zero, timer wrap, ownership, one toggle");
 +}
 +'''
