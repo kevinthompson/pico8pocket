@@ -323,9 +323,9 @@ static void draw_bringup_frame(uint8_t *fb, const p8p_cart_info_t *cart,
 
 /* A short line drawn over the game after a native load the Pocket can only
  * report as "Load failed" (for now: a Memory taken in another cart). */
-#define STATE_NOTICE_FRAMES 180
+#define STATE_NOTICE_US 3000000u
 static const char *g_state_notice;
-static int g_state_notice_frames;
+static uint32_t g_state_notice_until_us;
 
 static void draw_state_notice(uint8_t *fb) {
     fill_rect(fb, 0, 119, 128, 9, 0);
@@ -385,7 +385,7 @@ static int service_savestate(p8p_runtime_t *runtime, int running,
     if (result != 0) {
         printf("pico8pocket: native state load failed (%d)\n", result);
         g_state_notice = p8p_state_load_notice(result);
-        g_state_notice_frames = g_state_notice ? STATE_NOTICE_FRAMES : 0;
+        g_state_notice_until_us = 0;
     }
     p8p_platform_savestate_finish(result == 0);
     return result == 0;
@@ -737,7 +737,15 @@ int main(int argc, char **argv) {
                          (unsigned)render_divisor, average_instructions,
                          average_draw_runtime_us, &api_profile);
         }
-        if (g_state_notice_frames > 0 && !menu_open) {
+        /* The notice's time starts when it is first shown, so an open
+         * menu doesn't use it up. */
+        if (g_state_notice && !menu_open && !g_state_notice_until_us)
+            g_state_notice_until_us =
+                (p8p_platform_time_us() + STATE_NOTICE_US) | 1u;
+        if (g_state_notice && g_state_notice_until_us &&
+            (int32_t)(g_state_notice_until_us - p8p_platform_time_us()) <= 0)
+            g_state_notice = NULL;
+        if (g_state_notice && !menu_open) {
             if (present_palette) {
                 for (int pixel = 0; pixel < P8P_SCREEN_WIDTH * P8P_SCREEN_HEIGHT;
                      ++pixel)
@@ -751,7 +759,6 @@ int main(int argc, char **argv) {
             present_palette = NULL;
             present_required = 1;
             draw_state_notice(framebuffer);
-            --g_state_notice_frames;
         }
         if (running) {
             uint32_t audio_start_us = p8p_platform_time_us();

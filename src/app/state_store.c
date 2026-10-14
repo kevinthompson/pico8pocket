@@ -398,8 +398,6 @@ int p8p_state_deserialize(const p8p_cart_hash_t *cart_hash,
         return -1;
     if (read_u32(blob) != BLOB_MAGIC || read_u32(blob + 4) != BLOB_VERSION)
         return -2;
-    if (memcmp(blob + 24, cart_hash->bytes, sizeof(cart_hash->bytes)) != 0)
-        return P8P_STATE_OTHER_CART;
     raw_size = read_u32(blob + 8);
     compressed_size = read_u32(blob + 12);
     if (compressed_size > size - BLOB_HEADER_SIZE || !raw_size ||
@@ -413,6 +411,10 @@ int p8p_state_deserialize(const p8p_cart_hash_t *cart_hash,
                       compressed_size) != MZ_OK || output_size != raw_size ||
         mz_crc32(0, raw, raw_size) != read_u32(blob + 16))
         result = -6;
+    /* Only an intact state is reported as another cart's. */
+    else if (memcmp(blob + 24, cart_hash->bytes,
+                    sizeof(cart_hash->bytes)) != 0)
+        result = P8P_STATE_OTHER_CART;
     else
         result = p8p_runtime_load_state(runtime, raw, raw_size);
     free(raw);

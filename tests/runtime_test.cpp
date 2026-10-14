@@ -596,6 +596,8 @@ int main(void) {
             blob[blob_size - 1] ^= 0x5au;
             CHECK(p8p_state_deserialize(&cart_hash, runtime, blob,
                                         blob_size) != 0);
+            CHECK(p8p_state_deserialize(&other_hash, runtime, blob,
+                                        blob_size) != P8P_STATE_OTHER_CART);
             CHECK(p8p_state_load_notice(-6) == NULL);
             CHECK(p8p_state_load_notice(0) == NULL);
             blob[blob_size - 1] ^= 0x5au;
