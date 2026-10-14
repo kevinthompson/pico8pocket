@@ -64,6 +64,12 @@ int p8p_state_serialize(const p8p_cart_hash_t *cart_hash,
 int p8p_state_deserialize(const p8p_cart_hash_t *cart_hash,
                           p8p_runtime_t *runtime, const uint8_t *blob,
                           uint32_t size);
+/* p8p_state_deserialize's result for a well-formed state taken from a
+ * different cart (the Pocket lists every cart's Memories together). */
+#define P8P_STATE_OTHER_CART (-3)
+/* What to tell the player about a failed native load, or NULL when the
+ * Pocket's own "Load failed" says enough. */
+const char *p8p_state_load_notice(int result);
 
 int p8p_store_read_config(void *data, size_t size);
 int p8p_store_write_config(const void *data, size_t size);

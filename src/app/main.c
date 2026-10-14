@@ -321,6 +321,17 @@ static void draw_bringup_frame(uint8_t *fb, const p8p_cart_info_t *cart,
     fill_rect(fb, cursor_x - 1, cursor_y - 1, 3, 3, border);
 }
 
+/* A short line drawn over the game after a native load the Pocket can only
+ * report as "Load failed" (for now: a Memory taken in another cart). */
+#define STATE_NOTICE_FRAMES 180
+static const char *g_state_notice;
+static int g_state_notice_frames;
+
+static void draw_state_notice(uint8_t *fb) {
+    fill_rect(fb, 0, 119, 128, 9, 0);
+    draw_error_text(fb, 2, 121, g_state_notice, 7);
+}
+
 /* Answer the Pocket's own save states (Memories, sleep/wake), outside the
  * in-game menu's slots.  Returns 1 when a state was restored. */
 static int service_savestate(p8p_runtime_t *runtime, int running,
@@ -371,8 +382,11 @@ static int service_savestate(p8p_runtime_t *runtime, int running,
     result = p8p_state_deserialize(cart_hash, runtime, blob,
                                    (uint32_t)length);
     free(blob);
-    if (result != 0)
+    if (result != 0) {
         printf("pico8pocket: native state load failed (%d)\n", result);
+        g_state_notice = p8p_state_load_notice(result);
+        g_state_notice_frames = g_state_notice ? STATE_NOTICE_FRAMES : 0;
+    }
     p8p_platform_savestate_finish(result == 0);
     return result == 0;
 }
@@ -722,6 +736,22 @@ int main(int argc, char **argv) {
                          average_audio_us, average_present_us,
                          (unsigned)render_divisor, average_instructions,
                          average_draw_runtime_us, &api_profile);
+        }
+        if (g_state_notice_frames > 0 && !menu_open) {
+            if (present_palette) {
+                for (int pixel = 0; pixel < P8P_SCREEN_WIDTH * P8P_SCREEN_HEIGHT;
+                     ++pixel)
+                    framebuffer[pixel] =
+                        present_palette[present_framebuffer[pixel] & 15];
+            } else if (present_framebuffer != framebuffer) {
+                memcpy(framebuffer, present_framebuffer,
+                       P8P_SCREEN_WIDTH * P8P_SCREEN_HEIGHT);
+            }
+            present_framebuffer = framebuffer;
+            present_palette = NULL;
+            present_required = 1;
+            draw_state_notice(framebuffer);
+            --g_state_notice_frames;
         }
         if (running) {
             uint32_t audio_start_us = p8p_platform_time_us();
