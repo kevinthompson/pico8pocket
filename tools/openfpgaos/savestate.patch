@@ -1276,6 +1276,22 @@ index 0000000..9ef970b
 +void of_savestate_finish(int ok) { (void)ok; }
 +void of_savestate_tick(void) {}
 +int  of_savestate_boot_pending(void) { return 0; }
+diff --git a/src/fpga/common/audio_mixer.v b/src/fpga/common/audio_mixer.v
+index 51619da..53b7cd6 100644
+--- a/src/fpga/common/audio_mixer.v
++++ b/src/fpga/common/audio_mixer.v
+@@ -744,6 +744,11 @@ always @(posedge clk) begin
+ 
+     // ---- Idle: wait for FIFO to drop below half, then start new sample ----
+     S_IDLE: begin
++        // Position readback must follow a queued CPU seek/reset at the same
++        // commit as the voice table. A short restored stream can hold below
++        // STREAM_FLOOR indefinitely, so playback cannot refresh this shadow.
++        if (cpu_fsm_q_drain && !cpu_fsm_commit_is_vol)
++            pos_latch[cpu_fsm_commit_voice] <= cpu_fsm_commit_payload;
+         if (!cpu_fsm_q_empty || cpu_fsm_wr) begin
+             state <= S_IDLE;
+         end else if (mixer_enable && fifo_level[9:8] != 2'b11) begin
 diff --git a/src/fpga/common/axi_periph_slave.v b/src/fpga/common/axi_periph_slave.v
 index ff24cc2..9eff412 100644
 --- a/src/fpga/common/axi_periph_slave.v
@@ -1821,33 +1837,33 @@ index 0000000..3576e56
 +
 +`default_nettype wire
 diff --git a/src/fpga/targets/pocket/seeds/os20.seed b/src/fpga/targets/pocket/seeds/os20.seed
-index bb95160..00750ed 100644
+index bb95160..48082f7 100644
 --- a/src/fpga/targets/pocket/seeds/os20.seed
 +++ b/src/fpga/targets/pocket/seeds/os20.seed
 @@ -1 +1 @@
 -33
-+3
++12
 diff --git a/src/fpga/targets/pocket/seeds/os20.seed.src b/src/fpga/targets/pocket/seeds/os20.seed.src
-index 20ebfc1..cddc8e5 100644
+index 20ebfc1..29ee675 100644
 --- a/src/fpga/targets/pocket/seeds/os20.seed.src
 +++ b/src/fpga/targets/pocket/seeds/os20.seed.src
 @@ -1 +1 @@
 -f45446600f5733a77cfec79e96f99b91
-+5c028ca047040b6fd0db1b3da1ed9004
++c3d5e6f25119fae8e04d18cf4e9d2937
 diff --git a/src/fpga/targets/pocket/seeds/os25.seed b/src/fpga/targets/pocket/seeds/os25.seed
-index 209e3ef..45a4fb7 100644
+index 209e3ef..d00491f 100644
 --- a/src/fpga/targets/pocket/seeds/os25.seed
 +++ b/src/fpga/targets/pocket/seeds/os25.seed
 @@ -1 +1 @@
 -20
-+8
++1
 diff --git a/src/fpga/targets/pocket/seeds/os25.seed.src b/src/fpga/targets/pocket/seeds/os25.seed.src
-index 509ac88..bead4ef 100644
+index 509ac88..b520578 100644
 --- a/src/fpga/targets/pocket/seeds/os25.seed.src
 +++ b/src/fpga/targets/pocket/seeds/os25.seed.src
 @@ -1 +1 @@
 -ea139d77fb2c43de094893a08965400f
-+b4b22de7dab8dc054a861c8fe8450cee
++6942beb93e4b0206d58c81f8c32ef03c
 diff --git a/src/fpga/targets/pocket/variants/os20.mk b/src/fpga/targets/pocket/variants/os20.mk
 index a7323e9..c414557 100644
 --- a/src/fpga/targets/pocket/variants/os20.mk
@@ -1860,7 +1876,7 @@ index a7323e9..c414557 100644
 +DEFS := INCLUDE_ANALOGIZER INCLUDE_HW_MIXER INCLUDE_TRANSLUC INCLUDE_SAVESTATE \
          INCLUDE_PALETTE INCLUDE_4PLAYER INCLUDE_CLK90
 diff --git a/src/fpga/targets/pocket/variants/os25.mk b/src/fpga/targets/pocket/variants/os25.mk
-index a1e7864..7288ad9 100644
+index a1e7864..9ce7747 100644
 --- a/src/fpga/targets/pocket/variants/os25.mk
 +++ b/src/fpga/targets/pocket/variants/os25.mk
 @@ -32,7 +32,7 @@ DEFS := INCLUDE_ANALOGIZER INCLUDE_HW_MIXER INCLUDE_TRANSLUC \
@@ -1868,7 +1884,7 @@ index a1e7864..7288ad9 100644
          INCLUDE_PARAM_SPAN_Q29 INCLUDE_4PLAYER INCLUDE_BANK_ROW_TRACK \
          INCLUDE_CPU_RING INCLUDE_GPU_WRITE_BURSTS EXCLUDE_GPU_COMMAND_DMA \
 -        INCLUDE_SPAN_DEDICATED_MULT
-+        INCLUDE_SPAN_DEDICATED_MULT INCLUDE_SAVESTATE INCLUDE_CLK90
++        INCLUDE_SPAN_DEDICATED_MULT INCLUDE_SAVESTATE
  
  # Separate span products from the shared perspective DSP operand mux.
  # Bit-exact and cycle-identical in Quake/Doom replays; paired seeds 15/20
@@ -1929,6 +1945,65 @@ index 4e90b37..4b8ce47 100644
  # --- Pocket bridge command FSM ---
  bridge-cmd: $(BRIDGE_CMD_DIR)/V$(BRIDGE_CMD_TOP)
  	@printf "\n=== Pocket bridge command FSM ===\n"
+diff --git a/src/fpga/test/tb_audio_mixer_main.cpp b/src/fpga/test/tb_audio_mixer_main.cpp
+index 273c7c2..addcdd6 100644
+--- a/src/fpga/test/tb_audio_mixer_main.cpp
++++ b/src/fpga/test/tb_audio_mixer_main.cpp
+@@ -605,6 +605,46 @@ static void test_stream_empty_and_full(void) {
+     check(pos_full > 200, "full-ring position advances freely");
+ }
+ 
++// Repeated audio reset used by save-state restore. A three-pair tail holds
++// below STREAM_FLOOR, so readback must reflect the CPU reset without playback.
++static void test_stream_restore_position_readback(void) {
++    printf("test_stream_restore_position_readback:\n");
++    reset_dut();
++    const int V = 31;
++    sdram_fill_range(0, 1024, 0x10001000);
++    mmio_voice_write(V, VTBL_ADDR, 0);
++    mmio_voice_write(V, VTBL_LEN, 1024);
++    mmio_voice_write(V, VTBL_RATE, 0x10000);
++    mmio_voice_write(V, VTBL_LOOP_START, 0);
++    mmio_voice_write(V, VTBL_LOOP_END, 1024);
++    mmio_voice_write(V, VTBL_VOL_LR, 0xFFFF);
++    mmio_voice_write(V, VTBL_VOL_TARGET, 0xFFFF);
++    mmio_voice_write(V, VTBL_VOL_RATE, 4);
++    mmio_voice_write(V, VTBL_POS_INT, 0);
++    mmio_voice_write(V, VTBL_WPTR, 256);
++    mmio_voice_write(V, VTBL_CTRL, CTRL_ACTIVE | CTRL_STEREO | CTRL_LOOP | CTRL_STREAM);
++    run_samples(300);
++    check(read_pos(V) > 200, "pre-restore stream has nonzero position");
++    for (int cycle = 0; cycle < 2; cycle++) {
++        mmio_voice_write(V, VTBL_CTRL, 0);
++        tick(200);
++        mmio_voice_write(V, VTBL_POS_INT, 0);
++        mmio_voice_write(V, VTBL_WPTR, 0);
++        tick(200);
++        check_eq_u32("inactive reset commits position table", vtbl_read(V, VTBL_POS_INT), 0);
++        check_eq_u32("inactive reset also commits position readback", read_pos(V), 0);
++        mmio_voice_write(V, VTBL_WPTR, 3);
++        mmio_voice_write(V, VTBL_CTRL, CTRL_ACTIVE | CTRL_STEREO | CTRL_LOOP | CTRL_STREAM);
++        run_samples(128);
++        check_eq_u32("three-pair restore holds real position", vtbl_read(V, VTBL_POS_INT), 0);
++        check_eq_u32("three-pair restore readback stays zero", read_pos(V), 0);
++        check_eq_u32("firmware sees exactly three queued pairs", (3 - read_pos(V)) & 1023, 3);
++        mmio_voice_write(V, VTBL_WPTR, 256);
++        run_samples(300);
++        check(read_pos(V) > 200, "restored stream refills and advances");
++    }
++}
++
+ // Test 7b: stream voice at the firmware-clamped MAXIMUM rate (2.0).
+ // Position steps by up to 2 (+1 frac carry) per pass, the worst case
+ // the STREAM_FLOOR=4 margin must absorb: the voice must still hold
+@@ -971,6 +1011,7 @@ int main(int argc, char **argv) {
+     test_stream_hold_resume();
+ 
+     test_stream_empty_and_full();
++    test_stream_restore_position_readback();
+     test_stream_quiet_is_per_voice();
+ 
+     test_stream_max_rate();
 diff --git a/src/fpga/test/tb_savestate.v b/src/fpga/test/tb_savestate.v
 new file mode 100644
 index 0000000..5f1a603
@@ -2091,10 +2166,10 @@ index 0000000..5f1a603
 +endmodule
 diff --git a/src/fpga/test/tb_savestate_main.cpp b/src/fpga/test/tb_savestate_main.cpp
 new file mode 100644
-index 0000000..afa30cb
+index 0000000..ce7b0b1
 --- /dev/null
 +++ b/src/fpga/test/tb_savestate_main.cpp
-@@ -0,0 +1,236 @@
+@@ -0,0 +1,289 @@
 +//------------------------------------------------------------------------------
 +// SPDX-License-Identifier: Apache-2.0
 +// SPDX-FileType: SOURCE
@@ -2316,6 +2391,58 @@ index 0000000..afa30cb
 +    check_eq("load-err", host_cmd(0x00A4, 0), 3);
 +}
 +
++/* A fresh FPGA model per wake is important: toggling por_n alone does not
++ * recreate core_bridge_cmd's power-up initial state. Exercise the real
++ * A4-in-reset -> app registration -> A0 protocol twice after wake. The
++ * CPU serializer and host SD persistence are external to this RTL model. */
++static void test_two_sleep_wake_cycles() {
++    std::printf("test_two_sleep_wake_cycles:\n");
++    uint32_t previous_words = 3;
++    for (unsigned cycle = 0; cycle < 3; ++cycle) {
++        delete tb;
++        tb = new Vtb_savestate;
++        init();
++        check_eq("reload-starts-in-reset", tb->core_reset_n, 0);
++        for (uint32_t i = 0; i < previous_words; ++i)
++            write32(BLOB + i * 4, 0x51000000u | (cycle << 16) | i);
++        check_eq("wake-blob-arrived", tb->wr_words, previous_words);
++        host_cmd(0x00A4, 1);
++        check_eq("wake-accepted-before-app", host_cmd(0x00A4, 0), 2);
++        check_eq("wake-request-retained", tb->load_req_tgl, 1);
++        check_eq("wake-reset-exit", host_cmd(0x0011, 0), 0);
++        tb->cpu_size = 0x100000;
++        ticks(16);
++        cpu_complete_load(false);
++        tb->cpu_clear_tgl ^= 1;
++        ticks(8);
++        check_eq("wake-running", tb->core_reset_n, 1);
++        check_eq("wake-traffic-count-cleared", tb->wr_words, 0);
++        check_eq("wake-left-no-save-result", host_cmd(0x00A0, 0), 0);
++
++        uint32_t before = tb->start_req_tgl;
++        host_cmd(0x00A0, 1);
++        check_eq("sleep-requests-new-capture", tb->start_req_tgl, before ^ 1);
++        check_eq("sleep-busy-before-new-capture", host_cmd(0x00A0, 0), 1);
++        check_eq("sleep-cannot-reuse-wake-result", tb->rd_words, 0);
++        const uint32_t new_size = 128 + cycle * 16;
++        tb->cpu_size = new_size;
++        ticks(8);
++        cpu_complete_save(false);
++        check_eq("sleep-capture-completed", host_cmd(0x00A0, 0), 2);
++        check_eq("sleep-publishes-new-size", read32(HOST_R48), new_size);
++        previous_words = new_size / 4;
++        for (uint32_t i = 0; i < previous_words; ++i)
++            read32(BLOB + i * 4);
++        check_eq("sleep-host-read-complete", tb->rd_words, previous_words);
++
++        /* Current app behavior: maximum-size rearm after transfer, followed
++         * by physical sleep/reload. Document the sticky query result too. */
++        tb->cpu_size = 0x100000;
++        ticks(8);
++        check_eq("completed-save-remains-queryable", host_cmd(0x00A0, 0), 2);
++    }
++}
++
 +int main(int argc, char **argv) {
 +    Verilated::commandArgs(argc, argv);
 +    tb = new Vtb_savestate;
@@ -2327,6 +2454,7 @@ index 0000000..afa30cb
 +    test_load();
 +    test_wake_before_app();
 +    test_warm_reset();
++    test_two_sleep_wake_cycles();
 +    std::printf("\n=== Results: %d passed, %d failed ===\n", passes, fails);
 +    delete tb;
 +    return fails == 0 ? 0 : 1;
