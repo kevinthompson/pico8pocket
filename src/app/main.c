@@ -445,7 +445,8 @@ int main(int argc, char **argv) {
         if (runtime && p8p_runtime_load(runtime, &loaded_cart) == 0) {
             running = 1;
             p8p_cart_content_hash(&loaded_cart, &cart_hash);
-            p8p_platform_savestate_enable(P8P_STATE_BLOB_MAX);
+            if (p8p_platform_savestate_enable(P8P_STATE_BLOB_MAX) != 0)
+                printf("pico8pocket: save states unavailable\n");
             menu = p8p_menu_create(&settings, &cart_hash,
                                    p8p_cart_kind_name(cart.kind));
             p8p_runtime_set_service_hook(runtime, input_latch_service,
