@@ -572,6 +572,45 @@ int main(void) {
         CHECK(state_meta.exists == 0);
 
         {
+            /* Native (Pocket) save states round-trip through one blob and
+             * refuse corrupt data or another cart's state. */
+            uint8_t *blob = NULL;
+            uint32_t blob_size = 0;
+            p8p_cart_hash_t other_hash = cart_hash;
+            other_hash.bytes[0] ^= 0xffu;
+            CHECK(p8p_state_serialize(&cart_hash, runtime, &blob,
+                                      &blob_size) == 0);
+            CHECK(blob != NULL);
+            CHECK(blob_size > 40u && blob_size <= P8P_STATE_BLOB_MAX);
+            CHECK(p8p_runtime_step(runtime, 1u << 1) == 0);
+            CHECK(p8p_runtime_step(runtime, 1u << 1) == 0);
+            /* Another cart's state is told apart from a damaged one, so
+             * the player can be told why instead of a bare failure. */
+            CHECK(p8p_state_deserialize(&other_hash, runtime, blob,
+                                        blob_size) == P8P_STATE_OTHER_CART);
+            CHECK(strcmp(p8p_state_load_notice(P8P_STATE_OTHER_CART),
+                         "Memory is from another cart") == 0);
+            CHECK(p8p_state_deserialize(&cart_hash, runtime, blob, 39u) != 0);
+            CHECK(p8p_state_deserialize(&cart_hash, runtime, blob, 39u) !=
+                  P8P_STATE_OTHER_CART);
+            blob[blob_size - 1] ^= 0x5au;
+            CHECK(p8p_state_deserialize(&cart_hash, runtime, blob,
+                                        blob_size) != 0);
+            CHECK(p8p_state_deserialize(&other_hash, runtime, blob,
+                                        blob_size) != P8P_STATE_OTHER_CART);
+            CHECK(p8p_state_load_notice(-6) == NULL);
+            CHECK(p8p_state_load_notice(0) == NULL);
+            blob[blob_size - 1] ^= 0x5au;
+            CHECK(p8p_state_deserialize(&cart_hash, runtime, blob,
+                                        blob_size) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            framebuffer = p8p_runtime_framebuffer(runtime);
+            CHECK(framebuffer[3 * 128 + 1] == 8);
+            CHECK(framebuffer[3 * 128 + 2] == 0);
+            free(blob);
+        }
+
+        {
             /* A state whose raw size exceeds the 256 KiB slot (Moss Moss
              * saves ~500 KB) must still save when it compresses to fit. */
             static const char big_source[] =

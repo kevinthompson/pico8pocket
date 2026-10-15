@@ -6,17 +6,34 @@ DEPS_DIR="$PROJECT_ROOT/.deps"
 SDK_DIR="$DEPS_DIR/openfgpaSDK"
 DIABLO_DIR="$DEPS_DIR/diablo"
 FAKE08_DIR="$DEPS_DIR/fake-08"
+FORK_DIR="$DEPS_DIR/openfpgaCore"
+RUNTIME_DIR="$DEPS_DIR/pocket-runtime"
+# What the build uses (SDK_ROOT): Diablo's SDK sources, libraries and
+# container tooling, the fork's API headers, and the fork's Pocket runtime.
+STAGED_SDK_DIR="$DEPS_DIR/openfpgaos-sdk"
 
 SDK_URL="https://github.com/openfpgaOS/openfgpaSDK.git"
 SDK_COMMIT="628a12b551ac8137373c477e97466b84d153d2af"
 DIABLO_URL="https://github.com/openfpgaOS/Diablo.git"
 DIABLO_COMMIT="8cb3198d50618696e07f5b49ad086a369dc57706"
-# Only the SDK, the Pocket runtime and the container tooling are needed; the
-# game sources are left out of the sparse checkout.
-DIABLO_PATHS=(runtime/pocket src/sdk tools)
-DIABLO_OS20_SHA256="f8e21c5f75cbbd2f442e028118a855e5b4490eac6bdf21ae322fecf798590719"
-DIABLO_OS_SHA256="054abd4b3d2c57d55b4ecec23f2fcaa3703206db3df14ebe7793c22941d34ef7"
-DIABLO_LOADER_SHA256="fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99"
+# Only the SDK and the container tooling are needed; the game sources and
+# Diablo's runtime (no save-state service) are left out of the sparse checkout.
+DIABLO_PATHS=(src/sdk tools)
+# The openfpgaOS fork with native Pocket save states and sleep/wake.  Its API
+# headers replace Diablo's; the rest of Diablo's SDK is unchanged by the fork.
+FORK_URL="https://github.com/zenibako/openfpgaCore.git"
+FORK_COMMIT="a58aacd940c1b433c030b97f8207d2c7e03307c8"
+FORK_PATHS=(src/firmware/api)
+# Pocket runtime published from that commit.  os20.rbf_r is the 92202ab fit
+# with its BRAM image (bootloader and the OS's .fasttext) re-patched by
+# `make firmware`: an os.bin needs the bitstream patched from the same build.
+RUNTIME_URL="https://github.com/zenibako/openfpgaCore/releases/download/pocket-runtime-a58aacd"
+RUNTIME_FILES=(os20.rbf_r os.bin loader.bin)
+RUNTIME_SHA256=(
+    "92c0dbbd372e5d0879fdf05b52ecab9891d2bead66fb8e2c24b63ecd23524e87"
+    "d845160d123754a01854dadac6c78dca2e180aefc2711789d3ff32cbab47fc0e"
+    "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99"
+)
 FAKE08_URL="https://github.com/jtothebell/fake-08.git"
 FAKE08_COMMIT="814991a2571ad3970e386cef48f3b148aa1c27b9"
 Z8LUA_COMMIT="e6928578d46b61fd5ea30cfcf547e855a30a0553"
@@ -113,21 +130,68 @@ verify_sha256() {
     }
 }
 
+# Download each runtime file once and check it against its pin.
+fetch_runtime() {
+    local i file
+    mkdir -p "$RUNTIME_DIR"
+    for i in "${!RUNTIME_FILES[@]}"; do
+        file="${RUNTIME_FILES[$i]}"
+        if [[ -f "$RUNTIME_DIR/$file" ]] &&
+           verify_sha256 "$RUNTIME_DIR/$file" "${RUNTIME_SHA256[$i]}" "$file" 2>/dev/null; then
+            continue
+        fi
+        curl -fsSL -o "$RUNTIME_DIR/$file.partial" "$RUNTIME_URL/$file"
+        verify_sha256 "$RUNTIME_DIR/$file.partial" "${RUNTIME_SHA256[$i]}" \
+            "Pocket runtime $file"
+        mv "$RUNTIME_DIR/$file.partial" "$RUNTIME_DIR/$file"
+        echo "Pocket runtime: downloaded $file"
+    done
+}
+
+# Assemble the SDK the build uses.  Rebuilt from scratch whenever any pinned
+# input changes, so it never mixes files from two pins.
+stage_sdk() {
+    local stamp="$STAGED_SDK_DIR/.p8p-inputs"
+    local inputs="$DIABLO_COMMIT $FORK_COMMIT ${RUNTIME_SHA256[*]}"
+    if [[ -f "$stamp" && "$(cat "$stamp")" == "$inputs" ]]; then
+        echo "openfpgaOS SDK: staged SDK already up to date"
+        return 0
+    fi
+    local staging="$STAGED_SDK_DIR.partial" file
+    rm -rf "$staging"
+    mkdir -p "$staging/runtime/pocket"
+    cp -R "$DIABLO_DIR/src" "$DIABLO_DIR/tools" "$staging/"
+    # Same filter as openfpgaOS's `make sdk`: every header, subdirectories too.
+    rsync -a --delete --include='*/' --include='*.h' --exclude='*' \
+        "$FORK_DIR/src/firmware/api/" "$staging/src/sdk/include/"
+    for file in "${RUNTIME_FILES[@]}"; do
+        cp "$RUNTIME_DIR/$file" "$staging/runtime/pocket/"
+    done
+    printf '%s\n' "$inputs" > "$staging/.p8p-inputs"
+    rm -rf "$STAGED_SDK_DIR"
+    mv "$staging" "$STAGED_SDK_DIR"
+    echo "openfpgaOS SDK: staged $STAGED_SDK_DIR"
+}
+
 mkdir -p "$DEPS_DIR"
 fetch_one "openfpgaOS SDK" "$SDK_URL" "$SDK_COMMIT" "$SDK_DIR"
-fetch_sparse "Diablo SDK/runtime" "$DIABLO_URL" "$DIABLO_COMMIT" \
+fetch_sparse "Diablo SDK" "$DIABLO_URL" "$DIABLO_COMMIT" \
     "$DIABLO_DIR" "${DIABLO_PATHS[@]/#//}"
-verify_sha256 "$DIABLO_DIR/runtime/pocket/os20.rbf_r" "$DIABLO_OS20_SHA256" \
-    "Diablo os20 bitstream"
-verify_sha256 "$DIABLO_DIR/runtime/pocket/os.bin" "$DIABLO_OS_SHA256" \
-    "Diablo OS image"
-verify_sha256 "$DIABLO_DIR/runtime/pocket/loader.bin" "$DIABLO_LOADER_SHA256" \
-    "Diablo loader"
+fetch_sparse "openfpgaOS fork API" "$FORK_URL" "$FORK_COMMIT" \
+    "$FORK_DIR" "${FORK_PATHS[@]/#//}"
+for header in of_version.h of_savestate.h; do
+    [[ -f "$FORK_DIR/src/firmware/api/$header" ]] || {
+        echo "openfpgaOS fork API has no $header" >&2
+        exit 1
+    }
+done
 grep -q '^#define OF_API_VERSION_MINOR  *9$' \
-    "$DIABLO_DIR/src/sdk/include/of_version.h" || {
-    echo "Diablo SDK is not API 0.9.x" >&2
+    "$FORK_DIR/src/firmware/api/of_version.h" || {
+    echo "openfpgaOS fork API is not 0.9.x" >&2
     exit 1
 }
+fetch_runtime
+stage_sdk
 fetch_one "Fake-08" "$FAKE08_URL" "$FAKE08_COMMIT" "$FAKE08_DIR"
 
 git -C "$FAKE08_DIR" submodule update --init --depth 1 libs/z8lua

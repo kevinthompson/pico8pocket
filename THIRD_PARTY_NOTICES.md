@@ -7,8 +7,12 @@ binary components remain under their respective licenses.
 The build fetches pinned revisions of:
 
 - [Diablo for openfpgaOS](https://github.com/openfpgaOS/Diablo), used as the
-  pinned source of the API 0.9.0 SDK snapshot and its matched Pocket
-  `os20.rbf_r`, `os.bin` and `loader.bin` runtime files.
+  pinned source of the API 0.9.0 SDK sources, libraries and container
+  tooling.
+- [zenibako/openfpgaCore](https://github.com/zenibako/openfpgaCore), an
+  openfpgaOS fork with native Pocket save states, used as the pinned source
+  of the SDK API headers and of the Pocket `os20.rbf_r`, `os.bin` and
+  `loader.bin` runtime files (release `pocket-runtime-a58aacd`).
 - [openfpgaOS SDK](https://github.com/openfpgaOS/openfgpaSDK), whose
   SDK-authored components are provided under Apache-2.0. The upstream SDK
   notice documents additional components embedded in the runtime binaries;

@@ -16,8 +16,11 @@ ThinkElastic stack provides:
 
 The `os20` bitstream is the default because PICO-8 is a 2D workload and benefits
 more from its dual-issue CPU than from the 2.5D/3D accelerators in the other
-variants. The build pins the matched SDK and Pocket runtime published with
-Diablo 1.1.0 at commit `8cb3198d50618696e07f5b49ad086a369dc57706` (API 0.9.0).
+variants. The build pins the SDK published with Diablo 1.1.0 at commit
+`8cb3198d50618696e07f5b49ad086a369dc57706` (API 0.9.0), with its API headers
+and the matched Pocket runtime taken from the openfpgaOS fork
+zenibako/openfpgaCore at `a58aacd` (release `pocket-runtime-a58aacd`), which
+adds native save states and sleep/wake.
 Version 0.0.32 used the earlier `2687e3d0` snapshot (runtime source `453a283`,
 API 0.8.1).
 

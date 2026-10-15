@@ -156,6 +156,18 @@ Build and assemble the Pocket SD tree:
 make pocket
 ```
 
+`make deps` stages the SDK the build uses in `.deps/openfpgaos-sdk/`:
+Diablo's SDK sources, libraries and container tooling, the API headers from
+`main` of the openfpgaOS fork
+[zenibako/openfpgaCore](https://github.com/zenibako/openfpgaCore) (`a58aacd`),
+and that fork's device-tested Pocket runtime (`os20.rbf_r`, `os.bin`,
+`loader.bin`) from its
+[`pocket-runtime-a58aacd`](https://github.com/zenibako/openfpgaCore/releases/tag/pocket-runtime-a58aacd)
+release, each checked against a SHA-256 pin. The fork's runtime adds native
+save states and sleep/wake: `core.json` sets `sleep_supported`, which turns
+on both the Pocket's Memories and sleep. Built against an SDK without the
+save-state API (`SDK_ROOT=...`), the core advertises neither.
+
 The result is written to `build/pocket/pico8pocket/`. `make package` creates a
 public, cartridge-free release ZIP under `releases/`. With a local Homebrew
 RISC-V toolchain, use:
@@ -234,9 +246,12 @@ planned in-core browser will consume an index stored beside the cards; see
 
 ## Upstream bases
 
-- Diablo/openfpgaOS SDK and Pocket runtime commit
-  `8cb3198d50618696e07f5b49ad086a369dc57706` (API 0.9.0, the runtime
-  shipped with Diablo 1.1.0)
+- Diablo/openfpgaOS SDK commit `8cb3198d50618696e07f5b49ad086a369dc57706`
+  (API 0.9.0, as shipped with Diablo 1.1.0): SDK sources, libraries and
+  container tooling
+- openfpgaOS fork zenibako/openfpgaCore commit
+  `a58aacd940c1b433c030b97f8207d2c7e03307c8`: API headers, and the Pocket
+  runtime from its `pocket-runtime-a58aacd` release
 - openfpgaOS SDK commit `628a12b551ac8137373c477e97466b84d153d2af`
   (license and redistribution notices)
 - Fake-08 commit `814991a2571ad3970e386cef48f3b148aa1c27b9`, with z8lua at
