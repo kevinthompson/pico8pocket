@@ -22,9 +22,11 @@ DIABLO_PATHS=(src/sdk tools)
 # The openfpgaOS fork with native Pocket save states and sleep/wake.  Its API
 # headers replace Diablo's; the rest of Diablo's SDK is unchanged by the fork.
 FORK_URL="https://github.com/zenibako/openfpgaCore.git"
-FORK_COMMIT="92202ab23cd5f4527968ad06a9b40d374541b36d"
+FORK_COMMIT="a58aacd940c1b433c030b97f8207d2c7e03307c8"
 FORK_PATHS=(src/firmware/api)
-# Device-tested Pocket runtime published from that commit.
+# Device-tested Pocket runtime, published from 92202ab.  a58aacd adds only
+# of_savestate_set_id() to the OS; on this runtime it reports not supported
+# and the state's own cart hash is the only check.
 RUNTIME_URL="https://github.com/zenibako/openfpgaCore/releases/download/pocket-runtime-92202ab"
 RUNTIME_FILES=(os20.rbf_r os.bin loader.bin)
 RUNTIME_SHA256=(

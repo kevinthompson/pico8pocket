@@ -371,6 +371,10 @@ int p8p_platform_savestate_enable(uint32_t max_size) {
     return of_savestate_enable(max_size);
 }
 
+int p8p_platform_savestate_set_id(const void *id, uint32_t size) {
+    return of_savestate_set_id(id, size);
+}
+
 int p8p_platform_savestate_poll(void) {
     switch (of_savestate_poll()) {
     case OF_SAVESTATE_SAVE: return P8P_SAVESTATE_SAVE;
@@ -384,7 +388,8 @@ int p8p_platform_savestate_save(const void *blob, uint32_t size) {
 }
 
 int p8p_platform_savestate_load(void *buffer, uint32_t capacity) {
-    return of_savestate_load(buffer, capacity);
+    int result = of_savestate_load(buffer, capacity);
+    return result == OF_ERR_DENIED ? P8P_SAVESTATE_OTHER_GAME : result;
 }
 
 void p8p_platform_savestate_finish(int ok) {
@@ -393,6 +398,12 @@ void p8p_platform_savestate_finish(int ok) {
 #else
 int p8p_platform_savestate_enable(uint32_t max_size) {
     (void)max_size;
+    return -1;
+}
+
+int p8p_platform_savestate_set_id(const void *id, uint32_t size) {
+    (void)id;
+    (void)size;
     return -1;
 }
 

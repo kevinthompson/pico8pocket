@@ -376,6 +376,10 @@ static int service_savestate(p8p_runtime_t *runtime, int running,
     if (length <= 0) {
         /* The OS has already reported the failure. */
         printf("pico8pocket: native state rejected by OS (%d)\n", length);
+        if (length == P8P_SAVESTATE_OTHER_GAME) {
+            g_state_notice = p8p_state_load_notice(P8P_STATE_OTHER_CART);
+            g_state_notice_until_us = 0;
+        }
         free(blob);
         return 0;
     }
@@ -459,6 +463,10 @@ int main(int argc, char **argv) {
         if (runtime && p8p_runtime_load(runtime, &loaded_cart) == 0) {
             running = 1;
             p8p_cart_content_hash(&loaded_cart, &cart_hash);
+            /* The OS then refuses another cart's Memory before it is
+             * copied out; the state's own cart hash still backs it up. */
+            p8p_platform_savestate_set_id(cart_hash.bytes,
+                                          sizeof cart_hash.bytes);
             if (p8p_platform_savestate_enable(P8P_STATE_BLOB_MAX) != 0)
                 printf("pico8pocket: save states unavailable\n");
             menu = p8p_menu_create(&settings, &cart_hash,

@@ -65,7 +65,15 @@ enum p8p_savestate_request {
     P8P_SAVESTATE_LOAD = 2
 };
 
+/* What load() returns for an intact state from another game: the OS
+ * compares the id given to set_id() (here the cart hash) with the one saved
+ * in the state.  Other failures are negative too. */
+#define P8P_SAVESTATE_OTHER_GAME (-4)
+
 int p8p_platform_savestate_enable(uint32_t max_size);
+/* Name the game for the OS's own check; up to 16 bytes.  Runtimes without
+ * the check return nonzero, and the state's own cart hash is all there is. */
+int p8p_platform_savestate_set_id(const void *id, uint32_t size);
 int p8p_platform_savestate_poll(void);
 int p8p_platform_savestate_save(const void *blob, uint32_t size);
 int p8p_platform_savestate_load(void *buffer, uint32_t capacity);
