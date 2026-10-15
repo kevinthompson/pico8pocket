@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SDK_ROOT="${SDK_ROOT:-$PROJECT_ROOT/.deps/diablo}"
+SDK_ROOT="${SDK_ROOT:-$PROJECT_ROOT/.deps/openfpgaos-sdk}"
 SDK_NOTICE_ROOT="$PROJECT_ROOT/.deps/openfgpaSDK"
 FAKE08_ROOT="$PROJECT_ROOT/.deps/fake-08"
 OUT="$PROJECT_ROOT/build/pocket/pico8pocket"

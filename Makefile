@@ -1,5 +1,5 @@
 PROJECT_ROOT := $(abspath $(CURDIR))
-override SDK_ROOT := $(abspath $(if $(strip $(SDK_ROOT)),$(SDK_ROOT),$(PROJECT_ROOT)/.deps/diablo))
+override SDK_ROOT := $(abspath $(if $(strip $(SDK_ROOT)),$(SDK_ROOT),$(PROJECT_ROOT)/.deps/openfpgaos-sdk))
 FAKE08_ROOT  := $(PROJECT_ROOT)/.deps/fake-08
 APP_DIR      := $(PROJECT_ROOT)/src/app
 BUILD_DIR    := $(PROJECT_ROOT)/build

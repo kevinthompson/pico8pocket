@@ -156,26 +156,17 @@ Build and assemble the Pocket SD tree:
 make pocket
 ```
 
-### Save states and sleep
-
-Pocket Memories and sleep need a runtime with the openfpgaOS save-state
-service, which the Diablo runtime pinned by `make deps` does not have. Build
-it from `main` of the openfpgaOS fork
-[zenibako/openfpgaCore](https://github.com/zenibako/openfpgaCore) (`6a9594f`
-or later), install it into a copy of the pinned SDK, and point the build at
-that copy:
-
-```sh
-cp -R .deps/diablo .deps/diablo-savestate
-make -C /path/to/openfpgaCore full VARIANT=os20
-make -C /path/to/openfpgaCore sdk DEST="$PWD/.deps/diablo-savestate"
-make pocket SDK_ROOT="$PWD/.deps/diablo-savestate"
-```
-
-`core.json`'s `sleep_supported` switches both features: the build sets it
-false when the SDK has no save-state API, and the Pocket then greys out
-Memories and powers off instead of sleeping. Ship the app, `os.bin` and
-bitstream from one build; they must match.
+`make deps` stages the SDK the build uses in `.deps/openfpgaos-sdk/`:
+Diablo's SDK sources, libraries and container tooling, the API headers from
+the openfpgaOS fork
+[zenibako/openfpgaCore](https://github.com/zenibako/openfpgaCore), and that
+fork's device-tested Pocket runtime (`os20.rbf_r`, `os.bin`, `loader.bin`)
+from its
+[`pocket-runtime-92202ab`](https://github.com/zenibako/openfpgaCore/releases/tag/pocket-runtime-92202ab)
+release, each checked against a SHA-256 pin. The fork's runtime adds native
+save states and sleep/wake: `core.json` sets `sleep_supported`, which turns
+on both the Pocket's Memories and sleep. Built against an SDK without the
+save-state API (`SDK_ROOT=...`), the core advertises neither.
 
 The result is written to `build/pocket/pico8pocket/`. `make package` creates a
 public, cartridge-free release ZIP under `releases/`. With a local Homebrew
@@ -255,11 +246,12 @@ planned in-core browser will consume an index stored beside the cards; see
 
 ## Upstream bases
 
-- Diablo/openfpgaOS SDK and Pocket runtime commit
-  `8cb3198d50618696e07f5b49ad086a369dc57706` (API 0.9.0, the runtime
-  shipped with Diablo 1.1.0)
-- Save-state runtime (optional): zenibako/openfpgaCore `main`, from commit
-  `6a9594f4c6add2cb33034b08cf4d18df684f11e2`
+- Diablo/openfpgaOS SDK commit `8cb3198d50618696e07f5b49ad086a369dc57706`
+  (API 0.9.0, as shipped with Diablo 1.1.0): SDK sources, libraries and
+  container tooling
+- openfpgaOS fork zenibako/openfpgaCore commit
+  `92202ab23cd5f4527968ad06a9b40d374541b36d`: API headers, and the Pocket
+  runtime from its `pocket-runtime-92202ab` release
 - openfpgaOS SDK commit `628a12b551ac8137373c477e97466b84d153d2af`
   (license and redistribution notices)
 - Fake-08 commit `814991a2571ad3970e386cef48f3b148aa1c27b9`, with z8lua at

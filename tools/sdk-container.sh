@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SDK_ROOT="${SDK_ROOT:-$PROJECT_ROOT/.deps/diablo}"
+SDK_ROOT="${SDK_ROOT:-$PROJECT_ROOT/.deps/openfpgaos-sdk}"
 IMG="${SDK_IMG:-openfpgaos-firmware}"
 DOCKERFILE="${SDK_DOCKERFILE:-$SDK_ROOT/tools/docker/Dockerfile.firmware}"
 

@@ -13,7 +13,7 @@ argument-hint: "[harness: path or host:path of the os25 harness, if any]"
   at hundreds of instructions per operation, so keep it off per-call paths
   (`time()` used to divide in double; see `api_time`).
 - 14,336 bytes of zero-wait BRAM for code (`APP_BRAM` in
-  `.deps/diablo/src/sdk/app.ld`), in section `.app_fasttext`. The z8lua
+  `.deps/openfpgaos-sdk/src/sdk/app.ld`), in section `.app_fasttext`. The z8lua
   dispatch loop and a few helpers live there:
   - `include/p8p/vm_fasttext.h` (`OF_FASTTEXT` declarations, force-included
     into z8lua)

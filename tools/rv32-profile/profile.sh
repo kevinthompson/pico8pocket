@@ -27,7 +27,7 @@ with open(sys.argv[2], "w") as out:
 PY
 ARCH="-march=rv32imafc -mabi=ilp32f"
 SPECS="--specs=picolibc.specs"
-COMMON="$ARCH $SPECS -O3 -flto -fomit-frame-pointer -ffunction-sections -fdata-sections -falign-functions=64 -falign-loops=64 -fno-tree-loop-distribute-patterns -D_GNU_SOURCE -w -I$P/include -I$P/.deps/diablo/src/sdk/include -I$P/.deps/fake-08/libs/miniz -DP8P_RUNTIME_DEBUG -include $HERE/types_fix.h"
+COMMON="$ARCH $SPECS -O3 -flto -fomit-frame-pointer -ffunction-sections -fdata-sections -falign-functions=64 -falign-loops=64 -fno-tree-loop-distribute-patterns -D_GNU_SOURCE -w -I$P/include -I$P/.deps/openfpgaos-sdk/src/sdk/include -I$P/.deps/fake-08/libs/miniz -DP8P_RUNTIME_DEBUG -include $HERE/types_fix.h"
 CXX="$COMMON -fwrapv -DLUA_USE_LONGJMP -std=c++17 -fno-exceptions -fno-rtti -fno-threadsafe-statics -include $P/include/p8p/vm_fasttext.h -I$Z -I$P/src/compat/cxx"
 setup_escaped="$(printf '%s' "$SETUP" | sed 's/\\/\\\\/g; s/"/\\"/g')"
 rm -f "$OUT"/obj/*.o
