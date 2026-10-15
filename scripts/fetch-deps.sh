@@ -24,12 +24,13 @@ DIABLO_PATHS=(src/sdk tools)
 FORK_URL="https://github.com/zenibako/openfpgaCore.git"
 FORK_COMMIT="a58aacd940c1b433c030b97f8207d2c7e03307c8"
 FORK_PATHS=(src/firmware/api)
-# Pocket runtime published from that commit: its os.bin, with os20.rbf_r and
-# loader.bin unchanged from 92202ab (a58aacd changed only the OS).
+# Pocket runtime published from that commit.  os20.rbf_r is the 92202ab fit
+# with its BRAM image (bootloader and the OS's .fasttext) re-patched by
+# `make firmware`: an os.bin needs the bitstream patched from the same build.
 RUNTIME_URL="https://github.com/zenibako/openfpgaCore/releases/download/pocket-runtime-a58aacd"
 RUNTIME_FILES=(os20.rbf_r os.bin loader.bin)
 RUNTIME_SHA256=(
-    "621a3fb6546c5c57440df21661b611a5ea243f0625f7afb247bb9511d7024755"
+    "92c0dbbd372e5d0879fdf05b52ecab9891d2bead66fb8e2c24b63ecd23524e87"
     "d845160d123754a01854dadac6c78dca2e180aefc2711789d3ff32cbab47fc0e"
     "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99"
 )
