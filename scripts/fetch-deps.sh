@@ -24,14 +24,13 @@ DIABLO_PATHS=(src/sdk tools)
 FORK_URL="https://github.com/zenibako/openfpgaCore.git"
 FORK_COMMIT="a58aacd940c1b433c030b97f8207d2c7e03307c8"
 FORK_PATHS=(src/firmware/api)
-# Device-tested Pocket runtime, published from 92202ab.  a58aacd adds only
-# of_savestate_set_id() to the OS; on this runtime it reports not supported
-# and the state's own cart hash is the only check.
-RUNTIME_URL="https://github.com/zenibako/openfpgaCore/releases/download/pocket-runtime-92202ab"
+# Pocket runtime published from that commit: its os.bin, with os20.rbf_r and
+# loader.bin unchanged from 92202ab (a58aacd changed only the OS).
+RUNTIME_URL="https://github.com/zenibako/openfpgaCore/releases/download/pocket-runtime-a58aacd"
 RUNTIME_FILES=(os20.rbf_r os.bin loader.bin)
 RUNTIME_SHA256=(
     "621a3fb6546c5c57440df21661b611a5ea243f0625f7afb247bb9511d7024755"
-    "f6f585308667692f543236c90e73da45c25c9e4f497086c6e780826f3723ab82"
+    "d845160d123754a01854dadac6c78dca2e180aefc2711789d3ff32cbab47fc0e"
     "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99"
 )
 FAKE08_URL="https://github.com/jtothebell/fake-08.git"

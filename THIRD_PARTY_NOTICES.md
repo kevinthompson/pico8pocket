@@ -12,7 +12,7 @@ The build fetches pinned revisions of:
 - [zenibako/openfpgaCore](https://github.com/zenibako/openfpgaCore), an
   openfpgaOS fork with native Pocket save states, used as the pinned source
   of the SDK API headers and of the Pocket `os20.rbf_r`, `os.bin` and
-  `loader.bin` runtime files (release `pocket-runtime-92202ab`).
+  `loader.bin` runtime files (release `pocket-runtime-a58aacd`).
 - [openfpgaOS SDK](https://github.com/openfpgaOS/openfgpaSDK), whose
   SDK-authored components are provided under Apache-2.0. The upstream SDK
   notice documents additional components embedded in the runtime binaries;
