@@ -908,19 +908,62 @@ int main(void) {
                 "if run({1,2},function(t,v) if v==1 then add(t,9) end end)==\"129\" then pset(2,0,7) end\n"
                 "if run({5,6,7},function(t,v) if v==5 then deli(t,3) end end)==\"56\" then pset(3,0,7) end\n"
                 "local n=0 for v in all({}) do n+=1 end for v in all(nil) do n+=1 end\n"
-                "if n==0 then pset(4,0,7) end end\n";
+                "if n==0 then pset(4,0,7) end\n"
+                "local t={} for i=1,20 do t['key'..i]=i end t[1]=1 t[2]=2 if run(t,function() end)=='12' then pset(5,0,7) end\n"
+                "if run({1,2,3,4,5,6,7,8},function(t,v) if v==5 then t[4]=nil t[8]=nil end end)=='1234567' then pset(6,0,7) end end\n";
             p8p_cart_t all_cart = {};
             CHECK(p8p_cart_load_text_memory((const uint8_t *)all_source,
                                             sizeof(all_source) - 1,
                                             &all_cart) == 0);
             CHECK(p8p_runtime_load(runtime, &all_cart) == 0);
             CHECK(p8p_runtime_step(runtime, 0) == 0);
-            for (int check = 0; check < 5; ++check) {
+            for (int check = 0; check < 7; ++check) {
                 if (p8p_runtime_framebuffer(runtime)[check] != 7)
                     fprintf(stderr, "all() check %d failed\n", check);
                 CHECK(p8p_runtime_framebuffer(runtime)[check] == 7);
             }
             p8p_cart_destroy(&all_cart);
+        }
+
+        {
+            /* foreach(): callbacks can resize either Lua stack or table,
+             * mutate traversal, collect, recurse, or raise an error. */
+            static const char foreach_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function walk(t,f) local s='' foreach(t,function(v) s..=tostr(v) f(t,v) end) return s end\n"
+                "function _draw() cls()\n"
+                "if walk({1,2,3,4},function(t,v) if v==2 then del(t,v) end end)=='1234' then pset(0,0,7) end\n"
+                "if walk({1,2,3},function(t,v) del(t,v) end)=='123' then pset(1,0,7) end\n"
+                "if walk({1,2},function(t,v) if v==1 then add(t,9) end end)=='129' then pset(2,0,7) end\n"
+                "if walk({1,2,3},function(t,v) if v==1 then deli(t,3) end end)=='12' then pset(3,0,7) end\n"
+                "if walk({1,2},function(t,v) if v==1 then t[1]=9 end end)=='192' then pset(4,0,7) end\n"
+                "local once=false if walk({2,2,3},function(t,v) if not once then deli(t,1) once=true end end)=='23' then pset(5,0,7) end\n"
+                "local t={1,2,3,4,5,6,7,8} if walk(t,function(t,v) if v==5 then t[4]=nil t[8]=nil end end)=='12345' then pset(6,0,7) end\n"
+                "local s=0 foreach({1,2},function(v) foreach({3,4},function(w) s+=v*w return 9,8,7 end) end) if s==21 then pset(7,0,7) end\n"
+                "local function grow(n) if n==0 then collectgarbage() return 1 end return 1+grow(n-1) end\n"
+                "local t={1,2,3} local s=0 foreach(t,function(v) if v==1 then for i=4,512 do t[i]=i end for i=512,4,-1 do t[i]=nil end end s+=v+grow(80) end) if s==249 then pset(8,0,7) end\n"
+                "local t={{n=1},{n=2}} local s=0 foreach(t,function(v) del(t,v) collectgarbage() s+=v.n end) if s==3 and #t==0 then pset(9,0,7) end\n"
+                "local traps=0 local t=setmetatable({1,2},{__len=function() traps+=1 return 100 end,__index=function() traps+=1 end}) local s=0 foreach(t,function(v) s+=v end) if s==3 and traps==0 then pset(10,0,7) end\n"
+                "local ok,err=pcall(function() foreach({1},function() error('foreach-boom') end) end) local s=0 foreach({1,2},function(v) s+=v end) if not ok and string.find(err,'foreach-boom',1,true) and s==3 then pset(11,0,7) end\n"
+                "local co=cocreate(function() foreach({1},function() yield() end) end) local ok,err=coresume(co) if not ok and string.find(err,'yield') then pset(12,0,7) end\n"
+                "local calls=0 local f=setmetatable({},{__call=function() calls+=1 end}) foreach(nil,function() calls+=1 end) foreach({},function() calls+=1 end) foreach({1},f) if calls==0 then pset(13,0,7) end\n"
+                "local traps=0 local mt={__eq=function() traps+=1 return true end} local a=setmetatable({},mt) local b=setmetatable({},mt) local t={a} local n=0 foreach(t,function(v) n+=1 if n==1 then t[1]=b end end) if n==2 and traps==0 then pset(14,0,7) end\n"
+                "local t={} for i=1,20 do t['key'..i]=i end t[1]=1 t[2]=2 local n=0 foreach(t,function(v) n+=v end) if n==3 then pset(15,0,7) end\n"
+                "local a={} local t={a,'same',3,true} local n=0 foreach(t,function(v) n+=1 if n==1 then t[1]=false elseif n==2 then t[1]=a end end) if n==6 then pset(16,0,7) end\n"
+                "end\n";
+            p8p_cart_t foreach_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)foreach_source,
+                                            sizeof(foreach_source) - 1,
+                                            &foreach_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &foreach_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            for (int check = 0; check < 17; ++check) {
+                if (p8p_runtime_framebuffer(runtime)[check] != 7)
+                    fprintf(stderr, "foreach() check %d failed: %s\n", check,
+                            p8p_runtime_error(runtime));
+                CHECK(p8p_runtime_framebuffer(runtime)[check] == 7);
+            }
+            p8p_cart_destroy(&foreach_cart);
         }
 
         {

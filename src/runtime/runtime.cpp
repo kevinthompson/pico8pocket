@@ -2628,6 +2628,10 @@ static int api_all(lua_State *lua) {
     return 1;
 }
 
+/* Keep this indirect callback helper compact and independent of caller IPA. */
+#if defined(__riscv) && defined(__GNUC__)
+__attribute__((noipa, optimize("align-loops=4")))
+#endif
 static int api_foreach(lua_State *lua) {
     profile_api(P8P_API_HELPER);
     if (!lua_istable(lua, 1) || !lua_isfunction(lua, 2))
@@ -2651,7 +2655,12 @@ static int api_foreach(lua_State *lua) {
         lua_call(lua, 1, 0);
 
         lua_rawgeti(lua, 1, index);
-        int unchanged = lua_rawequal(lua, -1, -2);
+        /* Actor lists usually contain tables; raw equality is identity here.
+         * Read the stack only after the callback, which can grow or move it. */
+        const TValue *current = lua->top - 1;
+        const TValue *previous = lua->top - 2;
+        int unchanged = ttistable(current) && ttistable(previous) ?
+            hvalue(current) == hvalue(previous) : lua_rawequal(lua, -1, -2);
         lua_pop(lua, 2);
         if (unchanged)
             ++index;
