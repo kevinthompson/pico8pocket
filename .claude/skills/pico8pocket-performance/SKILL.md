@@ -192,11 +192,15 @@ python3 pico8/run.py report --case EXACT_CASE
   clock: `90000000 / mean_cycles`, capped at target FPS for the estimate.
   Preserve historical os25 results with their original CPU and 100 MHz clock;
   they cannot be converted to os20 by rescaling clock alone.
-- This matches the documented os20 CPU configuration, not proven complete
-  hardware parity. The platform is pinned to OS `8318f25`; Diablo's shipped
-  bitstream has no source-generation manifest. Record compiler, libc, flags,
+- The platform is pinned to frozen OS `8318f25`. The production runtime and
+  hashes come from `scripts/fetch-deps.sh` (currently the `openfpgaCore`
+  `pocket-runtime-a58aacd` release). Its CPU/cache/SDRAM source profile agrees
+  with the frozen adapter, but save-state gateware and firmware differ. Recheck
+  source configuration when the production pin changes; source-profile agreement
+  does not prove fitted-bitstream or device timing parity. Keep the bitstream,
+  OS and loader from the same pinned release set. Record compiler, libc, flags,
   alignment and BRAM layout against the intended device ELF: the harness's
-  GCC13/bounded allocator build can differ from the actual SDK build.
+  GCC13/bounded allocator build can differ from the staged SDK build.
 - Runtime replay excludes presentation, adaptive frame skipping, OS/SD and
   live display/audio scheduling; caches start cold and PCM consumption is fixed.
   Require hardware evidence for device FPS or full parity claims. Butterscotch's

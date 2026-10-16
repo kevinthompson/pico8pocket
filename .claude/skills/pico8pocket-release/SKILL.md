@@ -15,10 +15,15 @@ argument-hint: "[card: SD mount path, e.g. /Volumes/Pocket]"
 - Copy the zip to the repo root under a descriptive name, for example
   `pico8-zenibako-v0.0.33-<topic>.zip` (`*.zip` is gitignored), and send it
   with SendUserFile. The user tests every change on a real Pocket.
-- The OS runtime comes from the Diablo port's release that
-  `scripts/fetch-deps.sh` pins (1.1.0, the newest Pocket runtime as of
-  2026-10-11). The openfpgaOS repo itself publishes no Pocket binaries, so
-  check openfpgaSDK and Diablo releases when asked whether to upgrade.
+- Resolve dependency revisions and runtime hashes from `scripts/fetch-deps.sh`.
+  The build stages Diablo's SDK sources/tools with the API headers and Pocket
+  runtime from `zenibako/openfpgaCore` (currently `pocket-runtime-a58aacd`)
+  into `.deps/openfpgaos-sdk`, the default `SDK_ROOT`.
+- Treat `os20.rbf_r`, `os.bin` and `loader.bin` as one pinned release set.
+  The FPGA fit's BRAM bootloader and OS `.fasttext` are re-patched during the
+  firmware build; `os.bin` requires the bitstream patched from that same build.
+  Mixing runtime versions can black-screen even when the application ELF is
+  unchanged. Verify all three packaged files against the fetch-script hashes.
 - Public zips never contain carts. `make package-local` bundles local carts
   and is for private use only.
 
@@ -33,11 +38,14 @@ argument-hint: "[card: SD mount path, e.g. /Volumes/Pocket]"
   and BRAM size for the packaged hardware build. Compare the bitstream, OS and
   loader hashes with the pins in `scripts/fetch-deps.sh`; a core name or version
   alone does not identify the installed binary.
-- The os20 simulator matches the documented CPU profile but uses its own
-  runtime/checkpoint build. Exact equivalence to Diablo's shipped bitstream
-  source is unproven, and presentation, adaptive skipping, OS/SD and live audio
-  scheduling are omitted. Report simulated results separately from device FPS;
-  require the same scene's device A/B evidence for a hardware performance claim.
+- The os20 simulator uses frozen OS `8318f25` and its own runtime/checkpoint
+  build. The current fork retains that CPU/cache/SDRAM configuration but adds
+  save-state gateware and firmware. Source-profile agreement does not establish
+  fitted-bitstream or device timing parity; presentation, adaptive skipping,
+  OS/SD and live audio scheduling are omitted. Recheck the production source
+  profile whenever the runtime pin changes. Report simulated results separately
+  from device FPS; require the same scene's device A/B evidence for a hardware
+  performance claim.
   The Butterscotch os25 calibration cannot establish Pico8Pocket os20 parity.
 
 ## SD-card layout (core zenibako.pico8, platform pico8)

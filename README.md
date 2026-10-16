@@ -261,8 +261,11 @@ planned in-core browser will consume an index stored beside the cards; see
 
 These revisions are pinned by `scripts/fetch-deps.sh` so builds do not silently
 change when upstream moves. Diablo is fetched as a shallow, sparse Git checkout
-of the pinned commit (only `runtime/pocket`, `src/sdk` and `tools`), and the
-three Pocket runtime files are additionally verified by SHA-256.
+of the pinned commit (only `src/sdk` and `tools`); the fork checkout supplies
+`src/firmware/api`. The three Pocket runtime files are downloaded from the fork's
+pinned release and verified by SHA-256. Keep `os20.rbf_r`, `os.bin` and
+`loader.bin` together: the bitstream's BRAM contents must match its OS firmware
+build. The assembled SDK is staged at `.deps/openfpgaos-sdk`.
 
 ## License and disclaimer
 
