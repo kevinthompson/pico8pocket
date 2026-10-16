@@ -946,20 +946,29 @@ void p8p_audio_render(p8p_audio_t *audio, int16_t *stereo, size_t frames) {
         return;
     }
 
-    for (size_t frame = 0; frame < frames; ++frame) {
-        int32_t value;
-        if (!audio->second_output) {
-            /* First of the pair: midway from the previous sample. */
-            int32_t sample = synthesize(audio);
-            value = (audio->held_sample + sample) / 2;
-            audio->held_sample = sample;
-        } else {
-            value = audio->held_sample;
-        }
-        audio->second_output ^= 1;
-        stereo[frame * 2] = (int16_t)value;
-        stereo[frame * 2 + 1] = (int16_t)value;
+    if (frames && audio->second_output) {
+        stereo[0] = stereo[1] = (int16_t)audio->held_sample;
+        stereo += 2;
+        --frames;
+        audio->second_output = 0;
     }
+
+    /* Each synthesis step supplies a midpoint followed by the held sample. */
+    int32_t previous = audio->held_sample;
+    for (; frames >= 2; frames -= 2, stereo += 4) {
+        int32_t sample = synthesize(audio);
+        int16_t midpoint = (int16_t)((previous + sample) / 2);
+        stereo[0] = stereo[1] = midpoint;
+        stereo[2] = stereo[3] = (int16_t)sample;
+        previous = sample;
+    }
+    if (frames) {
+        int32_t sample = synthesize(audio);
+        stereo[0] = stereo[1] = (int16_t)((previous + sample) / 2);
+        previous = sample;
+        audio->second_output = 1;
+    }
+    audio->held_sample = previous;
 }
 
 /* Layout of struct p8p_audio in 0.0.32, whose tail state files contain. */

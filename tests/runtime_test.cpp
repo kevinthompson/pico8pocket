@@ -1,3 +1,4 @@
+#include "p8p/audio.h"
 #include "p8p/cart.h"
 #include "p8p/menu.h"
 #include "p8p/platform.h"
@@ -191,7 +192,72 @@ static void celeste_acceptance(p8p_runtime_t *runtime, const char *path,
     TEST_NOTES_4 TEST_NOTES_4 TEST_NOTES_4 TEST_NOTES_4 \
     TEST_NOTES_4 TEST_NOTES_4 TEST_NOTES_4 TEST_NOTES_4
 
+static void audio_chunk_boundaries(void) {
+    enum { FRAMES = 4099 };
+    static uint8_t ram[0x10000];
+    static int16_t expected[FRAMES * 2], actual[FRAMES * 2 + 2];
+    const size_t chunks[] = {0, 1, 2, 3, 7, 16, 31, 64, 257, 1600};
+    uint8_t pcm[257];
+    for (size_t i = 0; i < sizeof(pcm); ++i)
+        pcm[i] = (uint8_t)(i * 37);
+    for (unsigned waveform = 0; waveform < 8; ++waveform) {
+        memset(ram, 0, sizeof(ram));
+        for (unsigned channel = 0; channel < 4; ++channel) {
+            uint8_t *sfx = ram + 0x3200 + channel * 68;
+            unsigned wave = (waveform + channel) & 7;
+            for (unsigned note = 0; note < 32; ++note) {
+                sfx[note * 2] = (uint8_t)((24 + note % 12) | ((wave & 3) << 6));
+                sfx[note * 2 + 1] = (uint8_t)((wave >> 2) | 14 | ((note % 6) << 4));
+            }
+            sfx[64] = (uint8_t)(waveform * 8);
+            sfx[65] = 1;
+            sfx[67] = 32;
+        }
+        for (size_t skipped = 0; skipped < 4; ++skipped) {
+            p8p_audio_t *reference = p8p_audio_create(ram);
+            p8p_audio_t *batched = p8p_audio_create(ram);
+            CHECK(reference && batched);
+            if (!reference || !batched) {
+                p8p_audio_destroy(reference);
+                p8p_audio_destroy(batched);
+                continue;
+            }
+            for (int channel = 0; channel < 4; ++channel) {
+                p8p_audio_sfx(reference, channel, channel, 0, 32);
+                p8p_audio_sfx(batched, channel, channel, 0, 32);
+            }
+            CHECK(p8p_audio_pcm_push(reference, pcm, sizeof(pcm)) == sizeof(pcm));
+            CHECK(p8p_audio_pcm_push(batched, pcm, sizeof(pcm)) == sizeof(pcm));
+            p8p_audio_skip(reference, skipped);
+            p8p_audio_skip(batched, skipped);
+            for (size_t frame = 0; frame < FRAMES; ++frame)
+                p8p_audio_render(reference, expected + frame * 2, 1);
+            actual[0] = actual[FRAMES * 2 + 1] = 12345;
+            size_t rendered = 0;
+            for (size_t part = 0; rendered < FRAMES; ++part) {
+                size_t count = chunks[part % (sizeof(chunks) / sizeof(chunks[0]))];
+                if (count > FRAMES - rendered) count = FRAMES - rendered;
+                p8p_audio_render(batched, actual + 1 + rendered * 2, count);
+                p8p_audio_render(batched, NULL, 1);
+                rendered += count;
+            }
+            CHECK(memcmp(expected, actual + 1, sizeof(expected)) == 0);
+            CHECK(actual[0] == 12345 && actual[FRAMES * 2 + 1] == 12345);
+            CHECK(p8p_audio_pcm_queued(reference) == p8p_audio_pcm_queued(batched));
+            /* Compare the next output too: interpolation phase is unsaved. */
+            p8p_audio_skip(reference, 3);
+            p8p_audio_skip(batched, 3);
+            p8p_audio_render(reference, expected, FRAMES);
+            p8p_audio_render(batched, actual + 1, FRAMES);
+            CHECK(memcmp(expected, actual + 1, sizeof(expected)) == 0);
+            p8p_audio_destroy(reference);
+            p8p_audio_destroy(batched);
+        }
+    }
+}
+
 int main(void) {
+    audio_chunk_boundaries();
     static const uint8_t source[] =
         "pico-8 cartridge // http://www.pico-8.com\n"
         "version 42\n"
