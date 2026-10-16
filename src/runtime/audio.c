@@ -955,18 +955,16 @@ void p8p_audio_render(p8p_audio_t *audio, int16_t *stereo, size_t frames) {
 
     /* Each synthesis step supplies a midpoint followed by the held sample. */
     int32_t previous = audio->held_sample;
-    for (; frames >= 2; frames -= 2, stereo += 4) {
+    for (; frames; frames -= 2, stereo += 4) {
         int32_t sample = synthesize(audio);
         int16_t midpoint = (int16_t)((previous + sample) / 2);
         stereo[0] = stereo[1] = midpoint;
+        previous = sample;
+        if (frames == 1) {
+            audio->second_output = 1;
+            break;
+        }
         stereo[2] = stereo[3] = (int16_t)sample;
-        previous = sample;
-    }
-    if (frames) {
-        int32_t sample = synthesize(audio);
-        stereo[0] = stereo[1] = (int16_t)((previous + sample) / 2);
-        previous = sample;
-        audio->second_output = 1;
     }
     audio->held_sample = previous;
 }
