@@ -28,79 +28,7 @@
 
 using z8::fix32;
 
-struct p8p_runtime {
-    lua_State *lua;
-    p8p_audio_t *audio;
-    char *cart_lua;
-    size_t cart_lua_size;
-    uint8_t ram[0x10000];
-    uint8_t cart_rom[P8P_CART_ROM_SIZE];
-    /* One byte per logical pixel is the fast drawing surface.  PICO-8's
-     * packed 4-bpp screen RAM is synchronized only when a memory API touches
-     * it, avoiding a read-modify-write for every rendered pixel.  Word
-     * aligned so fill patterns can write four pixels at a time. */
-    alignas(4) uint8_t framebuffer[128 * 128];
-    uint8_t screen_ram_dirty;
-    /* RAM address the framebuffer mirrors: the screen at 0x6000 unless the
-     * cart redirects drawing with 0x5f55 (e.g. into the sprite sheet). */
-    uint16_t draw_target;
-    /* Unpacked screen RAM for presentation while drawing is redirected. */
-    uint8_t display[128 * 128];
-    uint8_t draw_palette[16];
-    uint8_t screen_palette[16];
-    uint8_t transparent[16];
-    /* Derived fast-path state.  These flags are deliberately not serialized:
-     * they are cheap to rebuild after loading a state or draw-state RAM. */
-    uint8_t palettes_default;
-    uint8_t transparency_default;
-    uint8_t buttons;
-    uint8_t previous_buttons;
-    /* Buttons sampled at the start of the current frame; live updates
-     * during the frame may only add to them. */
-    uint8_t frame_buttons;
-    uint16_t held_frames[7];
-    uint32_t rng[2];
-    int camera_x;
-    int camera_y;
-    int clip_x0;
-    int clip_y0;
-    int clip_x1;
-    int clip_y1;
-    int draw_color;
-    uint16_t fill_pattern;
-    uint8_t fill_pattern_transparent;
-    int cursor_x;
-    int cursor_y;
-    int target_fps;
-    uint8_t draw_frame;
-    uint32_t frame_count;
-    int persist_ref;
-    int restore_ref;
-    int frame_ref;  /* Lua dispatcher that runs _update/_draw (registry) */
-    int cart_thread_ref;
-    lua_State *cart_thread;
-    uint8_t cart_thread_active;
-    uint8_t cart_thread_kind;
-    uint8_t restart_requested;
-    /* menuitem() entries 1-5: label ("" when empty), button filter from
-     * bits 8-15 of the index, and a registry table of callbacks. */
-    char menu_labels[5][17];
-    uint8_t menu_filters[5];
-    int menu_ref;
-    p8p_runtime_service_fn service_hook;
-    void *service_userdata;
-    p8p_runtime_profile_fn profile_hook;
-    void *profile_userdata;
-    uint32_t api_profile_calls[P8P_API_CATEGORY_COUNT];
-    uint16_t cart_instruction_slices;
-    p8p_runtime_cartdata_load_fn cartdata_load;
-    p8p_runtime_cartdata_save_fn cartdata_save;
-    void *cartdata_userdata;
-    char cartdata_id[65];
-    uint8_t cartdata_active;
-    uint8_t cartdata_dirty;
-    char error[256];
-};
+#include "runtime_internal.h"
 
 struct p8p_runtime_state_header {
     uint8_t magic[8];
@@ -143,7 +71,8 @@ static_assert(offsetof(p8p_runtime, ram) % 4 == 0,
 static_assert(offsetof(p8p_runtime, framebuffer) % 4 == 0,
               "screen packing uses word access to the framebuffer");
 
-static p8p_runtime_t *active_runtime;
+p8p_runtime_t *p8p_active_runtime;
+#define active_runtime p8p_active_runtime
 
 static void profile_api(p8p_runtime_api_category_t category) {
     if (active_runtime && active_runtime->profile_hook &&
@@ -1375,6 +1304,8 @@ static P8P_FASTTEXT void blit_tile(p8p_runtime_t *runtime, int sprite,
     int source_y = (sprite >> 4) * 8;
     int default_colors = runtime->palettes_default &&
                          runtime->transparency_default;
+    if (!runtime->palettes_default && runtime->transparency_default)
+        default_colors = p8p_draw_palette_identity(runtime->draw_palette);
     runtime->screen_ram_dirty = 1;
     for (int y = start_y; y < end_y; ++y) {
         const uint8_t *source = runtime->ram + sprite_base +
@@ -1521,7 +1452,7 @@ static void reset_transparency(p8p_runtime_t *runtime) {
     runtime->transparency_default = 1;
 }
 
-static int api_pal(lua_State *lua) {
+extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
     profile_api(P8P_API_DRAW_STATE);
     p8p_runtime_t *runtime = active_runtime;
     if (arg_count(lua) == 0) {
@@ -2683,7 +2614,7 @@ static const luaL_Reg runtime_api[] = {
     {"tline", api_tline},
     {"mget", api_mget}, {"mset", api_mset}, {"map", api_map},
     {"mapdraw", api_map}, {"fget", api_fget}, {"fset", api_fset},
-    {"camera", api_camera}, {"clip", api_clip}, {"pal", api_pal},
+    {"camera", api_camera}, {"clip", api_clip}, {"pal", p8p_api_pal},
     {"palt", api_palt}, {"btn", api_btn}, {"btnp", api_btnp},
     {"peek", api_peek}, {"poke", api_poke}, {"peek2", api_peek2},
     {"poke2", api_poke2}, {"peek4", api_peek4}, {"poke4", api_poke4},
