@@ -39,6 +39,7 @@ build)
     cd "$PROJECT_ROOT"
     g++ -x c++ -std=c++17 -O2 -fwrapv -DP8P_RUNTIME_DEBUG -w '-Dluai_makeseed()=0u' \
         -Iinclude -I"$Z" -I"$M" tools/compat_scan.cpp src/runtime/runtime.cpp \
+        src/runtime/palette_fast.cpp \
         src/runtime/audio.c src/runtime/cart.c src/runtime/cart_png.c \
         "${sources[@]}" "$M/miniz.c" -lm -o "$out"
     echo "built $out"

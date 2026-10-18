@@ -28,6 +28,7 @@ SRCS := \
 	$(FAKE08_ROOT)/libs/miniz/miniz.c
 SRCS_CXX := \
 	$(PROJECT_ROOT)/src/runtime/runtime.cpp \
+	$(PROJECT_ROOT)/src/runtime/palette_fast.cpp \
 	$(SDK_DIR)/of_cxxabi.cpp \
 	$(Z8LUA_GENERATED)
 
@@ -60,3 +61,7 @@ all: $(OBJ_DIR)/app.elf
 clean: sdk-clean
 
 .PHONY: all clean
+
+# Keep the small palette leaves out of the whole-program inline budget.
+$(call sdk_app_object,$(PROJECT_ROOT)/src/runtime/palette_fast.cpp): CXXFLAGS += -fno-lto
+$(call sdk_app_object,$(PROJECT_ROOT)/src/runtime/palette_fast.cpp) $(call sdk_app_object,$(PROJECT_ROOT)/src/runtime/runtime.cpp): $(PROJECT_ROOT)/src/runtime/runtime_internal.h
