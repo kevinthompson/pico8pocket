@@ -6,7 +6,7 @@ missing values and arbitrary callbacks. No cached properties or Proto layout cha
 diff --git a/lvm.c b/lvm.c
 --- a/lvm.c
 +++ b/lvm.c
-@@ -107,6 +107,56 @@
+@@ -107,6 +107,69 @@
  }
 
 
@@ -60,21 +60,31 @@ diff --git a/lvm.c b/lvm.c
 +}
 +
 +
++/* Keep speculation and its registers off the ordinary table-read path. */
++__attribute__((noinline))
++static void callIndexTM (lua_State *L, const TValue *tm, const TValue *t,
++                         const TValue *key, StkId val) {
++  const TValue *value = luaV_delegateget(L, t, key, tm);
++  if (value != NULL) {
++    setobj2s(L, val, value);
++  } else {
++    callTM(L, tm, t, key, val, 1);
++  }
++}
++
++
  void luaV_gettable (lua_State *L, const TValue *t, TValue *key, StkId val) {
    // PICO-8 0.2.5 changelog: sub(str,pos,pos) can be written as str[pos]
    if (ttisstring(t)) {
-@@ -136,6 +186,11 @@
+@@ -136,7 +199,7 @@
      else if (ttisnil(tm = luaT_gettmbyobj(L, t, TM_INDEX)))
        luaG_typeerror(L, t, "index");
      if (ttisfunction(tm)) {
-+      const TValue *value = luaV_delegateget(L, t, key, tm);
-+      if (value != NULL) {
-+        setobj2s(L, val, value);
-+        return;
-+      }
-       callTM(L, tm, t, key, val, 1);
+-      callTM(L, tm, t, key, val, 1);
++      callIndexTM(L, tm, t, key, val);
        return;
      }
+     t = tm;  /* else repeat with 'tm' */
 diff --git a/lvm.h b/lvm.h
 --- a/lvm.h
 +++ b/lvm.h
