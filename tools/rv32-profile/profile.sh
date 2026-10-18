@@ -36,6 +36,8 @@ for n in eris lapi lauxlib lbaselib lcode lcorolib lctype ldblib ldebug ldo ldum
     riscv64-unknown-elf-g++ $CXX -x c++ -c "$Z/$n.c" -o "$OUT/obj/$n.o" &
 done
 riscv64-unknown-elf-g++ $CXX -c "$P/src/runtime/runtime.cpp" -o "$OUT/obj/runtime.o" &
+# Match the production leaf boundary after the runtime source split.
+riscv64-unknown-elf-g++ $CXX -fno-lto -c "$P/src/runtime/palette_fast.cpp" -o "$OUT/obj/palette_fast.o" &
 riscv64-unknown-elf-g++ $CXX -I"$OUT" "-DSETUP=\"$setup_escaped\"" -DWARM="$WARM" -DFRAMES="$FRAMES" \
     -c "$HERE/main.cpp" -o "$OUT/obj/main.o" &
 for n in audio cart cart_png; do
