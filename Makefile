@@ -5,6 +5,7 @@ APP_DIR      := $(PROJECT_ROOT)/src/app
 BUILD_DIR    := $(PROJECT_ROOT)/build
 TEST_BIN     := $(BUILD_DIR)/tests/pico8pocket_tests
 RUNTIME_TEST_BIN := $(BUILD_DIR)/tests/pico8pocket_runtime_tests
+DELEGATE_TEST_BIN := $(BUILD_DIR)/tests/pico8pocket_delegate_tests
 COMPAT_SCAN_BIN := $(BUILD_DIR)/tools/pico8pocket_compat_scan
 BUNDLE_LOCAL_CARTS ?= 0
 export BUNDLE_LOCAL_CARTS
@@ -47,9 +48,16 @@ $(COMPAT_SCAN_BIN): tools/compat_scan.cpp src/runtime/runtime.cpp src/runtime/pa
 		tools/compat_scan.cpp src/runtime/runtime.cpp src/runtime/palette_fast.cpp src/runtime/audio.c src/runtime/cart.c \
 		src/runtime/cart_png.c $(Z8LUA_SOURCES) $(MINIZ_ROOT)/miniz.c -lm -o $@
 
-test: deps $(TEST_BIN) $(RUNTIME_TEST_BIN)
+$(DELEGATE_TEST_BIN): tests/delegate_test.cpp $(Z8LUA_SOURCES)
+	@mkdir -p $(dir $@)
+	$(CXX) -x c++ -std=c++17 -O2 -fwrapv -Wall -Wextra \
+		-Wno-deprecated-declarations -Wno-unused-function -Wno-unused-parameter \
+		-I$(Z8LUA_ROOT) tests/delegate_test.cpp $(Z8LUA_SOURCES) -lm -o $@
+
+test: deps $(TEST_BIN) $(RUNTIME_TEST_BIN) $(DELEGATE_TEST_BIN)
 	$(TEST_BIN)
 	$(RUNTIME_TEST_BIN)
+	$(DELEGATE_TEST_BIN)
 
 compat-scan: deps $(COMPAT_SCAN_BIN)
 
