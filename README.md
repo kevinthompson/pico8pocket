@@ -136,6 +136,27 @@ presentation path have been validated on physical Pocket hardware. CPU-heavy
 cartridges and scaler behavior beyond the established 2X path still need more
 compatibility and performance work.
 
+## AI development disclosure
+
+Pico8Pocket has been developed with substantial assistance from OpenAI Codex
+and Claude Code for implementation, tests, documentation and companion tools.
+The maintainer directs changes and tests on hardware; the original creator's
+[personal note](ABOUT_ME.md) also describes AI use. This disclosure does not
+attribute every inherited Fake-08, z8lua, SDK or runtime component to AI.
+
+The core package includes a `declare_ai` list in `updaters.json`. Pocket Sync's
+numeric AI-ness score comes from the separate
+[openFPGA AI report](https://github.com/openfpga-library/openfpga-ai-check),
+not a measured percentage of AI-written source. A missing report is not a
+claim that AI was unused.
+
+## Experimental cart thumbnails
+
+A Go CLI and Pocket Sync plugin can generate Analogue Library artwork from
+your carts’ labels. Native picker display still needs a physical Pocket test.
+See the [one-cart test and tools guide](docs/THUMBNAILS.md). These tools do not
+modify cartridges or saves.
+
 ## Build
 
 Run the portable tests:
@@ -222,6 +243,10 @@ The core is `zenibako.pico8` on the `pico8` platform (shown as PICO-8):
 
 On launch, Pocket's native asset picker asks for a `.p8` or `.p8.png`
 cartridge.
+
+Pocket Sync associates the core with the cartridge slot. Fixed internal files
+(including the JSON launch descriptor) have no game-file filters. The `png`
+filter covers `.p8.png` carts; ZIP archives must be extracted first.
 
 Upgrading from a release that installed `Askent.pico8pocket`: move your carts
 from `/Assets/pico8pocket/common/cards/` to `/Assets/pico8/common/cards/`, then

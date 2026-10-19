@@ -85,3 +85,14 @@ clean:
 	rm -rf $(BUILD_DIR) $(PROJECT_ROOT)/.obj
 
 .PHONY: deps test compat-scan celeste celeste-baseline pocket-elf pocket validate package package-local clean
+
+# Independent host-side tools; no SDK or private cartridge dependency.
+thumbnail-test:
+	python3 -m unittest discover -s tests -p 'test_package_metadata.py'
+	go test ./...
+	go vet ./...
+
+thumbnail-tools:
+	./scripts/build-tools.sh
+
+.PHONY: thumbnail-test thumbnail-tools
