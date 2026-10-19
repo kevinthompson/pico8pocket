@@ -34,6 +34,8 @@ jobs:
           tar -xzf "$RUNNER_TEMP/binaryen.tar.gz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/tinygo/bin" >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/binaryen-version_133/bin" >> "$GITHUB_PATH"
+      - name: Check packaged AI disclosure
+        run: python3 -m unittest discover -s tests -p 'test_package_metadata.py'
       - run: make thumbnail-tools
       - name: Test compiled Pocket Sync plugin
         env:

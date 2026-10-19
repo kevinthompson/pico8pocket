@@ -136,6 +136,20 @@ presentation path have been validated on physical Pocket hardware. CPU-heavy
 cartridges and scaler behavior beyond the established 2X path still need more
 compatibility and performance work.
 
+## AI development disclosure
+
+Pico8Pocket has been developed with substantial assistance from OpenAI Codex
+and Claude Code for implementation, tests, documentation and companion tools.
+The maintainer directs changes and tests on hardware; the original creator's
+[personal note](ABOUT_ME.md) also describes AI use. This disclosure does not
+attribute every inherited Fake-08, z8lua, SDK or runtime component to AI.
+
+The core package includes a `declare_ai` list in `updaters.json`. Pocket Sync's
+numeric AI-ness score comes from the separate
+[openFPGA AI report](https://github.com/openfpga-library/openfpga-ai-check),
+not a measured percentage of AI-written source. A missing report is not a
+claim that AI was unused.
+
 ## Experimental cart thumbnails
 
 A Go CLI and Pocket Sync plugin can generate Analogue Library artwork from

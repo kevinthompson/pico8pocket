@@ -88,6 +88,7 @@ clean:
 
 # Independent host-side tools; no SDK or private cartridge dependency.
 thumbnail-test:
+	python3 -m unittest discover -s tests -p 'test_package_metadata.py'
 	go test ./...
 	go vet ./...
 
