@@ -3,6 +3,8 @@
  * alignment; do not pin addresses or retain otherwise-unused functions. */
 SECTIONS {
   .p8p_vm_hot : {
+    /* musl crt1 uses plain .text; keep the SDK entry at the SDRAM base. */
+    KEEP(*crt1.o(.text))
     KEEP(*(.text.start))
     HIDDEN(__p8p_hot_all_next_start = .);
     *(.text._ZL12api_all_nextP9lua_State*)
