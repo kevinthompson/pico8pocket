@@ -24,3 +24,4 @@ SECTIONS {
   } > SDRAM
 }
 INSERT BEFORE .text;
+ASSERT(_start == ORIGIN(SDRAM), "CRT entry moved from SDRAM base");
