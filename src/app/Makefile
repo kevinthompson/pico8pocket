@@ -67,8 +67,9 @@ clean: sdk-clean
 $(call sdk_app_object,$(PROJECT_ROOT)/src/runtime/palette_fast.cpp): CXXFLAGS += -fno-lto
 $(call sdk_app_object,$(PROJECT_ROOT)/src/runtime/palette_fast.cpp) $(call sdk_app_object,$(PROJECT_ROOT)/src/runtime/runtime.cpp): $(PROJECT_ROOT)/src/runtime/runtime_internal.h
 
-# The callback boundary must not affect VM IPA or ordinary text/data placement.
+# Keep the guarded delegate helper outside whole-program IPA.
 $(call sdk_app_object,$(PROJECT_ROOT)/src/runtime/vm_delegate.cpp): CXXFLAGS += -fno-lto
 LDFLAGS += -Wl,-T,$(PROJECT_ROOT)/mk/vm-cold.ld
+LDFLAGS += -Wl,-T,$(PROJECT_ROOT)/mk/vm-hot.ld
 
-$(OBJ_DIR)/app.elf: $(PROJECT_ROOT)/mk/vm-cold.ld
+$(OBJ_DIR)/app.elf: $(PROJECT_ROOT)/mk/vm-cold.ld $(PROJECT_ROOT)/mk/vm-hot.ld
