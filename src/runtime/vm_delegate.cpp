@@ -17,8 +17,10 @@
 #endif
 static_assert(sizeof(Value) == sizeof(uintptr_t), "callback payload ABI");
 
-// Private short-string reads avoid keeping a public luaH_getstr ABI alive.
-// Keep bucket/chain semantics identical to ltable.c; no allocation or mutation.
+/** @brief Read an interned short-string key without allocating or mutating.
+ * Mirrors ltable.c bucket/chain lookup without retaining the public luaH_getstr
+ * ABI. Returns a borrowed table slot, or luaO_nilobject when the key is absent.
+ */
 static inline __attribute__((always_inline)) const TValue *delegate_raw(Table *t, TString *key) {
   Node *n = gnode(t, lmod(key->tsv.hash, sizenode(t)));
   do {
@@ -29,9 +31,15 @@ static inline __attribute__((always_inline)) const TValue *delegate_raw(Table *t
   return luaO_nilobject;
 }
 
-/* Resolve only successful, allocation-free reads through exact pure Lua
-** delegates: function(self, key) return self.<constant field>[key] end.
-** Failed speculation leaves the ordinary metamethod call untouched. */
+/** @brief Resolve a read through at most four exact, pure Lua delegates.
+ * Accepts only warmed function(self, key) return self.<constant field>[key] end
+ * closures with sufficient existing call/stack capacity, no observable hooks
+ * and no pending GC work. Does not allocate, collect or invoke cart code.
+ * Returns a borrowed non-nil slot (including false), or NULL to require the
+ * ordinary metamethod call. Copy the slot into a rooted value before allocation,
+ * cart calls or table mutation. A miss may cache the absence of __index in
+ * metatable flags; it does not alter the Lua stack or callback state.
+ */
 P8P_VM_COLD
 const TValue *luaV_delegateget (lua_State *L, const TValue *t,
                               const TValue *key, const TValue *tm) {
@@ -85,9 +93,14 @@ const TValue *luaV_delegateget (lua_State *L, const TValue *t,
 }
 
 
-// Match the original RV32 callTM IPA clone's seven-word calling convention.
-// Only this cold boundary reconstructs the function TValue; the lookup loop
-// retains scalar payload/tag arguments and its original register pressure.
+/** @brief Exercise the scalar callback ABI through the retained cold thunk.
+ * Used by the contract tests; production callTM uses luaV_delegateclosure.
+ * Retained with the measured image layout. Reconstructs the complete Value/tag
+ * pair, tries the guard for result-bearing calls, then roots the callback and
+ * arguments before a normal Lua call. With hasres == 1, p3 receives the result
+ * after restoring its stack offset; with hasres == 0, p3 is the third argument.
+ * Yield/error behavior follows luaD_call and the current Lua/C caller context.
+ */
 P8P_VM_COLD
 void luaV_callindex(lua_State *L, Value function_value, int function_tag,
                     const TValue *p1, const TValue *p2, TValue *p3, int hasres) {
@@ -116,8 +129,11 @@ void luaV_callindex(lua_State *L, Value function_value, int function_tag,
   }
 }
 
-// Preserve the VM's original callTM edge and scalar IPA convention. The guard
-// is entered only from the existing callback body, before any stack mutation.
+/** @brief Adapt a complete scalar Value/tag pair for guard contract tests.
+ * This retained adapter preserves the measured image layout; production uses
+ * the typed closure entry. Borrows operands and returns the delegate guard's
+ * borrowed slot or NULL fallback without pushing a callback onto the stack.
+ */
 P8P_VM_COLD
 const TValue *luaV_delegatebits(lua_State *L, Value function_value,
                                 int function_tag, const TValue *p1,
@@ -128,8 +144,11 @@ const TValue *luaV_delegatebits(lua_State *L, Value function_value,
   return luaV_delegateget(L, p1, p2, &function);
 }
 
-// Enter only after the original callback has verified a Lua closure tag. A
-// typed pointer avoids aggregate ABI coupling and inactive union reads.
+/** @brief Enter the delegate guard after callTM proves a Lua closure tag.
+ * The typed pointer avoids aggregate ABI coupling and inactive union reads.
+ * Borrows the closure and operands; returns a borrowed non-nil slot on success
+ * or NULL when callTM must execute its ordinary callback path.
+ */
 P8P_VM_COLD
 const TValue *luaV_delegateclosure(lua_State *L, LClosure *closure,
                                    const TValue *p1, const TValue *p2) {

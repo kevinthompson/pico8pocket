@@ -2504,11 +2504,13 @@ static int api_serial(lua_State *lua) {
     return 1;
 }
 
-/* all(t) iterator; upvalues are the table, the next index and the value
- * returned last.  If that value is no longer at the index (the cart deleted
- * it), the index stays, as in PICO-8.  This runs once per loop iteration in
- * most carts, so it works on the table directly and computes #t only when
- * the slot is empty. */
+/** @brief Yield the next all(t) value with PICO-8 deletion semantics.
+ * Uses the current C closure's table, index and previous-value upvalues. If
+ * cart code removed the previous value, visits the same index again; otherwise
+ * advances using raw equality. Skips nil slots up to the raw table boundary.
+ * Updates the iterator and its GC barrier before pushing one value, or nil
+ * when exhausted. Computes the boundary only when an empty slot requires it.
+ */
 #if defined(__GNUC__)
 __attribute__((noinline))
 #endif
@@ -2549,9 +2551,13 @@ static int all_next_slow(lua_State *lua) {
     return 1;
 }
 
-/* Actor lists are dense arrays of tables. Keep their common path independent
- * of sparse-list traversal and general raw equality. No pointer survives a call
- * to cart code; the complete iterator remains the fallback for every other case. */
+/** @brief Yield dense actor-table entries, falling back for every other case.
+ * Reads array storage afresh on each invocation because cart code can resize
+ * or mutate it between yields. Table identity determines whether to advance.
+ * Every guard falls back before changing upvalues or the stack, so the slow
+ * iterator resumes from the original state. A hit applies the same GC barrier
+ * and pushes the same single value as all_next_slow.
+ */
 static int api_all_next(lua_State *lua) {
     profile_api(P8P_API_HELPER);
     CClosure *closure = clCvalue(lua->ci->func);
@@ -2584,6 +2590,10 @@ static int api_all_next(lua_State *lua) {
     return 1;
 }
 
+/** @brief Create all(t)'s iterator with table, index 1 and nil previous value.
+ * Captures the supplied value (or nil) in three GC-rooted closure upvalues and
+ * returns the iterator as one Lua result; traversal validates the table later.
+ */
 static int api_all(lua_State *lua) {
     profile_api(P8P_API_HELPER);
     if (arg_count(lua) >= 1)

@@ -10,7 +10,15 @@
 #include <lvm.h>
 static int failures;
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x);++failures;}}while(0)
+/** @brief Run fixture code and restore the caller's original Lua stack top.
+ * Unexpected load/runtime errors print a diagnostic and exit with status 2.
+ */
 static void eval(lua_State*L,const char*code){int n=lua_gettop(L);int rc=luaL_loadbuffer(L,code,strlen(code),"@guarded-fixture")||lua_pcall(L,0,LUA_MULTRET,0);if(rc){fprintf(stderr,"unexpected Lua error: %s\n",lua_tostring(L,-1));exit(2);}lua_settop(L,n);}
+/** @brief Probe delegate D with O and key for guarded resolution or fallback.
+ * Temporarily clears GC debt to isolate other guards, then restores debt and
+ * stack height. Returns a copy in static scratch storage, overwritten by the
+ * next probe; this storage is not a GC root and must be consumed immediately.
+ */
 static const TValue* probe(lua_State*L,const char*key,bool fallback){
     int n=lua_gettop(L);lua_getglobal(L,"O");lua_pushstring(L,key);lua_getglobal(L,"D");
     l_mem debt=G(L)->GCdebt;G(L)->GCdebt=-1;
@@ -18,9 +26,16 @@ static const TValue* probe(lua_State*L,const char*key,bool fallback){
     G(L)->GCdebt=debt;CHECK((result==NULL)==fallback);
     static TValue value;if(result)setobj(L,&value,result);lua_settop(L,n);return result?&value:NULL;
 }
+/** @brief Require a guarded numeric hit equal to the expected fixed value. */
 static void number(lua_State*L,const char*key,int expected){const TValue*v=probe(L,key,false);CHECK(v&&ttisnumber(v)&&nvalue(v)==z8::fix32(expected));}
+/** @brief Do nothing when tests install a hook to isolate hook-mask eligibility. */
 static void hook(lua_State*,lua_Debug*){}
 void cold_thunk_contracts();
+/** @brief Run guard and callback contracts in isolated Lua states.
+ * Covers mutation, false values, depth/capacity limits, hooks, GC debt, hash
+ * collisions and observable fallback behavior including errors and yields.
+ * Closes the owned state and returns nonzero if any CHECK assertion failed.
+ */
 int main(){
     cold_thunk_contracts();
     lua_State*L=luaL_newstate();CHECK(L);luaL_openlibs(L);

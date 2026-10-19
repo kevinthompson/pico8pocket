@@ -445,6 +445,11 @@ static void palette_leaf_contracts(void) {
     free(runtime);
 }
 
+/** @brief Run host runtime contracts and embedded cartridge regression cases.
+ * Checks API state and rendered pixel markers, including all(t) traversal
+ * through deletion, growth, collection and mixed values. Returns nonzero on
+ * failed checks so iterator changes are covered by the normal test target.
+ */
 int main(void) {
     palette_leaf_contracts();
     palette_fast_path_semantics();

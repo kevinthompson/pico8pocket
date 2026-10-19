@@ -8,15 +8,26 @@
 #include "lstate.h"
 #include "lobject.h"
 #include "lvm.h"
+/** @brief Return 37 to identify the light-C callback payload in ABI tests. */
 static int light(lua_State*L){lua_pushinteger(L,37);return 1;}
+/** @brief Return the captured upvalue to verify C-closure payload dispatch. */
 static int closure(lua_State*L){lua_pushvalue(L,lua_upvalueindex(1));return 1;}
+/** @brief Run fixture code with no results, asserting on load/runtime errors.
+ * Borrows the Lua state and preserves stack values below the loaded chunk.
+ */
 static void eval(lua_State*L,const char*s){int rc=luaL_loadstring(L,s)||lua_pcall(L,0,0,0);if(rc){fprintf(stderr,"%s\n",lua_tostring(L,-1));assert(false);}}
+/** @brief Call the retained thunk using the top four Lua stack slots.
+ * Requires callback, table, key and value/result slots in that order. hasres
+ * selects whether the fourth slot receives a result or supplies argument three.
+ */
 static void invoke(lua_State*L,int hasres){
  static_assert(sizeof(Value)==sizeof(uintptr_t),"function payload ABI");
  TValue*f=L->top-4,*t=L->top-3,*k=L->top-2,*v=L->top-1;luaV_callindex(L,f->value_,f->tt_,t,k,v,hasres);
 }
-// Exercise the internal callback boundary through all five real VM callers,
-// rather than only invoking the separate cold thunk directly.
+/** @brief Validate VM callback arguments and count each invocation.
+ * Assignment receives a third argument of 9 and returns nothing. Other calls
+ * return 17 for a light-C callback or the captured value for a C closure.
+ */
 static int vm_callback(lua_State *L) {
  assert(lua_gettop(L)==2 || lua_gettop(L)==3);
  assert(lua_istable(L,1));
@@ -30,6 +41,11 @@ static int vm_callback(lua_State *L) {
  lua_pushinteger(L,lua_isnone(L,lua_upvalueindex(1))?17:lua_tointeger(L,lua_upvalueindex(1)));
  return 1;
 }
+/** @brief Verify the five real VM callback paths using a borrowed Lua state.
+ * Checks light-C and captured C callbacks for index, assignment, addition,
+ * equality and length; also verifies callable-table dispatch and invalid
+ * callback errors. Fixture globals are replaced in the supplied state.
+ */
 static void vm_callback_contracts(lua_State *L) {
  for(int captured=0;captured<2;++captured){
   if(captured){lua_pushinteger(L,41);lua_pushcclosure(L,vm_callback,1);}
@@ -44,6 +60,11 @@ static void vm_callback_contracts(lua_State *L) {
  assert(strstr(lua_tostring(L,-1),"number"));lua_pop(L,1);
  puts("PASS five VM callback paths with light-C and captured C callbacks");
 }
+/** @brief Own a Lua state for VM-caller and retained-adapter contract tests.
+ * Verifies complete callback payload/tag dispatch, guarded and ordinary Lua
+ * paths, mutations, false hits and no-result assignment. Assertions fail the
+ * test on mismatch; the state is closed after all contracts pass.
+ */
 void cold_thunk_contracts(){
  lua_State*L=luaL_newstate();luaL_openlibs(L);assert(lua_checkstack(L,64));
  vm_callback_contracts(L);

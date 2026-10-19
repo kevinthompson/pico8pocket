@@ -47,9 +47,10 @@ build)
 diff)
     old="$2"; new="$3"; shift 3
     same=0; differ=0
-    # Scanner exit codes 0, 3 (load error) and 4 (runtime error) are results
-    # to compare; anything else (missing binary, setarch failure, bad cart
-    # path) means the run itself failed.
+    ## Run scanner $1 on cart $2 with fixed input and seed for $FRAMES frames.
+    # Print comparable output and exit status, omitting variable avg timings.
+    # Exit codes 0, 3 (load error) and 4 (runtime error) are comparable results;
+    # any other code aborts with status 2 because the scanner could not run.
     scan() {
         local output status=0
         output="$(P8P_EVERY_FRAME=1 setarch -R "$1" "$2" "$FRAMES" 1 2>&1)" ||

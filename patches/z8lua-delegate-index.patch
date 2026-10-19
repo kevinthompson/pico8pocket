@@ -1,13 +1,17 @@
 --- a/lvm.c
 +++ b/lvm.c
-@@ -90,8 +90,24 @@
+@@ -90,8 +90,28 @@
  }
 
 
 -static void callTM (lua_State *L, const TValue *f, const TValue *p1,
 -                    const TValue *p2, TValue *p3, int hasres) {
-+/* Keep the callback body in the existing cold section while retaining its
-+   explicit scalar ABI and the interpreter's outlined calls. */
++/** @brief Dispatch a metamethod using the original scalar Value/tag ABI.
++ * Result-bearing Lua closures may use the guarded delegate shortcut. Otherwise
++ * roots the reconstructed callback and arguments before luaD_call, preserving
++ * the caller's yield/error behavior. hasres == 1 stores one result in p3 using
++ * a saved stack offset across possible relocation; otherwise p3 is argument 3.
++ */
 +static void callTM (lua_State *L, Value function_value, int function_tag,
 +                    const TValue *p1, const TValue *p2, TValue *p3, int hasres) {
 +  /* Make the baseline scalar callback ABI explicit. Copy the whole Value so
@@ -27,7 +31,7 @@
    ptrdiff_t result = savestack(L, p3);
    setobj2s(L, L->top++, f);  /* push function */
    setobj2s(L, L->top++, p1);  /* 1st argument */
-@@ -136,7 +152,7 @@
+@@ -136,7 +156,7 @@
      else if (ttisnil(tm = luaT_gettmbyobj(L, t, TM_INDEX)))
        luaG_typeerror(L, t, "index");
      if (ttisfunction(tm)) {
@@ -36,7 +40,7 @@
        return;
      }
      t = tm;  /* else repeat with 'tm' */
-@@ -299,7 +315,7 @@
+@@ -299,7 +319,7 @@
          luaG_typeerror(L, t, "index");
      /* there is a metamethod */
      if (ttisfunction(tm)) {
@@ -45,7 +49,7 @@
        return;
      }
      t = tm;  /* else repeat with 'tm' */
-@@ -314,7 +330,7 @@
+@@ -314,7 +334,7 @@
    if (ttisnil(tm))
      tm = luaT_gettmbyobj(L, p2, event);  /* try second operand */
    if (ttisnil(tm)) return 0;
@@ -54,7 +58,7 @@
    return 1;
  }
 
-@@ -443,7 +459,7 @@
+@@ -443,7 +463,7 @@
        return gcvalue(t1) == gcvalue(t2);
    }
    if (tm == NULL) return 0;  /* no TM? */
@@ -63,7 +67,7 @@
    return !l_isfalse(L->top);
  }
 
-@@ -511,7 +527,7 @@
+@@ -511,7 +531,7 @@
        break;
      }
    }
