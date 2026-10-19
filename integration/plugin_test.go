@@ -102,6 +102,9 @@ func TestCompiledPlugin(t *testing.T) {
 					t.Fatalf("changed %s: %v", name, err)
 				}
 			}
+			if out := call("handle_response", []byte(`{"Kill":{}}`)); string(out) != `"Exit"` {
+				t.Fatalf("cancel did not exit: %s", out)
+			}
 			entries, err := os.ReadDir(host)
 			if err != nil || len(entries) != 0 {
 				t.Fatal("host mount changed")

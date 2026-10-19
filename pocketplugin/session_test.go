@@ -78,20 +78,29 @@ func TestMenuHelpAndReplay(t *testing.T) {
 		t.Fatal("after exit accepted")
 	}
 }
+
+// TestKillAndBeforeStart accepts both documented and deployed cancellation forms.
 func TestKillAndBeforeStart(t *testing.T) {
-	s := New(tempRoot(t), nil)
-	if _, e := s.Handle([]byte(`"Kill"`)); e == nil {
-		t.Fatal("before Start accepted")
-	}
-	start(t, s)
-	b, e := s.Handle([]byte(`"Kill"`))
-	if e != nil || string(b) != `"Exit"` {
-		t.Fatalf("%s %v", b, e)
+	for _, input := range []string{`"Kill"`, `{"Kill":{}}`} {
+		t.Run(input, func(t *testing.T) {
+			s := New(tempRoot(t), nil)
+			if _, e := s.Handle([]byte(input)); e == nil {
+				t.Fatal("before Start accepted")
+			}
+			start(t, s)
+			b, e := s.Handle([]byte(input))
+			if e != nil || string(b) != `"Exit"` {
+				t.Fatalf("%s %v", b, e)
+			}
+			if _, e := s.Handle([]byte(input)); e == nil {
+				t.Fatal("after Exit accepted")
+			}
+		})
 	}
 }
 func TestStrictAnswers(t *testing.T) {
 	invalid := []string{
-		`null`, `{}`, `[]`, `"Exit"`, `{"Kill":{}}`, `{"Answer":null}`,
+		`null`, `{}`, `[]`, `"Exit"`, `{"Kill":null}`, `{"Kill":[]}`, `{"Kill":{"extra":true}}`, `{"Kill":{},"extra":0}`, `{"Kill":{},"Kill":{}}`, `{"Kill":{}} null`, `{"Answer":null}`,
 		`{"Answer":{"name":"NAME","value":"Help","root":"/tmp"}}`,
 		`{"Answer":{"name":"NAME","value":"Help"},"extra":0}`,
 		`{"Answer":{"name":"NAME","name":"NAME","value":"Help"}}`,

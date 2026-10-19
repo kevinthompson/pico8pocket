@@ -148,6 +148,20 @@ func parseResponse(input []byte) (name, value string, kill bool, err error) {
 		return "", "", false, invalid
 	}
 	key, e := d.Token()
+	if e == nil && key == "Kill" {
+		// The published protocol uses an empty object; deployed hosts also
+		// send the unit string handled above. Require the exact object shape.
+		for _, want := range []json.Delim{'{', '}', '}'} {
+			got, readErr := d.Token()
+			if readErr != nil || got != want {
+				return "", "", false, invalid
+			}
+		}
+		if !eof() {
+			return "", "", false, invalid
+		}
+		return "", "", true, nil
+	}
 	if e != nil || key != "Answer" {
 		return "", "", false, invalid
 	}
