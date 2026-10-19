@@ -136,6 +136,13 @@ presentation path have been validated on physical Pocket hardware. CPU-heavy
 cartridges and scaler behavior beyond the established 2X path still need more
 compatibility and performance work.
 
+## Experimental cart thumbnails
+
+A Go CLI and Pocket Sync plugin can generate Analogue Library artwork from
+your carts’ labels. Native picker display still needs a physical Pocket test.
+See the [one-cart test and tools guide](docs/THUMBNAILS.md). These tools do not
+modify cartridges or saves.
+
 ## Build
 
 Run the portable tests:

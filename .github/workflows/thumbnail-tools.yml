@@ -1,0 +1,48 @@
+name: Thumbnail tools
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - run: go vet ./...
+  wasm:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Install pinned WASM toolchains
+        run: |
+          curl -fL -o "$RUNNER_TEMP/tinygo.tar.gz" https://github.com/tinygo-org/tinygo/releases/download/v0.43.0/tinygo0.43.0.linux-amd64.tar.gz
+          echo "ca9fc6d055e3889462dea4450a2e42a92242d88b5c362a7ec39bdb563413d78a  $RUNNER_TEMP/tinygo.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/tinygo.tar.gz" -C "$RUNNER_TEMP"
+          curl -fL -o "$RUNNER_TEMP/binaryen.tar.gz" https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz
+          echo "2dc9c7813f5375db93d96ead4b78222fcc3e2677bbb832297af4797782a37489  $RUNNER_TEMP/binaryen.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/binaryen.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/tinygo/bin" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/binaryen-version_133/bin" >> "$GITHUB_PATH"
+      - run: make thumbnail-tools
+      - name: Test compiled Pocket Sync plugin
+        env:
+          REQUIRE_PLUGIN_TESTS: '1'
+          POCKET_PLUGIN_WASM: ${{ github.workspace }}/build/thumbnail-tools/plugin.wasm
+          CART_THUMBNAILS_WASM: ${{ github.workspace }}/build/thumbnail-tools/cart-thumbnails.wasm
+        run: go test ./integration -count=1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: thumbnail-tools
+          path: build/thumbnail-tools/*
+          if-no-files-found: error

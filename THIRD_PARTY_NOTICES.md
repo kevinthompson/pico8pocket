@@ -35,3 +35,16 @@ PICO-8 is a product of Lexaloffle Games LLP. Analogue Pocket and openFPGA are
 products and technologies of Analogue. Pico8Pocket is an independent,
 unofficial compatibility project and is not affiliated with, endorsed by, or
 sponsored by Lexaloffle Games LLP or Analogue.
+
+## Optional thumbnail tools
+
+The independent Go thumbnail tooling is MIT-licensed. Its compiled distributions
+include Go and TinyGo runtime code and the Extism Go PDK; compiler runtime
+builtins may be linked by TinyGo. Their license texts are retained in
+`tools/thumbnail-licenses/` and bundled as `TOOL-NOTICES.txt`. The Extism host
+SDK and wazero are test-only dependencies, not included in the native CLI.
+
+Sources: Go 1.25+ (BSD-3-Clause), TinyGo 0.43.0 (BSD-3-Clause),
+Extism go-pdk 1.1.3 (BSD-3-Clause), compiler-rt (Apache-2.0 with LLVM exceptions
+and legacy license notices as reproduced). No Butterscotch implementation
+source is incorporated into these tools.
