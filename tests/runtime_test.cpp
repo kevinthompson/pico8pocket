@@ -1168,14 +1168,18 @@ int main(void) {
                 "local n=0 for v in all({}) do n+=1 end for v in all(nil) do n+=1 end\n"
                 "if n==0 then pset(4,0,7) end\n"
                 "local t={} for i=1,20 do t['key'..i]=i end t[1]=1 t[2]=2 if run(t,function() end)=='12' then pset(5,0,7) end\n"
-                "if run({1,2,3,4,5,6,7,8},function(t,v) if v==5 then t[4]=nil t[8]=nil end end)=='1234567' then pset(6,0,7) end end\n";
+                "if run({1,2,3,4,5,6,7,8},function(t,v) if v==5 then t[4]=nil t[8]=nil end end)=='1234567' then pset(6,0,7) end\n"
+                "local t={1,2} local sum=0 for v in all(t) do if v==1 then for i=3,128 do t[i]=i end collectgarbage() end sum+=v end if sum==8256 then pset(7,0,7) end\n"
+                "local a={} local t={a,false,3,'x'} local n=0 for v in all(t) do n+=1 if n==1 then del(t,a) collectgarbage() end end if n==4 and #t==3 then pset(8,0,7) end\n"
+                "local traps=0 local t=setmetatable({1,2},{__len=function() traps+=1 return 100 end,__index=function() traps+=1 end}) if run(t,function() end)=='12' and traps==0 then pset(9,0,7) end\n"
+                "local t={[1]=1,[2]=2,[3]=3} if run(t,function() end)=='123' then pset(10,0,7) end end\n";
             p8p_cart_t all_cart = {};
             CHECK(p8p_cart_load_text_memory((const uint8_t *)all_source,
                                             sizeof(all_source) - 1,
                                             &all_cart) == 0);
             CHECK(p8p_runtime_load(runtime, &all_cart) == 0);
             CHECK(p8p_runtime_step(runtime, 0) == 0);
-            for (int check = 0; check < 7; ++check) {
+            for (int check = 0; check < 11; ++check) {
                 if (p8p_runtime_framebuffer(runtime)[check] != 7)
                     fprintf(stderr, "all() check %d failed\n", check);
                 CHECK(p8p_runtime_framebuffer(runtime)[check] == 7);

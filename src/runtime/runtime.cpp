@@ -2504,6 +2504,15 @@ static int api_serial(lua_State *lua) {
     return 1;
 }
 
+/* Match luaH_getint's array probe without an out-of-line lookup on each
+ * yielded item. Re-read the table on every call: cart code may resize it. */
+static inline const TValue *all_getint(Table *table, int index) {
+    unsigned int offset = static_cast<unsigned int>(index) - 1u;
+    if (offset < static_cast<unsigned int>(table->sizearray))
+        return &table->array[offset];
+    return luaH_getint(table, index);
+}
+
 /* all(t) iterator; upvalues are the table, the next index and the value
  * returned last.  If that value is no longer at the index (the cart deleted
  * it), the index stays, as in PICO-8.  This runs once per loop iteration in
@@ -2522,16 +2531,16 @@ static int api_all_next(lua_State *lua) {
     Table *table = hvalue(table_value);
     int index;
     lua_number2int(index, nvalue(index_value));
-    const TValue *slot = luaH_getint(table, index);
+    const TValue *slot = all_getint(table, index);
     /* Items are usually tables, whose raw equality is identity. */
     if (ttistable(slot) && ttistable(previous) ?
             hvalue(slot) == hvalue(previous) :
             luaV_rawequalobj(slot, previous))
-        slot = luaH_getint(table, ++index);
+        slot = all_getint(table, ++index);
     if (ttisnil(slot)) {
         int length = luaH_getn(table);
         while (index <= length && ttisnil(slot))
-            slot = luaH_getint(table, ++index);
+            slot = all_getint(table, ++index);
         if (index > length) {
             setnvalue(index_value, cast_num(index));
             setnilvalue(previous);
