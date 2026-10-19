@@ -1,14 +1,19 @@
-Pass callback payload and tag explicitly across the guarded VM boundary.
+Place the scalar VM callback body in the existing cold section.
 
 diff --git a/lvm.c b/lvm.c
 --- a/lvm.c
 +++ b/lvm.c
-@@ -90,8 +90,22 @@
+@@ -90,8 +90,27 @@
  }
 
 
 -static void callTM (lua_State *L, const TValue *f, const TValue *p1,
 -                    const TValue *p2, TValue *p3, int hasres) {
++/* Keep the callback body in the existing cold section while retaining its
++   explicit scalar ABI and the interpreter's outlined calls. */
++#if defined(__ELF__)
++__attribute__((noinline, section(".p8p_vm_cold")))
++#endif
 +static void callTM (lua_State *L, Value function_value, int function_tag,
 +                    const TValue *p1, const TValue *p2, TValue *p3, int hasres) {
 +  /* Make the baseline scalar callback ABI explicit. Copy the whole Value so
@@ -28,7 +33,7 @@ diff --git a/lvm.c b/lvm.c
    ptrdiff_t result = savestack(L, p3);
    setobj2s(L, L->top++, f);  /* push function */
    setobj2s(L, L->top++, p1);  /* 1st argument */
-@@ -136,7 +150,7 @@
+@@ -136,7 +155,7 @@
      else if (ttisnil(tm = luaT_gettmbyobj(L, t, TM_INDEX)))
        luaG_typeerror(L, t, "index");
      if (ttisfunction(tm)) {
@@ -37,7 +42,7 @@ diff --git a/lvm.c b/lvm.c
        return;
      }
      t = tm;  /* else repeat with 'tm' */
-@@ -299,7 +313,7 @@
+@@ -299,7 +318,7 @@
          luaG_typeerror(L, t, "index");
      /* there is a metamethod */
      if (ttisfunction(tm)) {
@@ -46,7 +51,7 @@ diff --git a/lvm.c b/lvm.c
        return;
      }
      t = tm;  /* else repeat with 'tm' */
-@@ -314,7 +328,7 @@
+@@ -314,7 +333,7 @@
    if (ttisnil(tm))
      tm = luaT_gettmbyobj(L, p2, event);  /* try second operand */
    if (ttisnil(tm)) return 0;
@@ -55,7 +60,7 @@ diff --git a/lvm.c b/lvm.c
    return 1;
  }
 
-@@ -443,7 +457,7 @@
+@@ -443,7 +462,7 @@
        return gcvalue(t1) == gcvalue(t2);
    }
    if (tm == NULL) return 0;  /* no TM? */
@@ -64,7 +69,7 @@ diff --git a/lvm.c b/lvm.c
    return !l_isfalse(L->top);
  }
 
-@@ -511,7 +525,7 @@
+@@ -511,7 +530,7 @@
        break;
      }
    }
