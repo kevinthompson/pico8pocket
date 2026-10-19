@@ -2504,22 +2504,15 @@ static int api_serial(lua_State *lua) {
     return 1;
 }
 
-/* Match luaH_getint's array probe without an out-of-line lookup on each
- * yielded item. Re-read the table on every call: cart code may resize it. */
-static inline const TValue *all_getint(Table *table, int index) {
-    unsigned int offset = static_cast<unsigned int>(index) - 1u;
-    if (offset < static_cast<unsigned int>(table->sizearray))
-        return &table->array[offset];
-    return luaH_getint(table, index);
-}
-
 /* all(t) iterator; upvalues are the table, the next index and the value
  * returned last.  If that value is no longer at the index (the cart deleted
  * it), the index stays, as in PICO-8.  This runs once per loop iteration in
  * most carts, so it works on the table directly and computes #t only when
  * the slot is empty. */
-static int api_all_next(lua_State *lua) {
-    profile_api(P8P_API_HELPER);
+#if defined(__GNUC__)
+__attribute__((noinline))
+#endif
+static int all_next_slow(lua_State *lua) {
     CClosure *closure = clCvalue(lua->ci->func);
     TValue *table_value = &closure->upvalue[0];
     TValue *index_value = &closure->upvalue[1];
@@ -2531,16 +2524,16 @@ static int api_all_next(lua_State *lua) {
     Table *table = hvalue(table_value);
     int index;
     lua_number2int(index, nvalue(index_value));
-    const TValue *slot = all_getint(table, index);
+    const TValue *slot = luaH_getint(table, index);
     /* Items are usually tables, whose raw equality is identity. */
     if (ttistable(slot) && ttistable(previous) ?
             hvalue(slot) == hvalue(previous) :
             luaV_rawequalobj(slot, previous))
-        slot = all_getint(table, ++index);
+        slot = luaH_getint(table, ++index);
     if (ttisnil(slot)) {
         int length = luaH_getn(table);
         while (index <= length && ttisnil(slot))
-            slot = all_getint(table, ++index);
+            slot = luaH_getint(table, ++index);
         if (index > length) {
             setnvalue(index_value, cast_num(index));
             setnilvalue(previous);
@@ -2550,6 +2543,41 @@ static int api_all_next(lua_State *lua) {
     }
     setnvalue(index_value, cast_num(index));
     setobj(lua, previous, slot);
+    luaC_barrier(lua, closure, slot);
+    setobj2s(lua, lua->top, slot);
+    ++lua->top;
+    return 1;
+}
+
+/* Actor lists are dense arrays of tables. Keep their common path independent
+ * of sparse-list traversal and general raw equality. No pointer survives a call
+ * to cart code; the complete iterator remains the fallback for every other case. */
+static int api_all_next(lua_State *lua) {
+    profile_api(P8P_API_HELPER);
+    CClosure *closure = clCvalue(lua->ci->func);
+    TValue *table_value = &closure->upvalue[0];
+    if (!ttistable(table_value))
+        return all_next_slow(lua);
+    Table *table = hvalue(table_value);
+    int index;
+    lua_number2int(index, nvalue(&closure->upvalue[1]));
+    unsigned int offset = static_cast<unsigned int>(index) - 1u;
+    if (offset >= static_cast<unsigned int>(table->sizearray))
+        return all_next_slow(lua);
+    const TValue *slot = &table->array[offset];
+    if (!ttistable(slot))
+        return all_next_slow(lua);
+    const TValue *previous = &closure->upvalue[2];
+    if (ttistable(previous) && hvalue(slot) == hvalue(previous)) {
+        if (++offset >= static_cast<unsigned int>(table->sizearray))
+            return all_next_slow(lua);
+        slot = &table->array[offset];
+        if (!ttistable(slot))
+            return all_next_slow(lua);
+        ++index;
+    }
+    setnvalue(&closure->upvalue[1], cast_num(index));
+    setobj(lua, &closure->upvalue[2], slot);
     luaC_barrier(lua, closure, slot);
     setobj2s(lua, lua->top, slot);
     ++lua->top;
