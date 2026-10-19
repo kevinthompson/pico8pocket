@@ -115,3 +115,15 @@ void luaV_callindex(lua_State *L, Value function_value, int function_tag,
     setobjs2s(L, p3, --L->top);
   }
 }
+
+// Preserve the VM's original callTM edge and scalar IPA convention. The guard
+// is entered only from the existing callback body, before any stack mutation.
+P8P_VM_COLD
+const TValue *luaV_delegatebits(lua_State *L, Value function_value,
+                                int function_tag, const TValue *p1,
+                                const TValue *p2) {
+  TValue function;
+  function.value_ = function_value;
+  function.tt_ = function_tag;
+  return luaV_delegateget(L, p1, p2, &function);
+}

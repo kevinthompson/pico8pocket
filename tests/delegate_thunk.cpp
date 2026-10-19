@@ -22,10 +22,15 @@ void cold_thunk_contracts(){
   if(mode==0)lua_getglobal(L,"D");if(mode==1)lua_pushcfunction(L,light);
   if(mode==2){lua_pushinteger(L,43);lua_pushcclosure(L,closure,1);}
   if(mode==3){eval(L,"F=function(self,k) calls=(calls or 0)+1 return 47 end");lua_getglobal(L,"F");}
-  lua_getglobal(L,"O");lua_pushstring(L,"x");lua_pushnil(L);invoke(L,1);
+  lua_getglobal(L,"O");lua_pushstring(L,"x");lua_pushnil(L);
+  TValue *function=L->top-4; l_mem debt=G(L)->GCdebt;G(L)->GCdebt=-1;
+  const TValue *guard=luaV_delegatebits(L,function->value_,function->tt_,L->top-3,L->top-2);
+  G(L)->GCdebt=debt;
+  if(mode==0)assert(guard&&ttisnumber(guard)&&nvalue(guard)==z8::fix32(7));else assert(!guard);
+  invoke(L,1);
   assert(lua_tointeger(L,-1)==(mode==0?7:mode==1?37:mode==2?43:47));lua_settop(L,0);
  }
- eval(L,"B.x=11");lua_getglobal(L,"D");lua_getglobal(L,"O");lua_pushstring(L,"x");lua_pushnil(L);invoke(L,1);assert(lua_tointeger(L,-1)==11);lua_settop(L,0);
+ eval(L,"B.x=11 setmetatable(O,{__index=D,__add=D}) assert((O+'x')==11)");lua_getglobal(L,"D");lua_getglobal(L,"O");lua_pushstring(L,"x");lua_pushnil(L);invoke(L,1);assert(lua_tointeger(L,-1)==11);lua_settop(L,0);
  lua_getglobal(L,"D");lua_getglobal(L,"O");lua_pushstring(L,"f");lua_pushnil(L);invoke(L,1);assert(lua_isboolean(L,-1)&&!lua_toboolean(L,-1));lua_settop(L,0);
  eval(L,"S=function(self,k,v)self[k]=v end");lua_getglobal(L,"S");lua_getglobal(L,"B");lua_pushstring(L,"x");lua_pushinteger(L,73);invoke(L,0);lua_settop(L,0);eval(L,"assert(B.x==73 and calls==1)");
  lua_close(L);puts("PASS cold thunk payload/tag, Lua/light-C/C-closure fallback, mutation, false and no-result callback");
