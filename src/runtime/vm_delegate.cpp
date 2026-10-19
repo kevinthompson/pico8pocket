@@ -127,3 +127,13 @@ const TValue *luaV_delegatebits(lua_State *L, Value function_value,
   function.tt_ = function_tag;
   return luaV_delegateget(L, p1, p2, &function);
 }
+
+// Enter only after the original callback has verified a Lua closure tag. A
+// typed pointer avoids aggregate ABI coupling and inactive union reads.
+P8P_VM_COLD
+const TValue *luaV_delegateclosure(lua_State *L, LClosure *closure,
+                                   const TValue *p1, const TValue *p2) {
+  TValue function;
+  setclLvalue(L, &function, closure);
+  return luaV_delegateget(L, p1, p2, &function);
+}

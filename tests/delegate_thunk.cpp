@@ -27,6 +27,12 @@ void cold_thunk_contracts(){
   const TValue *guard=luaV_delegatebits(L,function->value_,function->tt_,L->top-3,L->top-2);
   G(L)->GCdebt=debt;
   if(mode==0)assert(guard&&ttisnumber(guard)&&nvalue(guard)==z8::fix32(7));else assert(!guard);
+  if(mode==0||mode==3){
+   G(L)->GCdebt=-1;
+   const TValue *typed=luaV_delegateclosure(L,clLvalue(function),L->top-3,L->top-2);
+   G(L)->GCdebt=debt;
+   if(mode==0)assert(typed&&ttisnumber(typed)&&nvalue(typed)==z8::fix32(7));else assert(!typed);
+  }
   invoke(L,1);
   assert(lua_tointeger(L,-1)==(mode==0?7:mode==1?37:mode==2?43:47));lua_settop(L,0);
  }

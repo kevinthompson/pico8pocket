@@ -1,14 +1,19 @@
-Guard delegates in the existing cold callback body; preserve lookup call edges.
+Snapshot the callback before an allocation-free delegate guard.
 
 diff --git a/lvm.c b/lvm.c
 --- a/lvm.c
 +++ b/lvm.c
-@@ -92,6 +92,13 @@
+@@ -92,6 +92,18 @@
 
  static void callTM (lua_State *L, const TValue *f, const TValue *p1,
                      const TValue *p2, TValue *p3, int hasres) {
-+  if (hasres) {
-+    const TValue *value = luaV_delegatebits(L, f->value_, f->tt_, p1, p2);
++  /* Consume the callback before the opaque, allocation-free guard. Keeping
++     the original TValue live across that call prevents scalar IPA splitting. */
++  TValue callback;
++  setobj(L, &callback, f);
++  f = &callback;
++  if (hasres && ttisLclosure(f)) {
++    const TValue *value = luaV_delegateclosure(L, clLvalue(f), p1, p2);
 +    if (value != NULL) {
 +      setobj2s(L, p3, value);
 +      return;
@@ -20,12 +25,14 @@ diff --git a/lvm.c b/lvm.c
 diff --git a/lvm.h b/lvm.h
 --- a/lvm.h
 +++ b/lvm.h
-@@ -30,6 +30,14 @@
+@@ -30,6 +30,16 @@
  LUAI_FUNC int luaV_lessequal (lua_State *L, const TValue *l, const TValue *r);
  LUAI_FUNC const TValue *luaV_tonumber (const TValue *obj, TValue *n);
  LUAI_FUNC int luaV_tostring (lua_State *L, StkId obj);
 +LUAI_FUNC const TValue *luaV_delegateget (lua_State *L, const TValue *t,
 +                                         const TValue *key, const TValue *tm);
++LUAI_FUNC const TValue *luaV_delegateclosure(lua_State *L, LClosure *function,
++                                            const TValue *p1, const TValue *p2);
 +LUAI_FUNC const TValue *luaV_delegatebits(lua_State *L, Value function_value,
 +                                         int function_tag, const TValue *p1,
 +                                         const TValue *p2);
