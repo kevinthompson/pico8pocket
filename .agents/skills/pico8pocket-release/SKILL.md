@@ -5,7 +5,7 @@ description: Build and verify Pico8Pocket distributions, prepare matched os20 AP
 
 # Pico8Pocket builds, device testing and PRs
 
-For device installation, accept an optional SD mount path such as `/Volumes/Pocket`.
+For device installation, accept an optional SD mount path (`$CARD`) such as `/Volumes/Pocket`.
 This repository owns release orchestration. Read [docs/RELEASING.md](../../../docs/RELEASING.md).
 The authoritative
 dependency pins remain in `scripts/fetch-deps.sh`; app source is this repo's
@@ -108,8 +108,8 @@ scripts/variant-core.sh releases/pico8pocket-v<VER>.zip b "Test build B" b.zip
 - Name the variants A and B, say exactly what differs, and ask for the same
   scene's overlay from each. One screenshot can catch a spike, so don't
   call a regression from a single device overlay; ask for the A/B pair.
-- To install both from a Mac, set `$CARD` to the card's mount path from the
-  **card** argument, asking the user if it wasn't given. The files the two
+- To install both from a Mac, set `$CARD` from the optional SD mount path,
+  asking the user if it wasn't given. The files the two
   zips share are identical, so order doesn't matter:
   ```sh
   unzip -o pico8-zenibako-<VER>-A-<topic>.zip -d "$CARD"
