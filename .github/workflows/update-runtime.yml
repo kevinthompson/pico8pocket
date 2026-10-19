@@ -1,0 +1,64 @@
+name: Prepare runtime pin update
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_tag:
+        description: Matched openfpgaCore runtime release tag (empty selects latest stable release)
+        default: ''
+        type: string
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test release automation
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+      - name: Resolve the published runtime release
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNTIME_TAG: ${{ inputs.runtime_tag }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, re, subprocess
+          tag = os.environ['RUNTIME_TAG']
+          if tag and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', tag):
+              raise SystemExit('Invalid runtime release tag')
+          endpoint = 'repos/zenibako/openfpgaCore/releases/' + ('tags/' + tag if tag else 'latest')
+          release = json.loads(subprocess.check_output(['gh', 'api', endpoint], text=True))
+          tag = release['tag_name']
+          if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', tag):
+              raise SystemExit('Invalid resolved release tag')
+          required = {'os20.rbf_r', 'os.bin', 'loader.bin'}
+          if release['draft'] or release['prerelease'] or not required <= {a['name'] for a in release['assets']}:
+              raise SystemExit('Require a published stable matched os20 runtime bundle')
+          print('tag=' + tag)
+          PY
+      - uses: actions/checkout@v7
+        with:
+          repository: zenibako/openfpgaCore
+          ref: ${{ steps.candidate.outputs.tag }}
+          path: build/runtime-source
+      - name: Fetch previous source and download the three matched runtime files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNTIME_TAG: ${{ steps.candidate.outputs.tag }}
+        run: |
+          previous=$(python3 -c 'import runpy; m=runpy.run_path("scripts/release.py"); print(m["read_pins"](open("scripts/fetch-deps.sh").read())["FORK_COMMIT"])')
+          git -C build/runtime-source fetch --no-tags --depth=1 origin "$previous"
+          gh release download "$RUNTIME_TAG" --repo zenibako/openfpgaCore \
+            --dir build/runtime-candidate --pattern os20.rbf_r --pattern os.bin --pattern loader.bin
+      - name: Prepare patch and exact-tree report without changing a branch
+        env:
+          RUNTIME_TAG: ${{ steps.candidate.outputs.tag }}
+        run: |
+          python3 scripts/release.py prepare-runtime --source build/runtime-source \
+            --runtime build/runtime-candidate --tag "$RUNTIME_TAG"
+          cat build/runtime-update/REVIEW.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: runtime-pin-candidate
+          path: build/runtime-update/*
+          if-no-files-found: error

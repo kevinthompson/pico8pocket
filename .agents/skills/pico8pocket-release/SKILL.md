@@ -1,10 +1,62 @@
 ---
 name: pico8pocket-release
-description: Build, package and hand Pico8Pocket test builds to the user for Analogue Pocket testing, including side-by-side A/B cores, the SD-card layout, the platform banner and the PR/CodeRabbit review flow. Use whenever producing a zip for the user, changing packaging or core metadata, or opening and merging PRs in this repo.
-argument-hint: "[card: SD mount path, e.g. /Volumes/Pocket]"
+description: Build and verify Pico8Pocket distributions, prepare matched os20 API/runtime pin updates, coordinate explicit draft releases, and hand off hardware test builds. Use for dependency refreshes, packaging, release metadata, A/B cores and release PRs in the Pico8Pocket repository.
 ---
 
 # Pico8Pocket builds, device testing and PRs
+
+For device installation, accept an optional SD mount path such as `/Volumes/Pocket`.
+This repository owns release orchestration. Read [docs/RELEASING.md](../../../docs/RELEASING.md).
+The authoritative
+dependency pins remain in `scripts/fetch-deps.sh`; app source is this repo's
+commit, not a second core repository. This skill lives in `.agents/skills/`,
+with a Claude symlink to the same file.
+
+## Matched runtime refresh
+
+- Run **Prepare runtime pin update** in this repository, with a published
+  runtime tag or an empty input for the latest stable release. It requires the
+  complete `os20.rbf_r`/`os.bin`/`loader.bin` set, resolves the tag to its source
+  commit, checks API 0.9.x/save-state headers, and produces a review patch.
+- Read `runtime-pin-candidate/REVIEW.md` and the patch. Hashes fingerprint the
+  downloaded candidate; they do not establish correctness or hardware testing.
+  Compare exact source endpoints after history rewrites. Do not substitute
+  os25, advance unrelated SDK/Fake-08/z8lua pins, or regenerate hashes merely
+  to accept an unexpected file.
+- Apply at the release checkout commit in the report, using `git apply --check`
+  first. Local preparation uses `python3 scripts/release.py prepare-runtime`
+  with `--source`, `--runtime`, `--tag`, and optional `--apply`; see the release
+  guide for fetching both source endpoints. An empty patch is a no-op.
+- Review all changed pin/documentation files, run release tests, make a signed
+  conventional commit and push a topic branch only with session authorization.
+  Preparation success alone is not build or hardware evidence.
+
+## Complete distribution and draft releases
+
+Require **Build and verify distribution** on the exact candidate commit:
+three native Go platforms, compiled plugin/WASI integration, C/C++ host
+regressions, the pinned GCC 13.2 core build/public APF package, and final
+distribution/provenance/checksums. An older green commit does not qualify.
+Inspect annotations for runner-acquisition failures; retry only with
+authorization and at most twice. Required abandoned/cancelled jobs remain
+incomplete; do not suppress failures or retry code failures blindly.
+
+Before release, record physical-Pocket cart launch, controls/audio,
+cartdata/progress persistence, Memories and sleep/wake checks. Native picker
+thumbnail display still needs its own device evidence. Use the user's own
+carts privately and state unperformed checks. CI does not establish hardware
+compatibility.
+
+Obtain the version and explicit release authorization before dispatching with
+`create_draft=true`; `version` must be `v` plus the version already committed
+in `dist/core/core.json`. The workflow gates a complete draft on all checks:
+core ZIP, plugin/manifest, six native thumbnail bundles, WASI, docs/licenses,
+source archive, core provenance and global checksums. Do not publish a tools-only
+latest release or include local carts/saves. Inspect the draft assets and
+report the link; stable publication requires separate explicit authorization.
+Dispatch creates a fresh tag at the tested commit and refuses existing tags.
+If it fails after tag creation, inspect state and ask before recovery; do not
+delete tags or repeatedly rerun the workflow.
 
 ## Building a test zip
 
@@ -15,10 +67,10 @@ argument-hint: "[card: SD mount path, e.g. /Volumes/Pocket]"
 - Copy the zip to the repo root under a descriptive name, for example
   `pico8-zenibako-v0.0.33-<topic>.zip` (`*.zip` is gitignored), and send it
   with SendUserFile. The user tests every change on a real Pocket.
-- The OS runtime comes from the Diablo port's release that
-  `scripts/fetch-deps.sh` pins (1.1.0, the newest Pocket runtime as of
-  2026-10-11). The openfpgaOS repo itself publishes no Pocket binaries, so
-  check openfpgaSDK and Diablo releases when asked whether to upgrade.
+- The SDK comes from the pinned Diablo source, with API headers and the
+  matched os20 runtime from the fork's pinned runtime release. Read current
+  pins from `scripts/fetch-deps.sh`; do not infer a compatible runtime from
+  whichever upstream commit happens to be newest.
 - Public zips never contain carts. `make package-local` bundles local carts
   and is for private use only.
 
