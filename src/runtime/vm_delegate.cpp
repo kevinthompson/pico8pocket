@@ -34,7 +34,11 @@ static inline __attribute__((always_inline)) const TValue *delegate_raw(Table *t
 /** @brief Resolve a read through at most four exact, pure Lua delegates.
  * Accepts only warmed function(self, key) return self.<constant field>[key] end
  * closures with sufficient existing call/stack capacity, no observable hooks
- * and no pending GC work. Does not allocate, collect or invoke cart code.
+ * and no pending GC work. Count-only hooks are safe: this VM decrements their
+ * counter only at servicepoints (calls, jumps and loops), and the exact bytecode
+ * pattern below contains none. Nested accepted delegates also contain none.
+ * See z8lua-servicepoints.patch and z8lua-pc-register.patch for hook dispatch.
+ * Does not allocate, collect or invoke cart code.
  * Returns a borrowed non-nil slot (including false), or NULL to require the
  * ordinary metamethod call. Copy the slot into a rooted value before allocation,
  * cart calls or table mutation. A miss may cache the absence of __index in

@@ -60,6 +60,58 @@ static void vm_callback_contracts(lua_State *L) {
  assert(strstr(lua_tostring(L,-1),"number"));lua_pop(L,1);
  puts("PASS five VM callback paths with light-C and captured C callbacks");
 }
+static int count_hook_calls;
+
+/** @brief Mutate the delegated table when a real count-hook event occurs. */
+static void mutate_on_count(lua_State *L, lua_Debug *) {
+ ++count_hook_calls;
+ lua_getglobal(L,"B");
+ lua_pushinteger(L,99);
+ lua_setfield(L,-2,"x");
+ lua_pop(L,1);
+}
+
+/** @brief Compare count-hook effects of guarded reads and ordinary Lua calls.
+ * This VM counts servicepoints, not instructions. Exact GETTABLE/GETTABLE/
+ * RETURN delegates have none, even with a hook due at the next servicepoint.
+ * A loop-bearing delegate proves the hook can mutate the result on fallback.
+ */
+static void count_hook_contracts(lua_State *L) {
+ for(int depth=1;depth<=4;depth+=3){
+  eval(L,"D=function(self,k)return self.base[k]end B={x=7} O=setmetatable({base=B},{__index=D}) assert(O.x==7)");
+  if(depth==4)eval(L,"for i=1,3 do O=setmetatable({base=O},{__index=D}) end assert(O.x==7)");
+  for(int period=1;period<=2;++period){
+   for(int ordinary=0;ordinary<2;++ordinary){
+    eval(L,"B.x=7");
+    if(ordinary)lua_getglobal(L,"D");
+    lua_getglobal(L,"O");
+    if(ordinary)lua_pushliteral(L,"x");
+    count_hook_calls=0;
+    lua_sethook(L,mutate_on_count,LUA_MASKCOUNT,period);
+    G(L)->GCdebt=-1;
+    // Calling D from C enters its ordinary Lua body without an outer OP_CALL.
+    // The guarded case enters __index through the production lookup boundary.
+    if(ordinary)lua_call(L,2,1);
+    else lua_getfield(L,-1,"x");
+    assert(lua_tointeger(L,-1)==7);
+    assert(count_hook_calls==0 && L->hookcount==period);
+    lua_sethook(L,NULL,0,0);
+    lua_settop(L,0);
+   }
+  }
+ }
+ eval(L,"D=function(self,k)for i=1,1 do end return self.base[k]end B.x=7 O=setmetatable({base=B},{__index=D})");
+ lua_getglobal(L,"O");
+ count_hook_calls=0;
+ lua_sethook(L,mutate_on_count,LUA_MASKCOUNT,1);
+ G(L)->GCdebt=-1;
+ lua_getfield(L,-1,"x");
+ assert(lua_tointeger(L,-1)==99 && count_hook_calls>0);
+ lua_sethook(L,NULL,0,0);
+ lua_settop(L,0);
+ puts("PASS count-hook servicepoint equivalence and mutating fallback");
+}
+
 /** @brief Own a Lua state for VM-caller and retained-adapter contract tests.
  * Verifies complete callback payload/tag dispatch, guarded and ordinary Lua
  * paths, mutations, false hits and no-result assignment. Assertions fail the
@@ -68,6 +120,7 @@ static void vm_callback_contracts(lua_State *L) {
 void cold_thunk_contracts(){
  lua_State*L=luaL_newstate();luaL_openlibs(L);assert(lua_checkstack(L,64));
  vm_callback_contracts(L);
+ count_hook_contracts(L);
  eval(L,"D=function(self,k)return self.base[k]end B={x=7,f=false} O=setmetatable({base=B},{__index=D}) assert(O.x==7)");
  for(int mode=0;mode<4;mode++){
   if(mode==0)lua_getglobal(L,"D");if(mode==1)lua_pushcfunction(L,light);
