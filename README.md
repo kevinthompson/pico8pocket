@@ -244,6 +244,10 @@ The core is `zenibako.pico8` on the `pico8` platform (shown as PICO-8):
 On launch, Pocket's native asset picker asks for a `.p8` or `.p8.png`
 cartridge.
 
+Pocket Sync associates the core with the cartridge slot. Fixed internal files
+(including the JSON launch descriptor) have no game-file filters. The `png`
+filter covers `.p8.png` carts; ZIP archives must be extracted first.
+
 Upgrading from a release that installed `Askent.pico8pocket`: move your carts
 from `/Assets/pico8pocket/common/cards/` to `/Assets/pico8/common/cards/`, then
 delete `/Cores/Askent.pico8pocket`, `/Assets/pico8pocket` and
