@@ -1,12 +1,12 @@
 // Guarded inheritance stays outside the whole-program optimizer and hot text.
 #include <stdint.h>
-#include <string.h>
 #include "lua.h"
 #include "ldo.h"
 #include "lgc.h"
 #include "lobject.h"
 #include "lopcodes.h"
 #include "lstate.h"
+#include "lstring.h"
 #include "ltable.h"
 #include "ltm.h"
 #include "lvm.h"
@@ -16,6 +16,18 @@
 #define P8P_VM_COLD __attribute__((noinline))
 #endif
 static_assert(sizeof(Value) == sizeof(uintptr_t), "callback payload ABI");
+
+// Private short-string reads avoid keeping a public luaH_getstr ABI alive.
+// Keep bucket/chain semantics identical to ltable.c; no allocation or mutation.
+static inline __attribute__((always_inline)) const TValue *delegate_raw(Table *t, TString *key) {
+  Node *n = gnode(t, lmod(key->tsv.hash, sizenode(t)));
+  do {
+    if (ttisshrstring(gkey(n)) && eqshrstr(rawtsvalue(gkey(n)), key))
+      return gval(n);
+    n = gnext(n);
+  } while (n);
+  return luaO_nilobject;
+}
 
 /* Resolve only successful, allocation-free reads through exact pure Lua
 ** delegates: function(self, key) return self.<constant field>[key] end.
@@ -55,13 +67,19 @@ const TValue *luaV_delegateget (lua_State *L, const TValue *t,
     constant = INDEXK(GETARG_C(first));
     if (constant >= p->sizek || !ttisshrstring(&p->k[constant]))
       return NULL;
-    base = luaH_getstr(hvalue(t), rawtsvalue(&p->k[constant]));
+    base = delegate_raw(hvalue(t), rawtsvalue(&p->k[constant]));
     if (!ttistable(base)) return NULL;
-    value = luaH_getstr(hvalue(base), rawtsvalue(key));
+    value = delegate_raw(hvalue(base), rawtsvalue(key));
     if (!ttisnil(value)) return value;  /* false is a successful hit */
     t = base;
-    tm = fasttm(L, hvalue(t)->metatable, TM_INDEX);
-    if (tm == NULL) return NULL;
+    Table *metatable = hvalue(t)->metatable;
+    if (metatable == NULL || (metatable->flags & (1u << TM_INDEX)))
+      return NULL;
+    tm = delegate_raw(metatable, G(L)->tmname[TM_INDEX]);
+    if (ttisnil(tm)) {
+      metatable->flags |= cast_byte(1u << TM_INDEX);
+      return NULL;
+    }
   }
   return NULL;
 }
@@ -71,10 +89,10 @@ const TValue *luaV_delegateget (lua_State *L, const TValue *t,
 // Only this cold boundary reconstructs the function TValue; the lookup loop
 // retains scalar payload/tag arguments and its original register pressure.
 P8P_VM_COLD
-void luaV_callindex(lua_State *L, uintptr_t function_bits, int function_tag,
+void luaV_callindex(lua_State *L, Value function_value, int function_tag,
                     const TValue *p1, const TValue *p2, TValue *p3, int hasres) {
   TValue function;
-  __builtin_memcpy(&function.value_, &function_bits, sizeof(function_bits));
+  function.value_ = function_value;
   function.tt_ = function_tag;
   if (hasres) {
     const TValue *value = luaV_delegateget(L, p1, p2, &function);

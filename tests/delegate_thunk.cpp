@@ -13,7 +13,7 @@ static int closure(lua_State*L){lua_pushvalue(L,lua_upvalueindex(1));return 1;}
 static void eval(lua_State*L,const char*s){int rc=luaL_loadstring(L,s)||lua_pcall(L,0,0,0);if(rc){fprintf(stderr,"%s\n",lua_tostring(L,-1));assert(false);}}
 static void invoke(lua_State*L,int hasres){
  static_assert(sizeof(Value)==sizeof(uintptr_t),"function payload ABI");
- TValue*f=L->top-4,*t=L->top-3,*k=L->top-2,*v=L->top-1;uintptr_t bits;memcpy(&bits,&f->value_,sizeof(bits));luaV_callindex(L,bits,f->tt_,t,k,v,hasres);
+ TValue*f=L->top-4,*t=L->top-3,*k=L->top-2,*v=L->top-1;luaV_callindex(L,f->value_,f->tt_,t,k,v,hasres);
 }
 void cold_thunk_contracts(){
  lua_State*L=luaL_newstate();luaL_openlibs(L);assert(lua_checkstack(L,64));

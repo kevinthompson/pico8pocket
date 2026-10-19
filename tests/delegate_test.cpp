@@ -54,5 +54,14 @@ int main(){
     eval(L,"O=setmetatable({base={}},{__index=D}) setmetatable(O.base,{__index=function(t,k) side=side+1 return 41 end}) assert(O.x==41) assert(side==1)");probe(L,"x",true);
     eval(L,"O.base=setmetatable({},{__index=function(t,k) coroutine.yield(43) return 47 end}) local c=coroutine.create(function() return O.x end) local ok,x=coroutine.resume(c) assert(ok and x==43) ok,x=coroutine.resume(c) assert(ok and x==47)");probe(L,"x",true);
     eval(L,"O=setmetatable({},{__index=D}) O.base=O local ok,msg=pcall(function() return O.x end) assert(not ok and type(msg)=='string')");probe(L,"x",true);
+    // Exercise private raw probes across populated collision chains, removed
+    // entries, an empty/dummy table and a changed metatable after a cached miss.
+    eval(L,"D=function(self,k)return self.base[k]end B={} for i=1,1024 do B['key'..i]=i end O=setmetatable({base=B},{__index=D}) assert(O.key1==1)");
+    for(int i=1;i<=1024;i++){char key[32];snprintf(key,sizeof(key),"key%d",i);number(L,key,i);}
+    eval(L,"for i=1,1024,2 do B['key'..i]=nil end");
+    for(int i=1;i<=1024;i++){char key[32];snprintf(key,sizeof(key),"key%d",i);if(i%2)probe(L,key,true);else number(L,key,i);}
+    eval(L,"O.base={} assert(O.missing==nil)");probe(L,"missing",true);
+    eval(L,"B=setmetatable({}, {}) O.base=B assert(O.x==nil)");probe(L,"x",true);
+    eval(L,"setmetatable(B,{__index=D}) B.base={x=97} assert(O.x==97)");number(L,"x",97);
     lua_close(L);printf("delegate contracts: %d failures\n",failures);return failures?1:0;
 }
