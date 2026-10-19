@@ -1,12 +1,23 @@
-name: Thumbnail tools
+name: Build and verify distribution
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version matching dist/core/core.json (vMAJOR.MINOR.PATCH), required for a draft
+        default: ''
+        type: string
+      create_draft:
+        description: Create a complete draft release after all checks pass
+        default: false
+        type: boolean
 permissions:
   contents: read
 jobs:
   native:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2025]
     runs-on: ${{ matrix.os }}
@@ -35,7 +46,7 @@ jobs:
           echo "$RUNNER_TEMP/tinygo/bin" >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/binaryen-version_133/bin" >> "$GITHUB_PATH"
       - name: Check packaged AI disclosure
-        run: python3 -m unittest discover -s tests -p 'test_package_metadata.py'
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
       - run: make thumbnail-tools
       - name: Test compiled Pocket Sync plugin
         env:
@@ -48,3 +59,92 @@ jobs:
           name: thumbnail-tools
           path: build/thumbnail-tools/*
           if-no-files-found: error
+  core:
+    runs-on: ubuntu-24.04
+    env:
+      BUNDLE_LOCAL_CARTS: '0'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install pinned core compiler and packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-riscv64-unknown-elf=13.2.0-11ubuntu1+12 binutils-riscv64-unknown-elf build-essential jq zip rsync
+      - name: Fetch matched dependencies, then run host regressions
+        run: |
+          make deps
+          make test
+          python3 -m unittest discover -s tests -p 'test_*.py'
+      - name: Build and validate the public core package
+        run: |
+          make package USE_SDK_CONTAINER=0 CROSS=riscv64-unknown-elf-
+          version=$(jq -er '.core.metadata.version' dist/core/core.json)
+          mkdir -p build/core-artifacts
+          cp "releases/pico8pocket-v${version}.zip" build/core-artifacts/
+          python3 scripts/release.py provenance \
+            --core "build/core-artifacts/pico8pocket-v${version}.zip" \
+            --out build/core-artifacts/CORE-PROVENANCE.json \
+            --compiler "$(riscv64-unknown-elf-gcc -dumpfullversion)"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-core
+          path: build/core-artifacts/*
+          if-no-files-found: error
+  distribution:
+    needs: [native, wasm, core]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-core
+          path: build/core-artifacts
+      - uses: actions/download-artifact@v8
+        with:
+          name: thumbnail-tools
+          path: build/thumbnail-tools
+      - name: Verify complete core and tool assets with provenance and checksums
+        run: |
+          python3 scripts/release.py assemble --core-dir build/core-artifacts --tools build/thumbnail-tools
+          cd build/distribution
+          sha256sum -c SHA256SUMS
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pico8pocket-distribution
+          path: build/distribution/*
+          if-no-files-found: error
+  draft-release:
+    if: github.event_name == 'workflow_dispatch' && inputs.create_draft
+    needs: distribution
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require explicit version matching the tested core
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          version = os.environ['VERSION']
+          expected = 'v' + json.load(open('dist/core/core.json'))['core']['metadata']['version']
+          if not re.fullmatch(r'v\d+\.\d+\.\d+', version) or version != expected:
+              raise SystemExit('Draft version must match dist/core/core.json')
+          PY
+      - uses: actions/download-artifact@v8
+        with:
+          name: pico8pocket-distribution
+          path: build/distribution
+      - name: Create complete draft for manual publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          cd build/distribution
+          sha256sum -c SHA256SUMS
+          # Atomically bind a fresh tag to the tested commit. --target alone
+          # would silently reuse an existing tag, even at a different commit.
+          gh api --method POST "repos/$GH_REPO/git/refs" \
+            --raw-field "ref=refs/tags/$VERSION" --raw-field "sha=$GITHUB_SHA"
+          gh release create "$VERSION" --draft --verify-tag --title "$VERSION" --notes '' ./*

@@ -289,6 +289,11 @@ change when upstream moves. Diablo is fetched as a shallow, sparse Git checkout
 of the pinned commit (only `runtime/pocket`, `src/sdk` and `tools`), and the
 three Pocket runtime files are additionally verified by SHA-256.
 
+See [Pin updates and releases](docs/RELEASING.md) for the read-only runtime
+update workflow, complete distribution CI, provenance and explicit draft
+release process. The repo's `pico8pocket-release` skill coordinates these
+checks with hardware verification.
+
 ## License and disclaimer
 
 Pico8Pocket source code authored for this repository is available under the
