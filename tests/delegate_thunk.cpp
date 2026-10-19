@@ -15,8 +15,38 @@ static void invoke(lua_State*L,int hasres){
  static_assert(sizeof(Value)==sizeof(uintptr_t),"function payload ABI");
  TValue*f=L->top-4,*t=L->top-3,*k=L->top-2,*v=L->top-1;luaV_callindex(L,f->value_,f->tt_,t,k,v,hasres);
 }
+// Exercise the internal callback boundary through all five real VM callers,
+// rather than only invoking the separate cold thunk directly.
+static int vm_callback(lua_State *L) {
+ assert(lua_gettop(L)==2 || lua_gettop(L)==3);
+ assert(lua_istable(L,1));
+ lua_getglobal(L,"callback_count");
+ int calls=lua_tointeger(L,-1);lua_pop(L,1);
+ lua_pushinteger(L,calls+1);lua_setglobal(L,"callback_count");
+ if(lua_gettop(L)==3){
+  assert(lua_tointeger(L,3)==9);
+  return 0;
+ }
+ lua_pushinteger(L,lua_isnone(L,lua_upvalueindex(1))?17:lua_tointeger(L,lua_upvalueindex(1)));
+ return 1;
+}
+static void vm_callback_contracts(lua_State *L) {
+ for(int captured=0;captured<2;++captured){
+  if(captured){lua_pushinteger(L,41);lua_pushcclosure(L,vm_callback,1);}
+  else lua_pushcfunction(L,vm_callback);
+  lua_setglobal(L,"callback");
+  eval(L,captured?"expected_callback=41":"expected_callback=17");
+  eval(L,"callback_count=0 local mt={__index=callback,__newindex=callback,__add=callback,__eq=callback,__len=callback} local a,b=setmetatable({},mt),setmetatable({},mt) assert(a.missing==expected_callback) a.assigned=9 assert(rawget(a,'assigned')==nil) assert(a+b==expected_callback) assert(a==b) assert(#a==expected_callback) assert(callback_count==5)");
+ }
+ eval(L,"local calls=0 local callback=setmetatable({},{__call=function(self,a,b) calls=calls+1 return 59 end}) local mt={__add=callback,__eq=callback,__len=callback} local a,b=setmetatable({},mt),setmetatable({},mt) assert(a+b==59) assert(a==b) assert(#a==59) assert(calls==3)");
+ eval(L,"local a=setmetatable({},{__add=7}) local ok,msg=pcall(function()return a+a end) assert(not ok and type(msg)=='string') invalid_callback_error=msg");
+ lua_getglobal(L,"invalid_callback_error");
+ assert(strstr(lua_tostring(L,-1),"number"));lua_pop(L,1);
+ puts("PASS five VM callback paths with light-C and captured C callbacks");
+}
 void cold_thunk_contracts(){
  lua_State*L=luaL_newstate();luaL_openlibs(L);assert(lua_checkstack(L,64));
+ vm_callback_contracts(L);
  eval(L,"D=function(self,k)return self.base[k]end B={x=7,f=false} O=setmetatable({base=B},{__index=D}) assert(O.x==7)");
  for(int mode=0;mode<4;mode++){
   if(mode==0)lua_getglobal(L,"D");if(mode==1)lua_pushcfunction(L,light);

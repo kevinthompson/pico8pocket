@@ -1,17 +1,23 @@
-Snapshot the callback before an allocation-free delegate guard.
+Pass callback payload and tag explicitly across the guarded VM boundary.
 
 diff --git a/lvm.c b/lvm.c
 --- a/lvm.c
 +++ b/lvm.c
-@@ -92,6 +92,18 @@
+@@ -90,8 +90,22 @@
+ }
 
- static void callTM (lua_State *L, const TValue *f, const TValue *p1,
-                     const TValue *p2, TValue *p3, int hasres) {
-+  /* Consume the callback before the opaque, allocation-free guard. Keeping
-+     the original TValue live across that call prevents scalar IPA splitting. */
+
+-static void callTM (lua_State *L, const TValue *f, const TValue *p1,
+-                    const TValue *p2, TValue *p3, int hasres) {
++static void callTM (lua_State *L, Value function_value, int function_tag,
++                    const TValue *p1, const TValue *p2, TValue *p3, int hasres) {
++  /* Make the baseline scalar callback ABI explicit. Copy the whole Value so
++     Lua, C-closure and light-C payloads retain their native representation. */
 +  TValue callback;
-+  setobj(L, &callback, f);
-+  f = &callback;
++  callback.value_ = function_value;
++  callback.tt_ = function_tag;
++  checkliveness(G(L), &callback);
++  const TValue *f = &callback;
 +  if (hasres && ttisLclosure(f)) {
 +    const TValue *value = luaV_delegateclosure(L, clLvalue(f), p1, p2);
 +    if (value != NULL) {
@@ -22,6 +28,51 @@ diff --git a/lvm.c b/lvm.c
    ptrdiff_t result = savestack(L, p3);
    setobj2s(L, L->top++, f);  /* push function */
    setobj2s(L, L->top++, p1);  /* 1st argument */
+@@ -136,7 +150,7 @@
+     else if (ttisnil(tm = luaT_gettmbyobj(L, t, TM_INDEX)))
+       luaG_typeerror(L, t, "index");
+     if (ttisfunction(tm)) {
+-      callTM(L, tm, t, key, val, 1);
++      callTM(L, tm->value_, tm->tt_, t, key, val, 1);
+       return;
+     }
+     t = tm;  /* else repeat with 'tm' */
+@@ -299,7 +313,7 @@
+         luaG_typeerror(L, t, "index");
+     /* there is a metamethod */
+     if (ttisfunction(tm)) {
+-      callTM(L, tm, t, key, val, 0);
++      callTM(L, tm->value_, tm->tt_, t, key, val, 0);
+       return;
+     }
+     t = tm;  /* else repeat with 'tm' */
+@@ -314,7 +328,7 @@
+   if (ttisnil(tm))
+     tm = luaT_gettmbyobj(L, p2, event);  /* try second operand */
+   if (ttisnil(tm)) return 0;
+-  callTM(L, tm, p1, p2, res, 1);
++  callTM(L, tm->value_, tm->tt_, p1, p2, res, 1);
+   return 1;
+ }
+
+@@ -443,7 +457,7 @@
+       return gcvalue(t1) == gcvalue(t2);
+   }
+   if (tm == NULL) return 0;  /* no TM? */
+-  callTM(L, tm, t1, t2, L->top, 1);  /* call TM */
++  callTM(L, tm->value_, tm->tt_, t1, t2, L->top, 1);  /* call TM */
+   return !l_isfalse(L->top);
+ }
+
+@@ -511,7 +525,7 @@
+       break;
+     }
+   }
+-  callTM(L, tm, rb, rb, ra, 1);
++  callTM(L, tm->value_, tm->tt_, rb, rb, ra, 1);
+ }
+
+
 diff --git a/lvm.h b/lvm.h
 --- a/lvm.h
 +++ b/lvm.h
