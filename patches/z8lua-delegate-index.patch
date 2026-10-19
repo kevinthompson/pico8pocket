@@ -1,0 +1,97 @@
+--- a/lvm.c
++++ b/lvm.c
+@@ -90,8 +90,28 @@
+ }
+
+
+-static void callTM (lua_State *L, const TValue *f, const TValue *p1,
+-                    const TValue *p2, TValue *p3, int hasres) {
++/** @brief Dispatch a metamethod using the original scalar Value/tag ABI.
++ * Result-bearing Lua closures may use the guarded delegate shortcut. Otherwise
++ * roots the reconstructed callback and arguments before luaD_call, preserving
++ * the caller's yield/error behavior. hasres == 1 stores one result in p3 using
++ * a saved stack offset across possible relocation; otherwise p3 is argument 3.
++ */
++static void callTM (lua_State *L, Value function_value, int function_tag,
++                    const TValue *p1, const TValue *p2, TValue *p3, int hasres) {
++  /* Make the baseline scalar callback ABI explicit. Copy the whole Value so
++     Lua, C-closure and light-C payloads retain their native representation. */
++  TValue callback;
++  callback.value_ = function_value;
++  callback.tt_ = function_tag;
++  checkliveness(G(L), &callback);
++  const TValue *f = &callback;
++  if (hasres && ttisLclosure(f)) {
++    const TValue *value = luaV_delegateclosure(L, clLvalue(f), p1, p2);
++    if (value != NULL) {
++      setobj2s(L, p3, value);
++      return;
++    }
++  }
+   ptrdiff_t result = savestack(L, p3);
+   setobj2s(L, L->top++, f);  /* push function */
+   setobj2s(L, L->top++, p1);  /* 1st argument */
+@@ -136,7 +156,7 @@
+     else if (ttisnil(tm = luaT_gettmbyobj(L, t, TM_INDEX)))
+       luaG_typeerror(L, t, "index");
+     if (ttisfunction(tm)) {
+-      callTM(L, tm, t, key, val, 1);
++      callTM(L, tm->value_, tm->tt_, t, key, val, 1);
+       return;
+     }
+     t = tm;  /* else repeat with 'tm' */
+@@ -299,7 +319,7 @@
+         luaG_typeerror(L, t, "index");
+     /* there is a metamethod */
+     if (ttisfunction(tm)) {
+-      callTM(L, tm, t, key, val, 0);
++      callTM(L, tm->value_, tm->tt_, t, key, val, 0);
+       return;
+     }
+     t = tm;  /* else repeat with 'tm' */
+@@ -314,7 +334,7 @@
+   if (ttisnil(tm))
+     tm = luaT_gettmbyobj(L, p2, event);  /* try second operand */
+   if (ttisnil(tm)) return 0;
+-  callTM(L, tm, p1, p2, res, 1);
++  callTM(L, tm->value_, tm->tt_, p1, p2, res, 1);
+   return 1;
+ }
+
+@@ -443,7 +463,7 @@
+       return gcvalue(t1) == gcvalue(t2);
+   }
+   if (tm == NULL) return 0;  /* no TM? */
+-  callTM(L, tm, t1, t2, L->top, 1);  /* call TM */
++  callTM(L, tm->value_, tm->tt_, t1, t2, L->top, 1);  /* call TM */
+   return !l_isfalse(L->top);
+ }
+
+@@ -511,7 +531,7 @@
+       break;
+     }
+   }
+-  callTM(L, tm, rb, rb, ra, 1);
++  callTM(L, tm->value_, tm->tt_, rb, rb, ra, 1);
+ }
+
+
+--- a/lvm.h
++++ b/lvm.h
+@@ -30,6 +30,16 @@
+ LUAI_FUNC int luaV_lessequal (lua_State *L, const TValue *l, const TValue *r);
+ LUAI_FUNC const TValue *luaV_tonumber (const TValue *obj, TValue *n);
+ LUAI_FUNC int luaV_tostring (lua_State *L, StkId obj);
++LUAI_FUNC const TValue *luaV_delegateget (lua_State *L, const TValue *t,
++                                         const TValue *key, const TValue *tm);
++LUAI_FUNC const TValue *luaV_delegateclosure(lua_State *L, LClosure *function,
++                                            const TValue *p1, const TValue *p2);
++LUAI_FUNC const TValue *luaV_delegatebits(lua_State *L, Value function_value,
++                                         int function_tag, const TValue *p1,
++                                         const TValue *p2);
++LUAI_FUNC void luaV_callindex (lua_State *L, Value function_value,
++                              int function_tag, const TValue *p1,
++                              const TValue *p2, TValue *p3, int hasres);
+ LUAI_FUNC void luaV_gettable (lua_State *L, const TValue *t, TValue *key,
+                                             StkId val);
+ LUAI_FUNC void luaV_settable (lua_State *L, const TValue *t, TValue *key,

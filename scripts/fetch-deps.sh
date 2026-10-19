@@ -55,6 +55,7 @@ Z8LUA_PATCHES=(
     "$PROJECT_ROOT/patches/z8lua-inline-cache.patch"
     "$PROJECT_ROOT/patches/z8lua-vm-tuning.patch"
     "$PROJECT_ROOT/patches/z8lua-call-fastpath.patch"
+    "$PROJECT_ROOT/patches/z8lua-delegate-index.patch"
 )
 
 fetch_one() {

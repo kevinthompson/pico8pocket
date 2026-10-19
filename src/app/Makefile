@@ -29,6 +29,7 @@ SRCS := \
 SRCS_CXX := \
 	$(PROJECT_ROOT)/src/runtime/runtime.cpp \
 	$(PROJECT_ROOT)/src/runtime/palette_fast.cpp \
+	$(PROJECT_ROOT)/src/runtime/vm_delegate.cpp \
 	$(SDK_DIR)/of_cxxabi.cpp \
 	$(Z8LUA_GENERATED)
 
@@ -45,7 +46,9 @@ CXXFLAGS += -D_GNU_SOURCE -DLUA_USE_LONGJMP -std=c++17 \
 # the many tiny VM/fixed-point helpers across translation units.
 CFLAGS += -O3 -flto -fomit-frame-pointer
 CXXFLAGS += -O3 -flto -fomit-frame-pointer -fwrapv
-LDFLAGS += -flto
+# LTO's final code-generation step also needs per-function sections so the
+# project linker policy can select individual functions.
+LDFLAGS += -flto -ffunction-sections -fdata-sections
 
 .DEFAULT_GOAL := all
 
@@ -65,3 +68,12 @@ clean: sdk-clean
 # Keep the small palette leaves out of the whole-program inline budget.
 $(call sdk_app_object,$(PROJECT_ROOT)/src/runtime/palette_fast.cpp): CXXFLAGS += -fno-lto
 $(call sdk_app_object,$(PROJECT_ROOT)/src/runtime/palette_fast.cpp) $(call sdk_app_object,$(PROJECT_ROOT)/src/runtime/runtime.cpp): $(PROJECT_ROOT)/src/runtime/runtime_internal.h
+
+# Keep the guarded delegate helper outside whole-program IPA.
+$(call sdk_app_object,$(PROJECT_ROOT)/src/runtime/vm_delegate.cpp): CXXFLAGS += -fno-lto
+LDFLAGS += -Wl,-T,$(PROJECT_ROOT)/mk/vm-cold.ld
+# Read the collecting augmentation before the SDK's broad .text wildcard.
+# INSERT controls output order; input matching still follows script read order.
+ALL_LDFLAGS = -Wl,-T,$(PROJECT_ROOT)/mk/vm-hot.ld $(SDK_LDFLAGS) $(LDFLAGS)
+
+$(OBJ_DIR)/app.elf: $(PROJECT_ROOT)/mk/vm-cold.ld $(PROJECT_ROOT)/mk/vm-hot.ld
