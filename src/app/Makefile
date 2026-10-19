@@ -29,6 +29,7 @@ SRCS := \
 SRCS_CXX := \
 	$(PROJECT_ROOT)/src/runtime/runtime.cpp \
 	$(PROJECT_ROOT)/src/runtime/palette_fast.cpp \
+	$(PROJECT_ROOT)/src/runtime/vm_delegate.cpp \
 	$(SDK_DIR)/of_cxxabi.cpp \
 	$(Z8LUA_GENERATED)
 
@@ -65,3 +66,9 @@ clean: sdk-clean
 # Keep the small palette leaves out of the whole-program inline budget.
 $(call sdk_app_object,$(PROJECT_ROOT)/src/runtime/palette_fast.cpp): CXXFLAGS += -fno-lto
 $(call sdk_app_object,$(PROJECT_ROOT)/src/runtime/palette_fast.cpp) $(call sdk_app_object,$(PROJECT_ROOT)/src/runtime/runtime.cpp): $(PROJECT_ROOT)/src/runtime/runtime_internal.h
+
+# The callback boundary must not affect VM IPA or ordinary text/data placement.
+$(call sdk_app_object,$(PROJECT_ROOT)/src/runtime/vm_delegate.cpp): CXXFLAGS += -fno-lto
+LDFLAGS += -Wl,-T,$(PROJECT_ROOT)/mk/vm-cold.ld
+
+$(OBJ_DIR)/app.elf: $(PROJECT_ROOT)/mk/vm-cold.ld

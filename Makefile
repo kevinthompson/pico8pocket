@@ -28,31 +28,31 @@ $(TEST_BIN): tests/test_main.c src/app/system_input.c src/app/scheduler.c src/ru
 		tests/test_main.c src/app/system_input.c src/app/scheduler.c src/runtime/cart.c src/runtime/cart_png.c \
 		src/runtime/display.c $(MINIZ_ROOT)/miniz.c -o $@
 
-$(RUNTIME_TEST_BIN): tests/runtime_test.cpp src/runtime/runtime.cpp src/runtime/palette_fast.cpp src/runtime/audio.c src/runtime/cart.c src/app/state_store.c src/app/settings.c src/app/menu.c \
+$(RUNTIME_TEST_BIN): tests/runtime_test.cpp src/runtime/runtime.cpp src/runtime/palette_fast.cpp src/runtime/vm_delegate.cpp src/runtime/audio.c src/runtime/cart.c src/app/state_store.c src/app/settings.c src/app/menu.c \
 		src/runtime/cart_png.c include/p8p/runtime.h src/runtime/runtime_internal.h include/p8p/cart.h \
 		$(Z8LUA_SOURCES) $(MINIZ_ROOT)/miniz.c
 	@mkdir -p $(dir $@)
 	$(CXX) -x c++ -std=c++17 -O2 -fwrapv -Wall -Wextra \
 		-Wno-deprecated-declarations -Wno-unused-function -Wno-unused-parameter \
 		-Iinclude -I$(Z8LUA_ROOT) -I$(MINIZ_ROOT) \
-		tests/runtime_test.cpp src/runtime/runtime.cpp src/runtime/palette_fast.cpp src/runtime/audio.c src/runtime/cart.c src/app/state_store.c src/app/settings.c src/app/menu.c \
+		tests/runtime_test.cpp src/runtime/runtime.cpp src/runtime/palette_fast.cpp src/runtime/vm_delegate.cpp src/runtime/audio.c src/runtime/cart.c src/app/state_store.c src/app/settings.c src/app/menu.c \
 		src/runtime/cart_png.c $(Z8LUA_SOURCES) $(MINIZ_ROOT)/miniz.c -lm -o $@
 
-$(COMPAT_SCAN_BIN): tools/compat_scan.cpp src/runtime/runtime.cpp src/runtime/palette_fast.cpp src/runtime/audio.c src/runtime/cart.c \
+$(COMPAT_SCAN_BIN): tools/compat_scan.cpp src/runtime/runtime.cpp src/runtime/palette_fast.cpp src/runtime/vm_delegate.cpp src/runtime/audio.c src/runtime/cart.c \
 		src/runtime/cart_png.c include/p8p/runtime.h src/runtime/runtime_internal.h include/p8p/cart.h \
 		$(Z8LUA_SOURCES) $(MINIZ_ROOT)/miniz.c
 	@mkdir -p $(dir $@)
 	$(CXX) -x c++ -std=c++17 -O2 -fwrapv -DP8P_RUNTIME_DEBUG -Wall -Wextra \
 		-Wno-deprecated-declarations -Wno-unused-function -Wno-unused-parameter \
 		-Iinclude -I$(Z8LUA_ROOT) -I$(MINIZ_ROOT) \
-		tools/compat_scan.cpp src/runtime/runtime.cpp src/runtime/palette_fast.cpp src/runtime/audio.c src/runtime/cart.c \
+		tools/compat_scan.cpp src/runtime/runtime.cpp src/runtime/palette_fast.cpp src/runtime/vm_delegate.cpp src/runtime/audio.c src/runtime/cart.c \
 		src/runtime/cart_png.c $(Z8LUA_SOURCES) $(MINIZ_ROOT)/miniz.c -lm -o $@
 
-$(DELEGATE_TEST_BIN): tests/delegate_test.cpp $(Z8LUA_SOURCES)
+$(DELEGATE_TEST_BIN): tests/delegate_test.cpp tests/delegate_thunk.cpp src/runtime/vm_delegate.cpp $(Z8LUA_SOURCES)
 	@mkdir -p $(dir $@)
 	$(CXX) -x c++ -std=c++17 -O2 -fwrapv -Wall -Wextra \
 		-Wno-deprecated-declarations -Wno-unused-function -Wno-unused-parameter \
-		-I$(Z8LUA_ROOT) tests/delegate_test.cpp $(Z8LUA_SOURCES) -lm -o $@
+		-I$(Z8LUA_ROOT) tests/delegate_test.cpp tests/delegate_thunk.cpp src/runtime/vm_delegate.cpp $(Z8LUA_SOURCES) -lm -o $@
 
 test: deps $(TEST_BIN) $(RUNTIME_TEST_BIN) $(DELEGATE_TEST_BIN)
 	$(TEST_BIN)

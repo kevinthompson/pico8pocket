@@ -20,7 +20,9 @@ static const TValue* probe(lua_State*L,const char*key,bool fallback){
 }
 static void number(lua_State*L,const char*key,int expected){const TValue*v=probe(L,key,false);CHECK(v&&ttisnumber(v)&&nvalue(v)==z8::fix32(expected));}
 static void hook(lua_State*,lua_Debug*){}
+void cold_thunk_contracts();
 int main(){
+    cold_thunk_contracts();
     lua_State*L=luaL_newstate();CHECK(L);luaL_openlibs(L);
     eval(L,"D=function(self,k) return self.base[k] end B={x=7,f=false} O=setmetatable({base=B},{__index=D})");
     lua_getglobal(L,"D");
