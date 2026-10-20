@@ -23,6 +23,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -32,6 +34,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -66,6 +70,8 @@ jobs:
       BUNDLE_LOCAL_CARTS: '0'
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Install pinned core compiler and packaging tools
         run: |
           sudo apt-get update
@@ -95,6 +101,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
           name: release-core
@@ -121,6 +129,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Require explicit version matching the tested core
         env:
           VERSION: ${{ inputs.version }}

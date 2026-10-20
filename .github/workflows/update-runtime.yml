@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Test release automation
         run: |
           python3 -m unittest discover -s tests -p 'test_release.py'
@@ -40,6 +42,7 @@ jobs:
           PY
       - uses: actions/checkout@v7
         with:
+          persist-credentials: false
           repository: zenibako/openfpgaCore
           ref: ${{ steps.candidate.outputs.tag }}
           path: build/runtime-source
