@@ -38,6 +38,7 @@ class CompatibilityRegistryTests(unittest.TestCase):
             "workaround": "Open the individual cartridges.",
             "evidence": "Verified launch attempt.",
             "issue": "https://example.test/issues/1",
+            "requires": [],
         }
         self.write_entries([self.entry])
         self.readme.write_text(
@@ -75,6 +76,17 @@ class CompatibilityRegistryTests(unittest.TestCase):
         self.assertTrue(readme.endswith(
             GENERATOR.END + "\n\nExisting installation instructions.\n"
         ))
+
+    def test_conditional_entries_generate_the_collection_capability(self):
+        self.entry['requires'] = ['arcade']
+        self.write_entries([self.entry])
+        self.assertEqual(GENERATOR.update(self.root, check=False), 0)
+        self.assertIn('P8P_CART_FEATURE_OFFLINE_ARCADE', self.compiled.read_text())
+        self.assertIn('Offline collection required', self.readme.read_text())
+        self.entry['requires'] = ['unknown']
+        self.write_entries([self.entry])
+        with self.assertRaises(ValueError):
+            GENERATOR.update(self.root, check=False)
 
     def test_check_cli_reports_stale_outputs_without_creating_or_changing_them(self):
         before = self.output_snapshot()

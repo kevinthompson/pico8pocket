@@ -7,13 +7,26 @@ TEST_BIN     := $(BUILD_DIR)/tests/pico8pocket_tests
 RUNTIME_TEST_BIN := $(BUILD_DIR)/tests/pico8pocket_runtime_tests
 COMPAT_SCAN_BIN := $(BUILD_DIR)/tools/pico8pocket_compat_scan
 APP_LOAD_TEST_BIN := $(BUILD_DIR)/tests/pico8pocket_app_load_tests
-APP_LOAD_TEST_OBJECTS := $(addprefix $(BUILD_DIR)/tests/app-load/,$(addsuffix .o,main state_store settings menu system_input scheduler))
+APP_MULTICART_TEST_BIN := $(BUILD_DIR)/tests/pico8pocket_app_multicart_tests
+APP_LOAD_TEST_OBJECTS := $(addprefix $(BUILD_DIR)/tests/app-load/,$(addsuffix .o,main state_store settings menu system_input scheduler multicart))
+BBS_TEST_BIN := $(BUILD_DIR)/tests/pico8pocket_bbs_tests
+MULTICART_TEST_BIN := $(BUILD_DIR)/tests/pico8pocket_multicart_tests
+MULTICART_RUNTIME_TEST_BIN := $(BUILD_DIR)/tests/pico8pocket_multicart_runtime_tests
+LEGACY_RUNTIME_STATE := $(BUILD_DIR)/tests/runtime-v1.state
+LEGACY_ALIAS_STATE := $(BUILD_DIR)/tests/runtime-v1-aliases.state
 BUNDLE_LOCAL_CARTS ?= 0
 export BUNDLE_LOCAL_CARTS
 Z8LUA_ROOT   := $(FAKE08_ROOT)/libs/z8lua
 MINIZ_ROOT   := $(FAKE08_ROOT)/libs/miniz
 
 include $(PROJECT_ROOT)/mk/z8lua.mk
+
+HOST_RUNTIME_SOURCES := src/runtime/runtime.cpp src/runtime/audio.c src/runtime/cart.c \
+	src/runtime/cart_png.c $(Z8LUA_SOURCES) $(MINIZ_ROOT)/miniz.c
+HOST_RUNTIME_FLAGS := -x c++ -std=c++17 -O2 -fwrapv -Wall -Wextra \
+	-Wno-deprecated-declarations -Wno-unused-function -Wno-unused-parameter \
+	-Iinclude -I$(Z8LUA_ROOT) -I$(MINIZ_ROOT)
+HOST_CART_HEADERS := $(wildcard include/p8p/*.h) include/p8p/incompatible_carts.inc include/p8p/bbs_catalog.inc
 
 .DEFAULT_GOAL := test
 
@@ -41,17 +54,37 @@ $(RUNTIME_TEST_BIN): tests/runtime_test.cpp src/runtime/runtime.cpp src/runtime/
 
 $(COMPAT_SCAN_BIN): tools/compat_scan.cpp src/runtime/runtime.cpp src/runtime/audio.c src/runtime/cart.c \
 		src/runtime/cart_png.c include/p8p/runtime.h include/p8p/cart.h \
-		$(Z8LUA_SOURCES) $(MINIZ_ROOT)/miniz.c include/p8p/incompatible_carts.inc
+		src/runtime/bbs.c src/app/multicart.c $(HOST_CART_HEADERS) $(Z8LUA_SOURCES) $(MINIZ_ROOT)/miniz.c
 	@mkdir -p $(dir $@)
 	$(CXX) -x c++ -std=c++17 -O2 -fwrapv -DP8P_RUNTIME_DEBUG -Wall -Wextra \
 		-Wno-deprecated-declarations -Wno-unused-function -Wno-unused-parameter \
 		-Iinclude -I$(Z8LUA_ROOT) -I$(MINIZ_ROOT) \
 		tools/compat_scan.cpp src/runtime/runtime.cpp src/runtime/audio.c src/runtime/cart.c \
-		src/runtime/cart_png.c $(Z8LUA_SOURCES) $(MINIZ_ROOT)/miniz.c -lm -o $@
+		src/runtime/cart_png.c src/runtime/bbs.c src/app/multicart.c $(Z8LUA_SOURCES) $(MINIZ_ROOT)/miniz.c -lm -o $@
 
 compatibility-check:
 	python3 scripts/incompatible-carts.py --check
+	python3 scripts/offline-carts.py --check
 	python3 -m unittest discover -s tests -p 'test_compatibility_registry.py'
+	python3 -m unittest discover -s tests -p 'test_offline_catalog.py'
+
+$(BBS_TEST_BIN): tests/bbs_test.c src/runtime/bbs.c src/runtime/cart.c src/runtime/cart_png.c $(HOST_CART_HEADERS) $(MINIZ_ROOT)/miniz.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -Iinclude -I$(MINIZ_ROOT) \
+		tests/bbs_test.c src/runtime/bbs.c src/runtime/cart.c src/runtime/cart_png.c $(MINIZ_ROOT)/miniz.c -o $@
+
+$(MULTICART_RUNTIME_TEST_BIN): tests/multicart_runtime_test.cpp $(HOST_RUNTIME_SOURCES) $(HOST_CART_HEADERS)
+	@mkdir -p $(dir $@)
+	$(CXX) $(HOST_RUNTIME_FLAGS) -DP8P_RUNTIME_DEBUG tests/multicart_runtime_test.cpp $(HOST_RUNTIME_SOURCES) -lm -o $@
+
+$(BUILD_DIR)/tests/%.state: tests/fixtures/%.state.z
+	@mkdir -p $(dir $@)
+	python3 -c 'import pathlib,zlib; pathlib.Path("$@").write_bytes(zlib.decompress(pathlib.Path("$<").read_bytes()))'
+
+$(MULTICART_TEST_BIN): tests/multicart_test.cpp src/app/multicart.c src/runtime/bbs.c $(HOST_RUNTIME_SOURCES) $(HOST_CART_HEADERS)
+	@mkdir -p $(dir $@)
+	$(CXX) $(HOST_RUNTIME_FLAGS) -DP8P_RUNTIME_DEBUG tests/multicart_test.cpp \
+		src/app/multicart.c src/runtime/bbs.c $(HOST_RUNTIME_SOURCES) -lm -o $@
 
 $(BUILD_DIR)/tests/app-load/%.o: src/app/%.c $(wildcard include/p8p/*.h)
 	@mkdir -p $(dir $@)
@@ -60,19 +93,31 @@ $(BUILD_DIR)/tests/app-load/%.o: src/app/%.c $(wildcard include/p8p/*.h)
 
 $(APP_LOAD_TEST_BIN): tests/app_load_test.cpp $(APP_LOAD_TEST_OBJECTS) \
 		src/runtime/runtime.cpp src/runtime/audio.c src/runtime/cart.c src/runtime/cart_png.c \
-		$(wildcard include/p8p/*.h) include/p8p/incompatible_carts.inc $(Z8LUA_SOURCES) $(MINIZ_ROOT)/miniz.c
+		src/runtime/bbs.c $(HOST_CART_HEADERS) $(Z8LUA_SOURCES) $(MINIZ_ROOT)/miniz.c
 	@mkdir -p $(dir $@)
 	$(CXX) -x c++ -std=c++17 -O2 -fwrapv -Wall -Wextra \
 		-Wno-deprecated-declarations -Wno-unused-function -Wno-unused-parameter \
 		-Iinclude -I$(Z8LUA_ROOT) -I$(MINIZ_ROOT) \
 		tests/app_load_test.cpp src/runtime/runtime.cpp src/runtime/audio.c src/runtime/cart.c \
-		src/runtime/cart_png.c $(Z8LUA_SOURCES) $(MINIZ_ROOT)/miniz.c \
+		src/runtime/cart_png.c src/runtime/bbs.c $(Z8LUA_SOURCES) $(MINIZ_ROOT)/miniz.c \
 		-x none $(APP_LOAD_TEST_OBJECTS) -lm -o $@
 
-test: deps compatibility-check $(TEST_BIN) $(RUNTIME_TEST_BIN) $(APP_LOAD_TEST_BIN)
+$(APP_MULTICART_TEST_BIN): tests/app_multicart_test.cpp $(APP_LOAD_TEST_OBJECTS) src/runtime/bbs.c $(HOST_RUNTIME_SOURCES) $(HOST_CART_HEADERS)
+	@mkdir -p $(dir $@)
+	$(CXX) $(HOST_RUNTIME_FLAGS) tests/app_multicart_test.cpp src/runtime/bbs.c $(HOST_RUNTIME_SOURCES) \
+		-x none $(APP_LOAD_TEST_OBJECTS) -lm -o $@
+
+test: deps compatibility-check $(TEST_BIN) $(RUNTIME_TEST_BIN) $(APP_LOAD_TEST_BIN) \
+	$(BBS_TEST_BIN) $(MULTICART_RUNTIME_TEST_BIN) $(MULTICART_TEST_BIN) $(APP_MULTICART_TEST_BIN) $(COMPAT_SCAN_BIN) $(LEGACY_RUNTIME_STATE) $(LEGACY_ALIAS_STATE)
 	$(TEST_BIN)
 	$(RUNTIME_TEST_BIN)
 	$(APP_LOAD_TEST_BIN)
+	$(BBS_TEST_BIN)
+	$(MULTICART_RUNTIME_TEST_BIN) $(LEGACY_RUNTIME_STATE) $(LEGACY_ALIAS_STATE)
+	$(MULTICART_TEST_BIN)
+	$(APP_MULTICART_TEST_BIN)
+	$(APP_MULTICART_TEST_BIN) --missing
+	python3 -m unittest discover -s tests -p 'test_compat_scan_multicart.py'
 
 compat-scan: deps compatibility-check $(COMPAT_SCAN_BIN)
 

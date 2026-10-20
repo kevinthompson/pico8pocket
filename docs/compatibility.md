@@ -32,18 +32,26 @@ Compatibility claims must be backed by a named cart/test and a Pocket run.
 
 [The README list](../README.md#known-incompatible-cartridges) is generated from
 [`compatibility/incompatible-carts.json`](../compatibility/incompatible-carts.json).
-The runtime rejects those decoded ROM/Lua content hashes before cartridge code
-executes, including on restart. This does not change saved-state identities or
+The runtime checks those decoded ROM/Lua content hashes before cartridge code
+executes, including on restart. Conditional entries require their complete
+offline collection index; unconditional entries are rejected. This does not change saved-state identities or
 block other revisions by filename. An unlisted revision is not a claim of support.
 
 The initial list was checked against older agent sessions and supplied-cart
 experiment reports on 2026-10-20:
 
-- Pico Arcade: all 35 launch selections reach unsupported online `load()` calls.
-- Trail of the Sorcerer: its intro calls `load("#mot_sorcerergame")`; the supplied
-  collection lacks that companion and the core cannot perform the handoff.
+- Pico Arcade: all 35 launch selections need BBS `load()` handoffs. The offline
+  Arcade bundle supplies those targets.
+- Trail of the Sorcerer: its intro calls `load("#mot_sorcerergame")`; the offline
+  Sorcerer collection supplies that companion.
 - Pico Backrooms: the current host runtime reproduces the historical native/RV32
   failure at frame 122, calling undefined `rrectfill()` at cart line 554.
+- Peral: the extended seed-7 smoke reaches `load("#peral_game", "", params)`
+  at frame 234; the companion is outside this collection and translations need
+  730 parameter bytes, beyond this loader's 255-byte bound.
+- Pico Night Funkin: the extended smoke reaches `load("#fnf_select")`;
+  that selection cart and subsequent song carts are outside this collection.
+  Both additional launchers link the existing offline-loader support issue.
 
 Grippy's differing native repeats were attributed to Lua hash seeding, not a
 demonstrated gameplay failure. Historical Yarn, Snail, Tetyis and Moss failures
@@ -58,6 +66,39 @@ restart and menu tests, also set any of `P8P_TEST_PICO_ARCADE`,
 `P8P_TEST_TRAIL_OF_THE_SORCERER` and `P8P_TEST_PICO_BACKROOMS` to the corresponding
 private cart file before running `make test`. Missing private fixtures are
 reported as skipped; never commit the cartridges.
+
+`P8P_TEST_PERAL` and `P8P_TEST_PICO_NIGHT_FUNKIN` exercise the two later launcher
+findings using the same rejection/restart and capability checks.
+
+## Offline loader verification
+
+On 2026-10-20, the host scanner selected all 35 targets through Pico Arcade's
+X-button launch route, ran each for 600 neutral-input frames and returned to the
+original launcher identity. Sorcerer's `newrandomgame()` / `rungame()` path
+loaded its genuine companion and ran 600 frames with shared cartdata. Its
+original load call supplies no breadcrumb, so no parent-return row is expected.
+These are launch/handoff smoke checks, not complete playthroughs or Pocket
+performance measurements. Space Picanoid also exposed a legacy source-terminal
+NUL; compilation now ignores trailing terminators while decoded bytes and saved
+identities remain unchanged, matching the supplied PICO-8 reference export.
+
+The actual Extism/WASI plugin installed all 36 validated original PNGs from
+cache, preserving every payload byte. Separate host runs exercised real HTTPS,
+15-second request spacing, cancellation and failed-update preservation. The
+project-owned app tests cover identity changes, return input suppression and
+missing-target Select-menu recovery. A genuine version-1 state fixture checks
+backward loading alongside current state round trips.
+
+For private route checks, build `make compat-scan`, set `P8P_BBS_PACK` to the
+installed pack's absolute path and run:
+
+```sh
+build/tools/pico8pocket_compat_scan ARCADE_CART --arcade-launch 1 600
+build/tools/pico8pocket_compat_scan SORCERER_CART --handoff '(function() newrandomgame() rungame() end)()' 600
+```
+
+Repeat Arcade indices 1 through 35. Physical Pocket slot-20 loading and the
+interactive updater UI still need device/application verification.
 
 ## Alpha implementation status
 
@@ -80,6 +121,9 @@ Implemented and covered by host tests:
   music patterns, fades and the standard note effects;
 - Eris-based Lua state persistence together with RAM, renderer, input, RNG and
   audio state, compressed per cartridge with state previews;
+- offline `load("#id", breadcrumb, parameters)`, `stat(6)` parameters,
+  `stat(100)` breadcrumb and `extcmd("go_back")`, including host-managed return
+  history and Select-menu return; the shared catalog initially contains 36 carts;
 - 120 error-free headless frames of the official Celeste Classic cart.
 
 Not yet compatibility-complete:
@@ -87,6 +131,7 @@ Not yet compatibility-complete:
 - exact custom-instrument, filter, reverb and hardware-audio behavior;
 - pause/menu callbacks, general P8SCII/custom font behavior beyond button
   constants, and the remaining obscure draw-state/hardware aliases;
-- PICO-8 `load()` multicart behavior;
+- arbitrary local-path `load()`/`reload()` multicart behavior and physical
+  Pocket verification of the new offline BBS loader;
 - ZIP extraction and the graphical indexed card browser;
 - full API/conformance coverage and physical-Pocket performance validation.

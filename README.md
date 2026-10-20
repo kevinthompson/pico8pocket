@@ -129,33 +129,37 @@ started and how you can help improve it.
 - Cartridge `menuitem()` entries appear in the Select system menu right after
   RESUME, with their callbacks, left/right input and button filters.
 
-This is still an alpha, not a full-compatibility release. Local multicart
-switching, ZIP extraction and the indexed in-core browser are not implemented
-yet. Save-state persistence, menu/input behavior, profiling and the current 2X
+This is still an alpha, not a full-compatibility release. Offline BBS handoffs
+use the separately installed collection described below. Arbitrary local-path
+multicart switching, ZIP extraction and the indexed in-core browser remain
+unfinished. Save-state persistence, menu/input behavior, profiling and the current 2X
 presentation path have been validated on physical Pocket hardware. CPU-heavy
 cartridges and scaler behavior beyond the established 2X path still need more
 compatibility and performance work.
 
 ## Known incompatible cartridges
 
-The core refuses the exact cartridge revisions below before running their Lua
-and displays the reason and workaround. Press Select to open the system menu.
+The core checks the exact cartridge revisions below before running their Lua.
+Launchers require their complete offline collection; other blocked revisions
+display the reason and workaround. Press Select to open the system menu.
 Matching uses decoded ROM and Lua content, so renaming a cart or changing its
 PNG label does not bypass the list. Different content is checked independently;
 an unlisted cart is not a compatibility guarantee.
 
 <!-- incompatible-carts:begin -->
-| Cartridge revision | Why it is blocked | Workaround / support |
-|---|---|---|
-| Pico Arcade (`pico_arcade.p8.png`) | Requires online BBS cartridge loading, which Pocket cannot provide. | Load each standalone game through the Pocket cartridge picker. [Issue](https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/68) |
-| Trail of the Sorcerer (`trail_of_the_sorcerer.p8.png`) | Gameplay needs a separate companion cart and unsupported cartridge switching. | The intro alone is not playable. Offline companion loading needs core support. [Issue](https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/68) |
-| Pico Backrooms (`pico_backrooms-1.p8.png`) | Crashes during gameplay: this revision calls unsupported rrectfill(). | Use a compatible revision when available; rounded-rectangle support is tracked. [Issue](https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/69) |
+| Cartridge revision | Status | Reason | Workaround / support |
+|---|---|---|---|
+| Pico Arcade (`pico_arcade.p8.png`) | Offline collection required | Needs the offline Arcade collection and cartridge-loading support. | Install the Arcade collection with the Pocket Sync plugin. [Issue](https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/68) |
+| Trail of the Sorcerer (`trail_of_the_sorcerer.p8.png`) | Offline collection required | Gameplay needs the offline Sorcerer companion collection. | Install the Sorcerer collection with the Pocket Sync plugin. [Issue](https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/68) |
+| Pico Backrooms (`pico_backrooms-1.p8.png`) | Blocked | Crashes during gameplay: this revision calls unsupported rrectfill(). | Use a compatible revision when available; rounded-rectangle support is tracked. [Issue](https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/69) |
+| Peral (`peral.p8.png`) | Blocked | Needs #peral_game and launch parameters larger than the current 255-byte limit. | This launcher is outside the initial offline collection. Use another cartridge. [Issue](https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/68) |
+| Pico Night Funkin (`pico_night_funkin.p8.png`) | Blocked | Needs #fnf_select and further game carts outside the initial offline collection. | Use another cartridge until the full companion collection is supported. [Issue](https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/68) |
 <!-- incompatible-carts:end -->
 
 The list records confirmed launch/gameplay blockers, not low frame rates or
 test-harness nondeterminism. Historical Yarn, Snail, Tetyis and Moss fixes are
-not blocked. Online BBS downloads are outside the Pocket compatibility target;
-the linked launcher issue tracks an offline path using separately supplied carts.
+not blocked. The Pocket runs installed BBS carts offline; downloads run on the
+computer through the plugin below. Unlisted revisions can still fail at runtime.
 
 Maintainers: edit [the registry](compatibility/incompatible-carts.json), then run
 `python3 scripts/incompatible-carts.py` to update the compiled list and this table.
@@ -163,6 +167,39 @@ Maintainers: edit [the registry](compatibility/incompatible-carts.json), then ru
 `CART --identity` mode prints a decoded content hash without executing the cart.
 Add only reproduced failures, record the tested revision and evidence, and
 remove its fingerprint once the support path is verified.
+
+## Offline Pico Arcade and Sorcerer
+
+The [Pocket Sync plugin](tools/pocket-sync/README.md) downloads Pico Arcade's
+35 referenced games and Trail of the Sorcerer's `mot_sorcerergame` companion.
+Build `tools/pocket-sync/plugin.wasm` with the included `build.sh`; it also copies
+the distribution pair into `releases/pocket-sync/`. Pocket Sync installs plugins
+from GitHub releases containing `plugin.wasm` and `plugin.json`. These artifacts
+have not been published. The native helper can install a verified local cache
+before publication; see the linked instructions. Once distributed, choose
+**Install both collections**, **Install Arcade**, or **Install Sorcerer**.
+Downloads are cached and paced; a rate limit stops the batch so it can resume
+later from the cache. No PICO-8 installation is needed for these downloads.
+
+The plugin writes standalone carts into `Assets/pico8/common/cards/bbs/` and
+the core's offline bundle into `Assets/pico8/common/cards/bbs.p8pack`. Keep your
+launcher carts in the normal card directory and select them as usual. Install
+the matching complete collection to clear its launch restriction. The core
+checks each requested payload's CRC and cartridge encoding before loading it.
+Core update packages omit the bundle so updates preserve your installed games.
+
+Cart `load("#id", "return label", "parameters")` requests switch outside Lua.
+Select opens a return row when the cart supplied a label; `extcmd("go_back")`
+also returns. Returning restarts the parent cart. Up to eight parents are kept
+for the current session. Save states retain parameters, but do not recreate
+return history after a fresh launch. Version-1 save states remain readable.
+
+The plugin cannot launch the PICO-8 app or browse your Mac's files. If you prefer
+your existing PICO-8 BBS cache, use the explicit native importer in the
+[plugin instructions](tools/pocket-sync/README.md#optional-explicit-cache-importer).
+Game assets and the licensed PICO-8 executable are never included in this repo
+or the plugin. Host tests cover the loader and actual Extism plugin execution;
+the new offline path still needs a physical Pocket run.
 
 ## Build
 

@@ -37,7 +37,7 @@ const p8p_cart_incompatibility_t *p8p_cart_find_incompatibility(
     const p8p_cart_hash_t *hash) {
     static const p8p_cart_incompatibility_t entries[] = {
 #include "p8p/incompatible_carts.inc"
-        {{0}, NULL, NULL, NULL}
+        {{0}, NULL, NULL, NULL, 0}
     };
     if (!hash)
         return NULL;

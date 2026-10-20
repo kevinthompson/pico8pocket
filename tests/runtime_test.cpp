@@ -197,6 +197,8 @@ static void test_incompatible_carts(void) {
         {"P8P_TEST_PICO_ARCADE", "Pico Arcade"},
         {"P8P_TEST_TRAIL_OF_THE_SORCERER", "Trail of the Sorcerer"},
         {"P8P_TEST_PICO_BACKROOMS", "Pico Backrooms"},
+        {"P8P_TEST_PERAL", "Peral"},
+        {"P8P_TEST_PICO_NIGHT_FUNKIN", "Pico Night Funkin"},
     };
     for (const auto &item : cases) {
         const char *path = getenv(item.env);
@@ -243,7 +245,56 @@ static void test_incompatible_carts(void) {
     }
 }
 
+static void test_terminal_nul_source(void) {
+    /* Legacy PNGs can count the terminating NUL in their declared code length.
+     * Keep those decoded bytes for content/save identity, but compile source
+     * without the terminator, as PICO-8 does when it exports the same cart. */
+    char source[] = "function _init() cls(3) end\nfunction _draw() cls(9) end\n";
+    p8p_cart_t cart = {};
+    p8p_cart_hash_t before = {}, after = {}, without_nul = {};
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    void *state = NULL;
+    size_t state_size = 0;
+    cart.lua = source;
+    cart.lua_size = sizeof(source);
+    p8p_cart_content_hash(&cart, &before);
+    --cart.lua_size;
+    p8p_cart_content_hash(&cart, &without_nul);
+    ++cart.lua_size;
+    CHECK(memcmp(&before, &without_nul, sizeof(before)) != 0);
+    CHECK(runtime != NULL);
+    if (!runtime)
+        return;
+    int loaded = p8p_runtime_load(runtime, &cart);
+    CHECK(loaded == 0);
+    if (loaded == 0) {
+        CHECK(p8p_runtime_framebuffer(runtime)[0] == 3);
+        CHECK(p8p_runtime_step(runtime, 0) == 0);
+        CHECK(p8p_runtime_framebuffer(runtime)[0] == 9);
+        CHECK(p8p_runtime_save_state(runtime, &state, &state_size) == 0);
+        CHECK(state != NULL && state_size != 0);
+        CHECK(p8p_runtime_load(runtime, &cart) == 0);
+        CHECK(p8p_runtime_framebuffer(runtime)[0] == 3);
+        if (state) {
+            CHECK(p8p_runtime_load_state(runtime, state, state_size) == 0);
+            CHECK(p8p_runtime_framebuffer(runtime)[0] == 9);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+        }
+    }
+    CHECK(cart.lua_size == sizeof(source));
+    CHECK(cart.lua[cart.lua_size - 1] == '\0');
+    p8p_cart_content_hash(&cart, &after);
+    CHECK(memcmp(&before, &after, sizeof(before)) == 0);
+    char embedded_nul[] = "cls(7)\0cls(9)\n";
+    cart.lua = embedded_nul;
+    cart.lua_size = sizeof(embedded_nul) - 1;
+    CHECK(p8p_runtime_load(runtime, &cart) != 0);
+    free(state);
+    p8p_runtime_destroy(runtime);
+}
+
 int main(void) {
+    test_terminal_nul_source();
     test_incompatible_carts();
     static const uint8_t source[] =
         "pico-8 cartridge // http://www.pico-8.com\n"

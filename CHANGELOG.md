@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Add a Pocket Sync / pupdate plugin for Pico Arcade's 35 BBS games and Trail
+  of the Sorcerer's companion, with verified cache reuse, paced downloads and
+  atomic offline-bundle updates. No game assets or PICO-8 binaries are bundled.
+- Add offline BBS cart handoffs, parameters and session return history, with a
+  Select-menu return row and refreshed per-cart save/control identities. The
+  optional bundle occupies tail slot 20; existing save slots stay in place.
+  Runtime state version 2 preserves parameters and still reads version 1.
+  Launcher compatibility restrictions clear when their collection is installed.
+- Legacy compressed carts ending in a source terminator, including Space
+  Picanoid, compile without changing decoded cart bytes or save identities.
 - Known incompatible cartridge revisions are blocked before execution with an
   explanation and Select-menu recovery. The compiled list and README table
   share one registry, initially covering Pico Arcade, Trail of the Sorcerer

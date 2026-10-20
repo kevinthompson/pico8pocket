@@ -18,10 +18,12 @@ SRCS := \
 	$(PROJECT_ROOT)/src/app/state_store.c \
 	$(PROJECT_ROOT)/src/app/settings.c \
 	$(PROJECT_ROOT)/src/app/menu.c \
+	$(PROJECT_ROOT)/src/app/multicart.c \
 	$(PROJECT_ROOT)/src/app/system_input.c \
 	$(PROJECT_ROOT)/src/app/scheduler.c \
 	$(PROJECT_ROOT)/src/runtime/cart.c \
 	$(PROJECT_ROOT)/src/runtime/cart_png.c \
+	$(PROJECT_ROOT)/src/runtime/bbs.c \
 	$(PROJECT_ROOT)/src/runtime/audio.c \
 	$(PROJECT_ROOT)/src/runtime/display.c \
 	$(PROJECT_ROOT)/src/platform/openfpgaos/platform.c \
@@ -54,6 +56,12 @@ include $(SDK_DIR)/sdk.mk
 # update must invalidate the object that contains the compiled list.
 $(call sdk_app_object,$(PROJECT_ROOT)/src/runtime/cart.c): \
 	$(PROJECT_ROOT)/include/p8p/cart.h $(PROJECT_ROOT)/include/p8p/incompatible_carts.inc
+$(call sdk_app_object,$(PROJECT_ROOT)/src/runtime/bbs.c): \
+	$(PROJECT_ROOT)/include/p8p/bbs.h $(PROJECT_ROOT)/include/p8p/bbs_catalog.inc
+
+# The shared app/runtime interfaces also affect incremental Pocket builds.
+$(foreach source,$(SRCS) $(PROJECT_ROOT)/src/runtime/runtime.cpp,$(call sdk_app_object,$(source))): \
+	$(wildcard $(PROJECT_ROOT)/include/p8p/*.h)
 
 $(Z8LUA_GENERATED_DIR)/%.cpp: $(Z8LUA_ROOT)/%.c
 	@mkdir -p $(dir $@)

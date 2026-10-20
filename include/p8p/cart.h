@@ -35,11 +35,18 @@ typedef struct p8p_cart_hash {
     uint8_t bytes[16];
 } p8p_cart_hash_t;
 
+enum p8p_cart_feature {
+    P8P_CART_FEATURE_OFFLINE_ARCADE = 1u,
+    P8P_CART_FEATURE_OFFLINE_SORCERER = 2u
+};
+
 typedef struct p8p_cart_incompatibility {
     uint8_t hash[16];
     const char *title;
     const char *reason;
     const char *workaround;
+    /* Zero denotes an unconditional blocker. Otherwise all bits are needed. */
+    uint32_t required_features;
 } p8p_cart_incompatibility_t;
 
 /* Identity of decoded ROM and exact Lua bytes; independent of filename/label. */

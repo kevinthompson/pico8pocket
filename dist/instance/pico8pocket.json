@@ -35,7 +35,8 @@
             { "id": 16, "filename": "pico8pocket_6.sav" },
             { "id": 17, "filename": "pico8pocket_7.sav" },
             { "id": 18, "filename": "pico8pocket_8.sav" },
-            { "id": 19, "filename": "pico8pocket_9.sav" }
+            { "id": 19, "filename": "pico8pocket_9.sav" },
+            {"id": 20, "filename": "cards/bbs.p8pack"}
         ]
     }
 }

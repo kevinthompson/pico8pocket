@@ -68,8 +68,9 @@ collection downloads validate. Merge existing valid pack entries so installing
 one collection does not remove the other. Show failed IDs and actionable errors.
 
 The ABI is start()/handle_response(), serde messages Choice/Text/Exit and
-Answer/Kill. Unit messages serialize as strings ("Exit", "Kill"). Make work
-incremental between prompts and handle cancellation without corrupting the last
+Answer/Kill. Unit messages serialize as strings ("Exit", "Kill"). Process work
+incrementally within one Install call, print progress, wait 15 seconds between
+HTTP requests and handle cancellation without corrupting the last
 valid bundle. Distribution artifacts are plugin.wasm and plugin.json.
 
 A native helper can import a user-specified PICO-8 cache and/or use their supplied
