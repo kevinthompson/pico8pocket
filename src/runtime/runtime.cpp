@@ -3761,11 +3761,24 @@ extern "C" int p8p_runtime_menu_select(p8p_runtime_t *runtime, int slot,
     lua_xmove(runtime->lua, thread, 1);
     lua_pushnumber(thread, fix32(buttons));
     int status = lua_resume(thread, runtime->lua, 1);
+    /* Menu callbacks formerly ran on the main thread, where flip() and the
+     * cooperative stubs returned immediately. Drain ordinary yields here while
+     * still stopping at a cart handoff; bound explicit yield loops. */
+    for (int resumes = 1; status == LUA_YIELD &&
+         !runtime->cart_request_pending && resumes < 1024; ++resumes) {
+        lua_settop(thread, 0);
+        status = lua_resume(thread, runtime->lua, 0);
+    }
     if (runtime->cart_request_pending) keep_open = 0;
-    else if (status != LUA_OK) {
+    else if (status == LUA_YIELD) {
+        snprintf(runtime->error, sizeof(runtime->error),
+                 "menu item: callback yielded too many times");
+        keep_open = -1;
+    } else if (status != LUA_OK) {
         set_thread_error(runtime, "menu item", thread);
         keep_open = -1;
-    } else keep_open = !choose || lua_toboolean(thread, -1);
+    } else keep_open = !choose ||
+        (lua_gettop(thread) > 0 && lua_toboolean(thread, 1));
     luaL_unref(runtime->lua, LUA_REGISTRYINDEX, reference);
     return keep_open;
 }

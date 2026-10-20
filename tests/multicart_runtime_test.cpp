@@ -26,6 +26,9 @@ static void noncontinuation() {
         {"after=0 function _update() load('#target','parent','hello') after=1 end function _draw() after=2 end", 1, false},
         {"after=0 function _draw() load('#target','parent','hello') after=1 end", 1, false},
         {"after=0 menuitem(1,'next',function() load('#target','parent','hello') after=1 end)", 0, true},
+        {"after=0 menuitem(1,'next',function() flip() load('#target','parent','hello') after=1 end)", 0, true},
+        {"after=0 menuitem(1,'next',function() mkdir('unused') load('#target','parent','hello') after=1 end)", 0, true},
+        {"after=0 menuitem(1,'next',function() yield(true,false) flip() load('#target','parent','hello') after=1 end)", 0, true},
         {"after=0 flip() load('#target','parent','hello') after=1", 1, false},
         {"after=0 function _init() flip() load('#target','parent','hello') after=1 end", 1, false},
         {"after=0 function _update() flip() load('#target','parent','hello') after=1 end", 2, false},
@@ -68,6 +71,42 @@ static void noncontinuation() {
         CHECK(eval(r, "after") != 1);
         p8p_runtime_destroy(r);
     }
+}
+
+static void ordinary_menu_yields() {
+    struct Case { const char *callback; int keep_open; };
+    const Case cases[] = {
+        {"flip() after=1 return true", 1},
+        {"mkdir('unused') after=1 return false", 0},
+        {"flip() mkdir('unused') after=1", 0},
+        {"after=1", 0},
+        {"after=1 return true,false", 1},
+        {"after=1 return false,true", 0},
+        {"for i=1,10 do yield(true,false) end after=1 return true", 1}
+    };
+    for (const auto &test : cases) {
+        auto r = p8p_runtime_create();
+        std::string source = std::string("after=0 menuitem(1,'ordinary',function(buttons) seen=buttons ") +
+            test.callback + " end)";
+        CHECK(load(r, source.c_str()) == 0);
+        CHECK(p8p_runtime_menu_select(r, 1, 112) == test.keep_open);
+        CHECK(eval(r, "after") == 1);
+        CHECK(eval(r, "seen") == 112);
+        CHECK(p8p_runtime_cart_request(r) == NULL);
+        CHECK(p8p_runtime_error(r)[0] == '\0');
+        p8p_runtime_destroy(r);
+    }
+    auto r = p8p_runtime_create();
+    CHECK(load(r, "after=0 menuitem(1,'bounded',function() while true do after+=1 yield(true) end end)") == 0);
+    CHECK(p8p_runtime_menu_select(r, 1, 112) == -1);
+    CHECK(eval(r, "after>1 and after<2000 and 1 or 0") == 1);
+    CHECK(strstr(p8p_runtime_error(r), "menu item") != NULL);
+    CHECK(p8p_runtime_cart_request(r) == NULL);
+    // A discarded ordinary callback cannot resume during a later game frame.
+    int stopped = eval(r, "after");
+    CHECK(p8p_runtime_step(r, 0) == 0);
+    CHECK(eval(r, "after") == stopped);
+    p8p_runtime_destroy(r);
 }
 
 static int context(p8p_runtime_t *r, const char *lua, const char *params, const char *back) {
@@ -315,7 +354,7 @@ static void capability_fixtures() {
 int main(int argc, char **argv) {
     noncontinuation(); context_and_back(); state_context(argc>1?argv[1]:NULL);
     bounded_requests(); back_boundaries(); restore_retires_pending_top_level(); capability_fixtures();
-    ordinary_coroutines_round_trip(); failed_load_preserves_context();
+    ordinary_coroutines_round_trip(); ordinary_menu_yields(); failed_load_preserves_context();
     legacy_aliases(argc > 2 ? argv[2] : NULL);
     if (!failures) puts("multicart runtime tests passed");
     return failures ? 1 : 0;
