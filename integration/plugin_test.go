@@ -405,3 +405,36 @@ func TestCompiledPluginDownloadCourtesyTimer(t *testing.T) {
 	assertPack(t, h.pack(), carts)
 	h.assertPreserved()
 }
+
+// Reopening the menu must not reset the courtesy interval after a real request.
+// Mock responses stay inside the real SDK HTTP host ABI without BBS traffic.
+func TestCompiledPluginCrossCallCourtesyTimer(t *testing.T) {
+	h := newHarness(t, "host", "www.lexaloffle.com")
+	var requests []time.Time
+	var latest []byte
+	previous := http.DefaultClient
+	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodGet || request.URL.Scheme != "https" || request.URL.Host != "www.lexaloffle.com" || request.URL.Path != "/bbs/get_cart.php" || request.URL.Query().Get("lid") != "mot_sorcerergame" {
+			t.Fatalf("unexpected mocked request: %s %s", request.Method, request.URL)
+		}
+		requests = append(requests, time.Now())
+		latest = testcart.PNG(byte(len(requests)))
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(latest)), Request: request}, nil
+	})}
+	t.Cleanup(func() { http.DefaultClient = previous })
+	for i := 0; i < 2; i++ {
+		m := menu(t, h.call("start", nil))
+		out := h.call("handle_response", answer(t, m, "Update Sorcerer"))
+		if !strings.HasPrefix(menu(t, out).Choice.Query, "Installed 1") {
+			t.Fatalf("mocked update failed: %s", out)
+		}
+	}
+	if len(requests) != 2 {
+		t.Fatalf("got %d HTTP requests, want two separate updates", len(requests))
+	}
+	if gap := requests[1].Sub(requests[0]); gap < 15*time.Second {
+		t.Fatalf("WASI courtesy interval reset across start/handle_response: %v, want at least 15s", gap)
+	}
+	assertPack(t, h.pack(), offline.Carts{"mot_sorcerergame": latest})
+	h.assertPreserved()
+}

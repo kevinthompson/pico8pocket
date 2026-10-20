@@ -31,12 +31,20 @@ type Session struct {
 	// Sleep is invoked only between actual network requests. A failing sleep cancels
 	// preparation; the default uses short WASI polls so host cancellation is prompt.
 	Sleep func(time.Duration) error
+	// Now supplies the request clock. Hosts and tests may replace it together with Sleep.
+	Now func() time.Time
+	// LastRequest survives separate actions. WASI restores it from an independent
+	// Extism variable so even cancellation before conversation persistence retains it.
+	LastRequest time.Time
+	// OnRequest persists LastRequest immediately before Fetch for cancellation,
+	// then again after Fetch completes to start the full courtesy cooldown.
+	OnRequest func(time.Time)
 	// CheckCancel may interrupt between cache reads, standalone writes and publication.
 	CheckCancel func() error
 }
 
 func New(pocketRoot, hostRoot string, logger func(string), fetch FetchFunc) *Session {
-	return &Session{pocketRoot: pocketRoot, hostRoot: hostRoot, logger: logger, fetch: fetch, Sleep: pollSleep}
+	return &Session{pocketRoot: pocketRoot, hostRoot: hostRoot, logger: logger, fetch: fetch, Sleep: pollSleep, Now: time.Now}
 }
 func pollSleep(duration time.Duration) error {
 	deadline := time.Now().Add(duration)
@@ -208,7 +216,6 @@ func (s *Session) Install(collection string, refresh bool) (string, error) {
 	}
 	s.log("Installing " + collection + " collection(s).")
 	var failures []string
-	requested := false
 	for i, cart := range selected {
 		if err = s.cancel(); err != nil {
 			return "", err
@@ -223,22 +230,13 @@ func (s *Session) Install(collection string, refresh bool) (string, error) {
 			failures = append(failures, cart.ID+": verified cache unavailable; network disabled")
 			continue
 		}
-		if requested {
-			s.log("Waiting between downloads to respect Lexaloffle rate limits.")
-			sleep := s.Sleep
-			if sleep == nil {
-				sleep = pollSleep
-			}
-			if err = sleep(15 * time.Second); err != nil {
-				return "", err
-			}
-		}
-		if err = s.cancel(); err != nil {
+		if err = s.beforeRequest(cart.ID); err != nil {
 			return "", err
 		}
-		requested = true
-		s.log("Downloading #" + cart.ID + "...")
 		status, data, retryAfter, fetchErr := s.fetch(cart.ID)
+		// Start the cooldown after the response. Persisting only the earlier
+		// reservation would include host-call setup time in the measured gap.
+		s.recordRequest()
 		if status == 429 {
 			if retryAfter == "" {
 				retryAfter = "not supplied"
@@ -302,15 +300,20 @@ func (s *Session) Install(collection string, refresh bool) (string, error) {
 // conversationState is saved in Extism variables, which survive guest reinitialization.
 // Paths and executable callbacks always come from the host's new Session.
 type conversationState struct {
-	Started  bool     `json:"started"`
-	Exited   bool     `json:"exited"`
-	Sequence uint64   `json:"sequence"`
-	Name     string   `json:"name"`
-	Choices  []string `json:"choices"`
+	Started     bool     `json:"started"`
+	Exited      bool     `json:"exited"`
+	Sequence    uint64   `json:"sequence"`
+	Name        string   `json:"name"`
+	Choices     []string `json:"choices"`
+	LastRequest int64    `json:"last_request,omitempty"`
 }
 
 func (s *Session) Snapshot() ([]byte, error) {
-	return json.Marshal(conversationState{s.started, s.exited, s.sequence, s.name, s.choices})
+	var stamp int64
+	if !s.LastRequest.IsZero() {
+		stamp = s.LastRequest.UnixNano()
+	}
+	return json.Marshal(conversationState{s.started, s.exited, s.sequence, s.name, s.choices, stamp})
 }
 func (s *Session) Restore(data []byte) error {
 	var state conversationState
@@ -325,5 +328,53 @@ func (s *Session) Restore(data []byte) error {
 	s.sequence = state.Sequence
 	s.name = state.Name
 	s.choices = state.Choices
+	if state.LastRequest != 0 {
+		saved := time.Unix(0, state.LastRequest)
+		if saved.After(s.LastRequest) {
+			s.LastRequest = saved
+		}
+	}
 	return nil
+}
+
+// beforeRequest gates network calls across menu actions without delaying cache use.
+func (s *Session) beforeRequest(id string) error {
+	now := s.Now
+	if now == nil {
+		now = time.Now
+	}
+	if !s.LastRequest.IsZero() {
+		elapsed := now().Sub(s.LastRequest)
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		remaining := 15*time.Second - elapsed
+		if remaining > 0 {
+			s.log("Waiting between downloads to respect Lexaloffle rate limits.")
+			sleep := s.Sleep
+			if sleep == nil {
+				sleep = pollSleep
+			}
+			if err := sleep(remaining); err != nil {
+				return err
+			}
+		}
+	}
+	if err := s.cancel(); err != nil {
+		return err
+	}
+	s.log("Downloading #" + id + "...")
+	s.recordRequest()
+	return nil
+}
+
+func (s *Session) recordRequest() {
+	now := s.Now
+	if now == nil {
+		now = time.Now
+	}
+	s.LastRequest = now()
+	if s.OnRequest != nil {
+		s.OnRequest(s.LastRequest)
+	}
 }

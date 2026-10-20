@@ -3,8 +3,10 @@
 package main
 
 import (
+	"encoding/binary"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/extism/go-pdk"
 	"github.com/zenibako/pico8pocket/offline"
@@ -50,10 +52,23 @@ func fetchCart(id string) (int, []byte, string, error) {
 }
 
 const stateKey = "pico8-offline-conversation"
+const requestKey = "pico8-offline-last-request"
 
 func newSession() *pocketplugin.Session {
 	// Absolute preopen names avoid depending on WASI directory enumeration order.
-	return pocketplugin.New("/pocket", "/host", logMessage, fetchCart)
+	session := pocketplugin.New("/pocket", "/host", logMessage, fetchCart)
+	// This variable is intentionally independent of conversation state. Record it
+	// before HTTP for cancellation, then refresh it after the response so a fresh
+	// start retains the full cooldown without counting host-call setup latency.
+	if saved := pdk.GetVar(requestKey); len(saved) == 8 {
+		session.LastRequest = time.Unix(0, int64(binary.LittleEndian.Uint64(saved)))
+	}
+	session.OnRequest = func(stamp time.Time) {
+		var saved [8]byte
+		binary.LittleEndian.PutUint64(saved[:], uint64(stamp.UnixNano()))
+		pdk.SetVar(requestKey, saved[:])
+	}
+	return session
 }
 func outputSession(session *pocketplugin.Session, output []byte, err error) int32 {
 	if err != nil {

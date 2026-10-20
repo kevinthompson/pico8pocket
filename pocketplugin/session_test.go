@@ -212,6 +212,7 @@ func TestCancellationDuringCourtesyWaitPreservesBundle(t *testing.T) {
 	old := read(t, filepath.Join(p, offline.PackPath))
 	calls := 0
 	s.fetch = func(string) (int, []byte, string, error) { calls++; return 200, fixture(t, 2), "", nil }
+	s.Now = func() time.Time { return time.Unix(1700000000, 0) }
 	s.Sleep = func(d time.Duration) error {
 		if d != 15*time.Second {
 			t.Fatal(d)
@@ -306,6 +307,7 @@ func TestMissingCartPreventsPartialPublication(t *testing.T) {
 		}
 		return 200, fixture(t, 2), "", nil
 	}
+	s.Now = func() time.Time { return time.Unix(1700000000, 0) }
 	s.Sleep = func(d time.Duration) error {
 		waits++
 		if d != 15*time.Second {
@@ -338,8 +340,8 @@ func TestMissingCartPreventsPartialPublication(t *testing.T) {
 	if _, e = s.Install("arcade", false); e != nil {
 		t.Fatal(e)
 	}
-	if calls != 1 || waits != 0 {
-		t.Fatalf("retry calls %d waits %d", calls, waits)
+	if calls != 1 || waits != 1 {
+		t.Fatalf("retry calls %d waits %d; immediate retries retain the preceding request interval", calls, waits)
 	}
 }
 
@@ -372,5 +374,137 @@ func TestCancelledBeforePublicationPreservesPack(t *testing.T) {
 	}
 	if bytes.Equal(fixture(t, 1), read(t, filepath.Join(p, offline.CartPath, "mot_sorcerergame.p8.png"))) {
 		t.Fatal("test did not reach standalone publication")
+	}
+}
+
+func TestCourtesyDelaySurvivesSeparateActions(t *testing.T) {
+	p, h := roots(t)
+	requests := 0
+	waits := 0
+	s := New(p, h, nil, func(string) (int, []byte, string, error) { requests++; return 200, fixture(t, 4), "", nil })
+	s.Sleep = func(d time.Duration) error {
+		waits++
+		if d <= 14*time.Second || d > 15*time.Second {
+			t.Fatalf("unexpected remaining wait %v", d)
+		}
+		return nil
+	}
+	c := start(t, s)
+	c = respond(t, s, c, "Update Sorcerer")
+	respond(t, s, c, "Update Sorcerer")
+	if requests != 2 || waits != 1 {
+		t.Fatalf("requests %d waits %d; separate actions must retain the courtesy interval", requests, waits)
+	}
+}
+
+func TestRequestTimestampPersistsBeforeCancelledFetch(t *testing.T) {
+	p, h := roots(t)
+	now := time.Unix(1700000000, 0)
+	var persisted time.Time
+	calls := 0
+	s := New(p, h, nil, nil)
+	s.Now = func() time.Time { return now }
+	s.OnRequest = func(stamp time.Time) { persisted = stamp }
+	s.fetch = func(string) (int, []byte, string, error) {
+		calls++
+		if !persisted.Equal(now) || !s.LastRequest.Equal(now) {
+			t.Fatal("timestamp not persisted before HTTP")
+		}
+		return 0, nil, "", ErrCancelled
+	}
+	start(t, s)
+	before, e := s.Snapshot()
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.Install("sorcerer", true); !errors.Is(e, ErrCancelled) {
+		t.Fatal(e)
+	}
+	// A cancelled guest has not written a new conversation snapshot. The separate
+	// host timestamp must take precedence when the old snapshot is restored.
+	restored := New(p, h, nil, func(string) (int, []byte, string, error) { calls++; return 429, nil, "60", nil })
+	restored.LastRequest = persisted
+	if e = restored.Restore(before); e != nil {
+		t.Fatal(e)
+	}
+	now = now.Add(3 * time.Second)
+	restored.Now = func() time.Time { return now }
+	waits := 0
+	restored.Sleep = func(d time.Duration) error {
+		waits++
+		if d != 12*time.Second {
+			t.Fatalf("remaining %v", d)
+		}
+		now = now.Add(d)
+		return nil
+	}
+	if _, e = restored.Install("sorcerer", true); e == nil || !strings.Contains(e.Error(), "429") {
+		t.Fatal(e)
+	}
+	if calls != 2 || waits != 1 {
+		t.Fatalf("calls %d waits %d", calls, waits)
+	}
+	saved, e := restored.Snapshot()
+	if e != nil {
+		t.Fatal(e)
+	}
+	another := New(p, h, nil, nil)
+	if e = another.Restore(saved); e != nil {
+		t.Fatal(e)
+	}
+	if !another.LastRequest.Equal(now) {
+		t.Fatal("snapshot lost timestamp")
+	}
+}
+
+func TestCourtesyGateUsesOnlyRemainingInterval(t *testing.T) {
+	p, h := roots(t)
+	now := time.Unix(1700000000, 0)
+	s := New(p, h, nil, func(string) (int, []byte, string, error) { return 200, fixture(t, 5), "", nil })
+	s.Now = func() time.Time { return now }
+	waits := 0
+	s.Sleep = func(d time.Duration) error { waits++; t.Fatalf("unexpected sleep %v", d); return nil }
+	if _, e := s.Install("sorcerer", true); e != nil {
+		t.Fatal(e)
+	}
+	// Cache use does not enter the gate even while the timestamp is recent.
+	if _, e := s.Install("sorcerer", false); e != nil {
+		t.Fatal(e)
+	}
+	now = now.Add(15 * time.Second)
+	if _, e := s.Install("sorcerer", true); e != nil {
+		t.Fatal(e)
+	}
+	if waits != 0 {
+		t.Fatal(waits)
+	}
+}
+
+func TestCourtesyCooldownStartsAfterFetchCompletes(t *testing.T) {
+	p, h := roots(t)
+	now := time.Unix(1700000000, 0)
+	s := New(p, h, nil, nil)
+	s.Now = func() time.Time { return now }
+	s.fetch = func(string) (int, []byte, string, error) {
+		now = now.Add(5 * time.Second)
+		return 200, fixture(t, 6), "", nil
+	}
+	waits := 0
+	s.Sleep = func(d time.Duration) error {
+		waits++
+		if d != 15*time.Second {
+			t.Fatalf("cooldown after a five-second fetch was %v, want15s", d)
+		}
+		now = now.Add(d)
+		return nil
+	}
+	if _, e := s.Install("sorcerer", true); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.Install("sorcerer", true); e != nil {
+		t.Fatal(e)
+	}
+	if waits != 1 {
+		t.Fatal(waits)
 	}
 }
