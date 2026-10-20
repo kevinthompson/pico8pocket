@@ -28,6 +28,37 @@ Out of scope for the Pocket hardware target:
 
 Compatibility claims must be backed by a named cart/test and a Pocket run.
 
+## Known incompatible revisions
+
+[The README list](../README.md#known-incompatible-cartridges) is generated from
+[`compatibility/incompatible-carts.json`](../compatibility/incompatible-carts.json).
+The runtime rejects those decoded ROM/Lua content hashes before cartridge code
+executes, including on restart. This does not change saved-state identities or
+block other revisions by filename. An unlisted revision is not a claim of support.
+
+The initial list was checked against older agent sessions and supplied-cart
+experiment reports on 2026-10-20:
+
+- Pico Arcade: all 35 launch selections reach unsupported online `load()` calls.
+- Trail of the Sorcerer: its intro calls `load("#mot_sorcerergame")`; the supplied
+  collection lacks that companion and the core cannot perform the handoff.
+- Pico Backrooms: the current host runtime reproduces the historical native/RV32
+  failure at frame 122, calling undefined `rrectfill()` at cart line 554.
+
+Grippy's differing native repeats were attributed to Lua hash seeding, not a
+demonstrated gameplay failure. Historical Yarn, Snail, Tetyis and Moss failures
+were repaired. Low FPS in the old os25 smoke windows also does not establish
+incompatibility. These cases are not blocked.
+
+To maintain the list, use `build/tools/pico8pocket_compat_scan CART --identity`
+after `make compat-scan`, record reproduction evidence and the support issue in
+the registry, then run `python3 scripts/incompatible-carts.py`. `make test`
+checks generation and public identity/lookup fixtures. For local rejection,
+restart and menu tests, also set any of `P8P_TEST_PICO_ARCADE`,
+`P8P_TEST_TRAIL_OF_THE_SORCERER` and `P8P_TEST_PICO_BACKROOMS` to the corresponding
+private cart file before running `make test`. Missing private fixtures are
+reported as skipped; never commit the cartridges.
+
 ## Alpha implementation status
 
 Implemented and covered by host tests:

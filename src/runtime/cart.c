@@ -4,6 +4,49 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void hash_content_bytes(uint64_t *a, uint64_t *b,
+                               const uint8_t *data, size_t size) {
+    while (size--) {
+        *a ^= *data;
+        *a *= UINT64_C(1099511628211);
+        *b ^= (uint64_t)(*data++ + 0x9d);
+        *b *= UINT64_C(14029467366897019727);
+        *b ^= *b >> 29;
+    }
+}
+
+void p8p_cart_content_hash(const p8p_cart_t *cart, p8p_cart_hash_t *hash) {
+    uint64_t a = UINT64_C(14695981039346656037);
+    uint64_t b = UINT64_C(7809847782465536322);
+    if (!hash)
+        return;
+    memset(hash, 0, sizeof(*hash));
+    if (!cart)
+        return;
+    hash_content_bytes(&a, &b, cart->rom, sizeof(cart->rom));
+    if (cart->lua)
+        hash_content_bytes(&a, &b, (const uint8_t *)cart->lua, cart->lua_size);
+    /* Preserve the save-state identity's little-endian byte layout. */
+    for (unsigned i = 0; i < 8; ++i) {
+        hash->bytes[i] = (uint8_t)(a >> (i * 8));
+        hash->bytes[i + 8] = (uint8_t)(b >> (i * 8));
+    }
+}
+
+const p8p_cart_incompatibility_t *p8p_cart_find_incompatibility(
+    const p8p_cart_hash_t *hash) {
+    static const p8p_cart_incompatibility_t entries[] = {
+#include "p8p/incompatible_carts.inc"
+        {{0}, NULL, NULL, NULL}
+    };
+    if (!hash)
+        return NULL;
+    for (size_t i = 0; entries[i].title; ++i)
+        if (memcmp(hash->bytes, entries[i].hash, sizeof(hash->bytes)) == 0)
+            return &entries[i];
+    return NULL;
+}
+
 static const uint8_t png_signature[8] = {
     0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a
 };

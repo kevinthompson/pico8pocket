@@ -50,6 +50,11 @@ LDFLAGS += -flto
 
 include $(SDK_DIR)/sdk.mk
 
+# The SDK does not emit dependency files for application includes. A registry
+# update must invalidate the object that contains the compiled list.
+$(call sdk_app_object,$(PROJECT_ROOT)/src/runtime/cart.c): \
+	$(PROJECT_ROOT)/include/p8p/cart.h $(PROJECT_ROOT)/include/p8p/incompatible_carts.inc
+
 $(Z8LUA_GENERATED_DIR)/%.cpp: $(Z8LUA_ROOT)/%.c
 	@mkdir -p $(dir $@)
 	cp $< $@

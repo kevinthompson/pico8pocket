@@ -51,21 +51,6 @@ static void hash_bytes(uint64_t *a, uint64_t *b, const uint8_t *data,
     }
 }
 
-void p8p_cart_content_hash(const p8p_cart_t *cart, p8p_cart_hash_t *hash) {
-    uint64_t a = UINT64_C(14695981039346656037);
-    uint64_t b = UINT64_C(7809847782465536322);
-    if (!hash)
-        return;
-    memset(hash, 0, sizeof(*hash));
-    if (!cart)
-        return;
-    hash_bytes(&a, &b, cart->rom, sizeof(cart->rom));
-    if (cart->lua)
-        hash_bytes(&a, &b, (const uint8_t *)cart->lua, cart->lua_size);
-    write_u64(hash->bytes, a);
-    write_u64(hash->bytes + 8, b);
-}
-
 static void initialize_store(uint8_t *store) {
     memset(store, 0xff, STORE_CAPACITY);
     memcpy(store, store_magic, sizeof(store_magic));

@@ -2928,6 +2928,16 @@ extern "C" void p8p_runtime_destroy(p8p_runtime_t *runtime) {
 extern "C" int p8p_runtime_load(p8p_runtime_t *runtime, const p8p_cart_t *cart) {
     if (!runtime || !cart || !cart->lua)
         return -1;
+    p8p_cart_hash_t cart_hash;
+    p8p_cart_content_hash(cart, &cart_hash);
+    const p8p_cart_incompatibility_t *incompatible =
+        p8p_cart_find_incompatibility(&cart_hash);
+    if (incompatible) {
+        snprintf(runtime->error, sizeof(runtime->error),
+                 "%s incompatible.\n%s\n%s", incompatible->title,
+                 incompatible->reason, incompatible->workaround);
+        return P8P_RUNTIME_INCOMPATIBLE_CART;
+    }
     char *cart_lua = (char *)malloc(cart->lua_size + 1);
     if (!cart_lua)
         return -2;

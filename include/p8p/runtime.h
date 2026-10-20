@@ -41,6 +41,8 @@ typedef int (*p8p_runtime_cartdata_save_fn)(void *userdata, const char *id,
 p8p_runtime_t *p8p_runtime_create(void);
 void p8p_runtime_destroy(p8p_runtime_t *runtime);
 int p8p_runtime_load(p8p_runtime_t *runtime, const p8p_cart_t *cart);
+/* A registered incompatible revision was rejected before its Lua ran. */
+#define P8P_RUNTIME_INCOMPATIBLE_CART (-5)
 int p8p_runtime_step(p8p_runtime_t *runtime, uint8_t buttons);
 int p8p_runtime_step_with_draw(p8p_runtime_t *runtime, uint8_t buttons,
                                int draw_frame);

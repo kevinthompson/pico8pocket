@@ -136,6 +136,34 @@ presentation path have been validated on physical Pocket hardware. CPU-heavy
 cartridges and scaler behavior beyond the established 2X path still need more
 compatibility and performance work.
 
+## Known incompatible cartridges
+
+The core refuses the exact cartridge revisions below before running their Lua
+and displays the reason and workaround. Press Select to open the system menu.
+Matching uses decoded ROM and Lua content, so renaming a cart or changing its
+PNG label does not bypass the list. Different content is checked independently;
+an unlisted cart is not a compatibility guarantee.
+
+<!-- incompatible-carts:begin -->
+| Cartridge revision | Why it is blocked | Workaround / support |
+|---|---|---|
+| Pico Arcade (`pico_arcade.p8.png`) | Requires online BBS cartridge loading, which Pocket cannot provide. | Load each standalone game through the Pocket cartridge picker. [Issue](https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/68) |
+| Trail of the Sorcerer (`trail_of_the_sorcerer.p8.png`) | Gameplay needs a separate companion cart and unsupported cartridge switching. | The intro alone is not playable. Offline companion loading needs core support. [Issue](https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/68) |
+| Pico Backrooms (`pico_backrooms-1.p8.png`) | Crashes during gameplay: this revision calls unsupported rrectfill(). | Use a compatible revision when available; rounded-rectangle support is tracked. [Issue](https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/69) |
+<!-- incompatible-carts:end -->
+
+The list records confirmed launch/gameplay blockers, not low frame rates or
+test-harness nondeterminism. Historical Yarn, Snail, Tetyis and Moss fixes are
+not blocked. Online BBS downloads are outside the Pocket compatibility target;
+the linked launcher issue tracks an offline path using separately supplied carts.
+
+Maintainers: edit [the registry](compatibility/incompatible-carts.json), then run
+`python3 scripts/incompatible-carts.py` to update the compiled list and this table.
+`make test` checks that both match. `make compat-scan` builds a tool whose
+`CART --identity` mode prints a decoded content hash without executing the cart.
+Add only reproduced failures, record the tested revision and evidence, and
+remove its fingerprint once the support path is verified.
+
 ## Build
 
 Run the portable tests:

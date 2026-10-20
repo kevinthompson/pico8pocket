@@ -191,7 +191,60 @@ static void celeste_acceptance(p8p_runtime_t *runtime, const char *path,
     TEST_NOTES_4 TEST_NOTES_4 TEST_NOTES_4 TEST_NOTES_4 \
     TEST_NOTES_4 TEST_NOTES_4 TEST_NOTES_4 TEST_NOTES_4
 
+/* Private cartridges are optional; never copy them into the public fixtures. */
+static void test_incompatible_carts(void) {
+    static const struct { const char *env; const char *title; } cases[] = {
+        {"P8P_TEST_PICO_ARCADE", "Pico Arcade"},
+        {"P8P_TEST_TRAIL_OF_THE_SORCERER", "Trail of the Sorcerer"},
+        {"P8P_TEST_PICO_BACKROOMS", "Pico Backrooms"},
+    };
+    for (const auto &item : cases) {
+        const char *path = getenv(item.env);
+        if (!path) {
+            printf("Compatibility rejection test skipped (%s unset)\n", item.env);
+            continue;
+        }
+        p8p_cart_t cart = {};
+        CHECK(p8p_cart_load_file(path, &cart) == 0);
+        if (!cart.lua)
+            continue;
+        p8p_cart_hash_t hash;
+        p8p_cart_content_hash(&cart, &hash);
+        printf("Compatibility fixture %s: ", item.title);
+        for (uint8_t byte : hash.bytes)
+            printf("%02x", byte);
+        printf("\n");
+        p8p_runtime_t *runtime = p8p_runtime_create();
+        CHECK(runtime != NULL);
+        if (runtime) {
+            int result = p8p_runtime_load(runtime, &cart);
+            CHECK(result == P8P_RUNTIME_INCOMPATIBLE_CART);
+            if (result != 0) {
+                CHECK(strstr(p8p_runtime_error(runtime), item.title) != NULL);
+                CHECK(strstr(p8p_runtime_error(runtime), "incompatible") != NULL);
+                CHECK(p8p_runtime_step(runtime, 0) != 0);
+                CHECK(p8p_runtime_load(runtime, &cart) != 0);
+                p8p_settings_t settings;
+                p8p_settings_defaults(&settings);
+                p8p_menu_t *menu = p8p_menu_create(&settings, &hash, "p8.png");
+                CHECK(menu != NULL);
+                if (menu) {
+                    p8p_menu_open(menu, runtime, 0, 0);
+                    CHECK(p8p_menu_framebuffer(menu) != NULL);
+                    p8p_menu_destroy(menu);
+                }
+                /* A revised cart must not inherit this exact version's block. */
+                cart.rom[P8P_CART_ROM_SIZE - 1] ^= 1;
+                CHECK(p8p_runtime_load(runtime, &cart) == 0);
+            }
+            p8p_runtime_destroy(runtime);
+        }
+        p8p_cart_destroy(&cart);
+    }
+}
+
 int main(void) {
+    test_incompatible_carts();
     static const uint8_t source[] =
         "pico-8 cartridge // http://www.pico-8.com\n"
         "version 42\n"

@@ -4,6 +4,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef enum p8p_cart_kind {
     P8P_CART_UNKNOWN = 0,
     P8P_CART_TEXT,
@@ -27,6 +31,22 @@ typedef struct p8p_cart {
     size_t lua_size;
 } p8p_cart_t;
 
+typedef struct p8p_cart_hash {
+    uint8_t bytes[16];
+} p8p_cart_hash_t;
+
+typedef struct p8p_cart_incompatibility {
+    uint8_t hash[16];
+    const char *title;
+    const char *reason;
+    const char *workaround;
+} p8p_cart_incompatibility_t;
+
+/* Identity of decoded ROM and exact Lua bytes; independent of filename/label. */
+void p8p_cart_content_hash(const p8p_cart_t *cart, p8p_cart_hash_t *hash);
+const p8p_cart_incompatibility_t *p8p_cart_find_incompatibility(
+    const p8p_cart_hash_t *hash);
+
 int p8p_cart_probe_memory(const uint8_t *data, size_t size,
                           uint64_t file_size, p8p_cart_info_t *out);
 int p8p_cart_probe_file(const char *path, p8p_cart_info_t *out);
@@ -38,5 +58,9 @@ int p8p_cart_load_png_memory(const uint8_t *data, size_t size,
                              p8p_cart_t *out);
 int p8p_cart_load_file(const char *path, p8p_cart_t *out);
 void p8p_cart_destroy(p8p_cart_t *cart);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

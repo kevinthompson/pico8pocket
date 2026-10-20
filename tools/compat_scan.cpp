@@ -219,12 +219,26 @@ int main(int argc, char **argv) {
         std::fprintf(stderr,
                      "usage: %s CART [FRAMES [SEED [nodraw]]] | "
                      "CART --bench EXPR FRAMES [SEED [nodraw [nohook]]] | "
-                     "CART --probe\n",
+                     "CART --probe | CART --identity | CART --source\n",
                      argv[0]);
         return 1;
     }
     if (argc >= 3 && std::strcmp(argv[2], "--probe") == 0)
         return run_input_probe(argv[1]);
+    if (argc >= 3 && std::strcmp(argv[2], "--identity") == 0) {
+        p8p_cart_t cart = {};
+        if (p8p_cart_load_file(argv[1], &cart) != 0)
+            return 2;
+        p8p_cart_hash_t hash;
+        p8p_cart_content_hash(&cart, &hash);
+        for (uint8_t byte : hash.bytes)
+            std::printf("%02x", byte);
+        const p8p_cart_incompatibility_t *entry =
+            p8p_cart_find_incompatibility(&hash);
+        std::printf(" %s\n", entry ? entry->title : "unlisted");
+        p8p_cart_destroy(&cart);
+        return 0;
+    }
 #ifdef P8P_RUNTIME_DEBUG
     if (argc >= 6 && std::strcmp(argv[2], "--eval") == 0)
         return run_eval(argv[1],

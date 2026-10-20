@@ -457,24 +457,28 @@ int main(int argc, char **argv) {
     if ((cart.kind == P8P_CART_TEXT || cart.kind == P8P_CART_PNG) && cart.valid &&
         p8p_cart_load_file(cart_path, &loaded_cart) == 0) {
         runtime = p8p_runtime_create();
+        p8p_cart_content_hash(&loaded_cart, &cart_hash);
+        if (runtime) {
+            /* Load rejections need the same Select-menu recovery as errors
+             * reached during gameplay. */
+            menu = p8p_menu_create(&settings, &cart_hash,
+                                   p8p_cart_kind_name(cart.kind));
+            if (!menu)
+                printf("pico8pocket: system menu allocation failed\n");
+        }
         if (runtime)
             p8p_runtime_set_cartdata_hooks(runtime, runtime_cartdata_load,
                                            runtime_cartdata_save, NULL);
         if (runtime && p8p_runtime_load(runtime, &loaded_cart) == 0) {
             running = 1;
-            p8p_cart_content_hash(&loaded_cart, &cart_hash);
             /* The OS then refuses another cart's Memory before it is
              * copied out; the state's own cart hash still backs it up. */
             p8p_platform_savestate_set_id(cart_hash.bytes,
                                           sizeof cart_hash.bytes);
             if (p8p_platform_savestate_enable(P8P_STATE_BLOB_MAX) != 0)
                 printf("pico8pocket: save states unavailable\n");
-            menu = p8p_menu_create(&settings, &cart_hash,
-                                   p8p_cart_kind_name(cart.kind));
             p8p_runtime_set_service_hook(runtime, input_latch_service,
                                          &input_latch);
-            if (!menu)
-                printf("pico8pocket: system menu allocation failed\n");
             printf("pico8pocket: z8lua cart started at %d fps\n",
                    p8p_runtime_target_fps(runtime));
         } else {
@@ -698,7 +702,7 @@ int main(int argc, char **argv) {
                 present_required = drew_game_frame;
             }
         }
-        if (!running) {
+        if (!running && !menu_open) {
             if (runtime_failed) {
                 draw_runtime_error_frame(framebuffer, runtime_error);
             } else {

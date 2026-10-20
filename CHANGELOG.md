@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Known incompatible cartridge revisions are blocked before execution with an
+  explanation and Select-menu recovery. The compiled list and README table
+  share one registry, initially covering Pico Arcade, Trail of the Sorcerer
+  and Pico Backrooms. Matching uses decoded content rather than filenames.
 - Lua-to-Lua calls set up and tear down their frames inside the
   interpreter loop instead of through `luaD_precall`/`luaD_poscall`, and C
   functions reached by a tail call (`return peek(...)`) or used as a `for ...
