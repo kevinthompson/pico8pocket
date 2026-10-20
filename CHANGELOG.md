@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Replace the Cart Thumbnails plugin with Offline Collections under the same
+  repository URL. Release CI uses pinned Rust/native tests, cartridge-free actual
+  WASI tests, complete core provenance and a new exact plugin asset inventory.
+  Retire thumbnail CLIs and Go/TinyGo tooling; preserve existing SD artwork.
+
 - Add a Pocket Sync / pupdate plugin for Pico Arcade's 35 BBS games and Trail
   of the Sorcerer's companion, with verified cache reuse, paced downloads and
   atomic offline-bundle updates. No game assets or PICO-8 binaries are bundled.

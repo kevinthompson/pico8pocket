@@ -1,9 +1,12 @@
+#include "p8p/audio.h"
 #include "p8p/cart.h"
 #include "p8p/menu.h"
 #include "p8p/platform.h"
 #include "p8p/runtime.h"
 #include "p8p/state_store.h"
 #include "miniz.h"
+#include "../src/runtime/runtime_internal.h"
+#include <lauxlib.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -245,6 +248,147 @@ static void test_incompatible_carts(void) {
     }
 }
 
+static void audio_chunk_boundaries(void) {
+    enum { FRAMES = 4099 };
+    static uint8_t ram[0x10000];
+    static int16_t expected[FRAMES * 2], actual[FRAMES * 2 + 2];
+    const size_t chunks[] = {0, 1, 2, 3, 7, 16, 31, 64, 257, 1600};
+    uint8_t pcm[257];
+    for (size_t i = 0; i < sizeof(pcm); ++i)
+        pcm[i] = (uint8_t)(i * 37);
+    for (unsigned waveform = 0; waveform < 8; ++waveform) {
+        memset(ram, 0, sizeof(ram));
+        for (unsigned channel = 0; channel < 4; ++channel) {
+            uint8_t *sfx = ram + 0x3200 + channel * 68;
+            unsigned wave = (waveform + channel) & 7;
+            for (unsigned note = 0; note < 32; ++note) {
+                sfx[note * 2] = (uint8_t)((24 + note % 12) | ((wave & 3) << 6));
+                sfx[note * 2 + 1] = (uint8_t)((wave >> 2) | 14 | ((note % 6) << 4));
+            }
+            sfx[64] = (uint8_t)(waveform * 8);
+            sfx[65] = 1;
+            sfx[67] = 32;
+        }
+        for (size_t skipped = 0; skipped < 4; ++skipped) {
+            p8p_audio_t *reference = p8p_audio_create(ram);
+            p8p_audio_t *batched = p8p_audio_create(ram);
+            CHECK(reference && batched);
+            if (!reference || !batched) {
+                p8p_audio_destroy(reference);
+                p8p_audio_destroy(batched);
+                continue;
+            }
+            for (int channel = 0; channel < 4; ++channel) {
+                p8p_audio_sfx(reference, channel, channel, 0, 32);
+                p8p_audio_sfx(batched, channel, channel, 0, 32);
+            }
+            CHECK(p8p_audio_pcm_push(reference, pcm, sizeof(pcm)) == sizeof(pcm));
+            CHECK(p8p_audio_pcm_push(batched, pcm, sizeof(pcm)) == sizeof(pcm));
+            p8p_audio_skip(reference, skipped);
+            p8p_audio_skip(batched, skipped);
+            for (size_t frame = 0; frame < FRAMES; ++frame)
+                p8p_audio_render(reference, expected + frame * 2, 1);
+            actual[0] = actual[FRAMES * 2 + 1] = 12345;
+            size_t rendered = 0;
+            for (size_t part = 0; rendered < FRAMES; ++part) {
+                size_t count = chunks[part % (sizeof(chunks) / sizeof(chunks[0]))];
+                if (count > FRAMES - rendered) count = FRAMES - rendered;
+                p8p_audio_render(batched, actual + 1 + rendered * 2, count);
+                p8p_audio_render(batched, NULL, 1);
+                rendered += count;
+            }
+            CHECK(memcmp(expected, actual + 1, sizeof(expected)) == 0);
+            CHECK(actual[0] == 12345 && actual[FRAMES * 2 + 1] == 12345);
+            CHECK(p8p_audio_pcm_queued(reference) == p8p_audio_pcm_queued(batched));
+            /* Compare the next output too: interpolation phase is unsaved. */
+            p8p_audio_skip(reference, 3);
+            p8p_audio_skip(batched, 3);
+            p8p_audio_render(reference, expected, FRAMES);
+            p8p_audio_render(batched, actual + 1, FRAMES);
+            CHECK(memcmp(expected, actual + 1, sizeof(expected)) == 0);
+            p8p_audio_destroy(reference);
+            p8p_audio_destroy(batched);
+        }
+    }
+}
+
+static void draw_palette_transitions(void) {
+    struct PaletteCase {
+        const char *name;
+        const char *setup;
+        uint8_t zero_pixel, one_pixel, fifteen_pixel, screen_one, screen_fifteen;
+    };
+    static const PaletteCase cases[] = {
+        {"screen scalar", "pal(1,8,1)", 6,1,15,8,15},
+        {"screen table", "pal({[1]=8,[15]=139},1)", 6,1,15,8,139},
+        {"scalar restore", "pal(1,4) pal(1,1)", 6,1,15,1,15},
+        {"table restore", "pal({[1]=4,[15]=0}) pal({[1]=1,[15]=15})", 6,1,15,1,15},
+        {"draw remap", "pal(1,4)", 6,4,15,1,15},
+        {"remap replacement", "pal(1,4) pal(1,5)", 6,5,15,1,15},
+        {"reset both", "pal(1,4) pal(1,8,1) pal()", 6,1,15,1,15},
+        {"unchanged entries", "pal(1,1) pal(1,1) pal({[1]=1}) pal(1,4)", 6,4,15,1,15},
+        {"screen and draw", "pal(1,8,1) pal(1,4)", 6,4,15,8,15},
+        {"poke remap", "poke(0x5f01,4)", 6,4,15,1,15},
+        {"poke restore", "poke(0x5f01,4) poke(0x5f01,1)", 6,1,15,1,15},
+        {"copy remap", "poke(0x4300,4) memcpy(0x5f01,0x4300,1)", 6,4,15,1,15},
+        {"copy restore", "poke(0x4300,4) memcpy(0x5f01,0x4300,1) poke(0x4300,1) memcpy(0x5f01,0x4300,1)", 6,1,15,1,15},
+        {"screen RAM", "poke(0x5f11,8)", 6,1,15,8,15},
+        {"one remap remains", "pal(1,4) pal(15,0) pal(1,1)", 6,1,0,1,15},
+        {"opaque zero", "pal(1,8,1) palt(0,false)", 0,1,15,8,15},
+        {"transparent nonzero", "pal(1,8,1) palt(1,true)", 6,6,15,8,15},
+        {"transparency reset", "pal(1,8,1) palt(1,true) palt()", 6,1,15,8,15},
+        {"screen-only reset", "pal({[1]=8,[15]=139},1) pal()", 6,1,15,1,15},
+        {"all draw entries", "for i=0,15 do pal(i,(i+1)%16) end", 7,2,0,1,15},
+        {"all entries restored", "for i=0,15 do pal(i,(i+1)%16) end for i=0,15 do pal(i,i) end", 6,1,15,1,15},
+        {"print memory", "print(chr(6)..'!5f01'..chr(4),0,100)", 6,4,15,1,15},
+    };
+    for (const PaletteCase &test : cases) {
+        char text[2048];
+        snprintf(text, sizeof(text),
+            "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+            "function _init() for y=0,7 do for x=0,7 do sset(8+x,8+y,(x+y*8)%%16) end end "
+            "mset(0,0,17) %s end\n"
+            "function _draw() if btn(0) then pal(1,4) elseif btn(1) then pal(1,1) end "
+            "cls(6) spr(17,16,16) map(0,0,40,16,1,1) end\n", test.setup);
+        p8p_cart_t cart = {};
+        p8p_runtime_t *runtime = p8p_runtime_create();
+        CHECK(runtime != NULL);
+        if (!runtime) continue;
+        int loaded = p8p_cart_load_text_memory((const uint8_t *)text, strlen(text), &cart);
+        CHECK(loaded == 0);
+        if (loaded == 0) loaded = p8p_runtime_load(runtime, &cart);
+        CHECK(loaded == 0);
+        if (loaded == 0) {
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            void *saved = NULL;
+            size_t saved_size = 0;
+            CHECK(p8p_runtime_save_state(runtime, &saved, &saved_size) == 0);
+            for (int restored = 0; restored < 2; ++restored) {
+                const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+                const uint8_t *screen = p8p_runtime_screen_palette(runtime);
+                int before = failures;
+                for (int tile = 0; tile < 2; ++tile) {
+                    int x = tile == 0 ? 16 : 40;
+                    CHECK(pixels[16 * 128 + x] == test.zero_pixel);
+                    CHECK(pixels[16 * 128 + x + 1] == test.one_pixel);
+                    CHECK(pixels[17 * 128 + x + 7] == test.fifteen_pixel);
+                }
+                CHECK(screen[1] == test.screen_one);
+                CHECK(screen[15] == test.screen_fifteen);
+                if (failures != before) fprintf(stderr, "palette transition: %s restored=%d\n", test.name, restored);
+                if (restored == 0 && saved) {
+                    CHECK(p8p_runtime_step(runtime, test.one_pixel == 4 ? 2 : 1) == 0);
+                    CHECK(p8p_runtime_load_state(runtime, saved, saved_size) == 0);
+                    CHECK(p8p_runtime_step(runtime, 0) == 0);
+                }
+            }
+            free(saved);
+        }
+        p8p_runtime_destroy(runtime);
+        p8p_cart_destroy(&cart);
+    }
+}
+
 static void test_terminal_nul_source(void) {
     /* Legacy PNGs can count the terminating NUL in their declared code length.
      * Keep those decoded bytes for content/save identity, but compile source
@@ -293,9 +437,128 @@ static void test_terminal_nul_source(void) {
     p8p_runtime_destroy(runtime);
 }
 
+static void palette_fast_path_semantics(void) {
+    static const char source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "function _init() assert(select('#',pal())==0) "
+        "assert(pal(1,4)==1) assert(pal(1,1)==4) "
+        "pal({[1]=8},1) pal() assert(peek(0x5f11)==1) "
+        "palt(0,false) pal() assert(peek(0x5f00)==16) end\n"
+        "function _draw() pal() assert(select('#',pal())==0) "
+        "assert(peek(0x5f00)==16 and peek(0x5f01)==1) end\n";
+    p8p_cart_t cart = {};
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    if (!runtime) return;
+    int loaded = p8p_cart_load_text_memory((const uint8_t *)source,
+                                           sizeof(source) - 1, &cart);
+    CHECK(loaded == 0);
+    if (loaded == 0) loaded = p8p_runtime_load(runtime, &cart);
+    CHECK(loaded == 0);
+    if (loaded == 0) {
+        for (int profiled = 0; profiled < 2; ++profiled) {
+            p8p_runtime_set_profile_hook(runtime,
+                profiled ? count_profile_event : NULL, NULL);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            p8p_runtime_api_profile_t profile = {};
+            p8p_runtime_get_api_profile(runtime, &profile);
+            CHECK(profile.calls[P8P_API_DRAW_STATE] == (profiled ? 2u : 0u));
+        }
+    }
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+
+    /* A remap in any word must keep both tile APIs on the general path. */
+    for (int changed = 0; changed < 16; ++changed) {
+        char text[1024];
+        snprintf(text, sizeof(text),
+            "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+            "function _init() for y=0,7 do for x=0,7 do "
+            "sset(8+x,8+y,(x+y*8)%%16) end end "
+            "mset(0,0,17) cls(6) pal(1,8,1) pal(%d,%d) end\n"
+            "function _draw() spr(17,16,16) map(0,0,40,16,1,1) end\n",
+            changed, (changed + 1) % 16);
+        p8p_cart_t remapped_cart = {};
+        runtime = p8p_runtime_create();
+        CHECK(runtime != NULL);
+        if (!runtime) continue;
+        loaded = p8p_cart_load_text_memory((const uint8_t *)text,
+                                           strlen(text), &remapped_cart);
+        CHECK(loaded == 0);
+        if (loaded == 0) loaded = p8p_runtime_load(runtime, &remapped_cart);
+        CHECK(loaded == 0);
+        if (loaded == 0) {
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            for (int tile = 0; tile < 2; ++tile) {
+                int x = tile == 0 ? 16 : 40;
+                CHECK(pixels[16 * 128 + x] == 6);
+                for (int color = 1; color < 16; ++color) {
+                    int expected = color == changed ? (color + 1) % 16 : color;
+                    CHECK(pixels[(16 + color / 8) * 128 + x + color % 8] == expected);
+                }
+            }
+            CHECK(p8p_runtime_screen_palette(runtime)[1] == 8);
+        }
+        p8p_runtime_destroy(runtime);
+        p8p_cart_destroy(&remapped_cart);
+    }
+}
+
+static void palette_leaf_contracts(void) {
+    alignas(4) uint8_t palette[16];
+    for (int i = 0; i < 16; ++i) palette[i] = (uint8_t)i;
+    CHECK(p8p_draw_palette_identity(palette) == 1);
+    for (int i = 0; i < 16; ++i) {
+        palette[i] ^= 1;
+        CHECK(p8p_draw_palette_identity(palette) == 0);
+        palette[i] ^= 1;
+    }
+    p8p_runtime_t *previous = p8p_active_runtime;
+    p8p_runtime_t *runtime = (p8p_runtime_t *)calloc(1, sizeof(*runtime));
+    lua_State *lua = luaL_newstate();
+    CHECK(runtime && lua);
+    if (!runtime || !lua) { free(runtime); if (lua) lua_close(lua); return; }
+    p8p_active_runtime = runtime;
+    runtime->palettes_default = runtime->transparency_default = 1;
+    CHECK(p8p_api_pal(lua) == 0);
+    runtime->palettes_default = 0;
+    memset(runtime->draw_palette, 3, 16);
+    CHECK(p8p_api_pal(lua) == 0);
+    CHECK(runtime->palettes_default == 1);
+    CHECK(p8p_draw_palette_identity(runtime->draw_palette) == 1);
+    runtime->transparency_default = 0;
+    memset(runtime->transparent, 1, 16);
+    CHECK(p8p_api_pal(lua) == 0);
+    CHECK(runtime->transparency_default == 1 && runtime->transparent[0] == 1);
+    for (int i = 1; i < 16; ++i) CHECK(runtime->transparent[i] == 0);
+    runtime->profile_hook = count_profile_event;
+    uint32_t before = runtime->api_profile_calls[P8P_API_DRAW_STATE];
+    CHECK(p8p_api_pal(lua) == 0);
+    CHECK(runtime->api_profile_calls[P8P_API_DRAW_STATE] == before + 1);
+    runtime->profile_hook = NULL;
+    lua_pushnumber(lua, 1);
+    lua_pushnumber(lua, 4);
+    CHECK(p8p_api_pal(lua) == 1);
+    CHECK(runtime->draw_palette[1] == 4 && runtime->palettes_default == 0);
+    CHECK(lua_tonumber(lua, -1) == 1);
+    p8p_active_runtime = previous;
+    lua_close(lua);
+    free(runtime);
+}
+
+/** @brief Run host runtime contracts and embedded cartridge regression cases.
+ * Checks API state and rendered pixel markers, including all(t) traversal
+ * through deletion, growth, collection and mixed values. Returns nonzero on
+ * failed checks so iterator changes are covered by the normal test target.
+ */
 int main(void) {
     test_terminal_nul_source();
     test_incompatible_carts();
+    palette_leaf_contracts();
+    palette_fast_path_semantics();
+    draw_palette_transitions();
+    audio_chunk_boundaries();
     static const uint8_t source[] =
         "pico-8 cartridge // http://www.pico-8.com\n"
         "version 42\n"
@@ -1012,19 +1275,69 @@ int main(void) {
                 "if run({1,2},function(t,v) if v==1 then add(t,9) end end)==\"129\" then pset(2,0,7) end\n"
                 "if run({5,6,7},function(t,v) if v==5 then deli(t,3) end end)==\"56\" then pset(3,0,7) end\n"
                 "local n=0 for v in all({}) do n+=1 end for v in all(nil) do n+=1 end\n"
-                "if n==0 then pset(4,0,7) end end\n";
+                "if n==0 then pset(4,0,7) end\n"
+                "local t={} for i=1,20 do t['key'..i]=i end t[1]=1 t[2]=2 if run(t,function() end)=='12' then pset(5,0,7) end\n"
+                "if run({1,2,3,4,5,6,7,8},function(t,v) if v==5 then t[4]=nil t[8]=nil end end)=='1234567' then pset(6,0,7) end\n"
+                "local t={1,2} local sum=0 for v in all(t) do if v==1 then for i=3,128 do t[i]=i end collectgarbage() end sum+=v end if sum==8256 then pset(7,0,7) end\n"
+                "local a={} local t={a,false,3,'x'} local n=0 for v in all(t) do n+=1 if n==1 then del(t,a) collectgarbage() end end if n==4 and #t==3 then pset(8,0,7) end\n"
+                "local traps=0 local t=setmetatable({1,2},{__len=function() traps+=1 return 100 end,__index=function() traps+=1 end}) if run(t,function() end)=='12' and traps==0 then pset(9,0,7) end\n"
+                "local t={[1]=1,[2]=2,[3]=3} if run(t,function() end)=='123' then pset(10,0,7) end\n"
+                "local a={n=1} local b={n=2} local s=0 for v in all({a,a,b}) do s=s*10+v.n end if s==112 then pset(11,0,7) end\n"
+                "local a={n=1} local t={a,{n=2}} local n=0 local s=0 for v in all(t) do n+=1 s+=v.n if n==1 then del(t,a) for i=3,64 do add(t,{n=i}) end collectgarbage() end end if n==64 and s==2080 then pset(12,0,7) end\n"
+                "local n=0 local s=0 for v in all({{n=1},{n=2},false,7}) do n+=1 if type(v)=='table' then s+=v.n else s+=1 end end if n==4 and s==5 then pset(13,0,7) end end\n";
             p8p_cart_t all_cart = {};
             CHECK(p8p_cart_load_text_memory((const uint8_t *)all_source,
                                             sizeof(all_source) - 1,
                                             &all_cart) == 0);
             CHECK(p8p_runtime_load(runtime, &all_cart) == 0);
             CHECK(p8p_runtime_step(runtime, 0) == 0);
-            for (int check = 0; check < 5; ++check) {
+            for (int check = 0; check < 14; ++check) {
                 if (p8p_runtime_framebuffer(runtime)[check] != 7)
                     fprintf(stderr, "all() check %d failed\n", check);
                 CHECK(p8p_runtime_framebuffer(runtime)[check] == 7);
             }
             p8p_cart_destroy(&all_cart);
+        }
+
+        {
+            /* foreach(): callbacks can resize either Lua stack or table,
+             * mutate traversal, collect, recurse, or raise an error. */
+            static const char foreach_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function walk(t,f) local s='' foreach(t,function(v) s..=tostr(v) f(t,v) end) return s end\n"
+                "function _draw() cls()\n"
+                "if walk({1,2,3,4},function(t,v) if v==2 then del(t,v) end end)=='1234' then pset(0,0,7) end\n"
+                "if walk({1,2,3},function(t,v) del(t,v) end)=='123' then pset(1,0,7) end\n"
+                "if walk({1,2},function(t,v) if v==1 then add(t,9) end end)=='129' then pset(2,0,7) end\n"
+                "if walk({1,2,3},function(t,v) if v==1 then deli(t,3) end end)=='12' then pset(3,0,7) end\n"
+                "if walk({1,2},function(t,v) if v==1 then t[1]=9 end end)=='192' then pset(4,0,7) end\n"
+                "local once=false if walk({2,2,3},function(t,v) if not once then deli(t,1) once=true end end)=='23' then pset(5,0,7) end\n"
+                "local t={1,2,3,4,5,6,7,8} if walk(t,function(t,v) if v==5 then t[4]=nil t[8]=nil end end)=='12345' then pset(6,0,7) end\n"
+                "local s=0 foreach({1,2},function(v) foreach({3,4},function(w) s+=v*w return 9,8,7 end) end) if s==21 then pset(7,0,7) end\n"
+                "local function grow(n) if n==0 then collectgarbage() return 1 end return 1+grow(n-1) end\n"
+                "local t={1,2,3} local s=0 foreach(t,function(v) if v==1 then for i=4,512 do t[i]=i end for i=512,4,-1 do t[i]=nil end end s+=v+grow(80) end) if s==249 then pset(8,0,7) end\n"
+                "local t={{n=1},{n=2}} local s=0 foreach(t,function(v) del(t,v) collectgarbage() s+=v.n end) if s==3 and #t==0 then pset(9,0,7) end\n"
+                "local traps=0 local t=setmetatable({1,2},{__len=function() traps+=1 return 100 end,__index=function() traps+=1 end}) local s=0 foreach(t,function(v) s+=v end) if s==3 and traps==0 then pset(10,0,7) end\n"
+                "local ok,err=pcall(function() foreach({1},function() error('foreach-boom') end) end) local s=0 foreach({1,2},function(v) s+=v end) if not ok and string.find(err,'foreach-boom',1,true) and s==3 then pset(11,0,7) end\n"
+                "local co=cocreate(function() foreach({1},function() yield() end) end) local ok,err=coresume(co) if not ok and string.find(err,'yield') then pset(12,0,7) end\n"
+                "local calls=0 local f=setmetatable({},{__call=function() calls+=1 end}) foreach(nil,function() calls+=1 end) foreach({},function() calls+=1 end) foreach({1},f) if calls==0 then pset(13,0,7) end\n"
+                "local traps=0 local mt={__eq=function() traps+=1 return true end} local a=setmetatable({},mt) local b=setmetatable({},mt) local t={a} local n=0 foreach(t,function(v) n+=1 if n==1 then t[1]=b end end) if n==2 and traps==0 then pset(14,0,7) end\n"
+                "local t={} for i=1,20 do t['key'..i]=i end t[1]=1 t[2]=2 local n=0 foreach(t,function(v) n+=v end) if n==3 then pset(15,0,7) end\n"
+                "local a={} local t={a,'same',3,true} local n=0 foreach(t,function(v) n+=1 if n==1 then t[1]=false elseif n==2 then t[1]=a end end) if n==6 then pset(16,0,7) end\n"
+                "end\n";
+            p8p_cart_t foreach_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)foreach_source,
+                                            sizeof(foreach_source) - 1,
+                                            &foreach_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &foreach_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            for (int check = 0; check < 17; ++check) {
+                if (p8p_runtime_framebuffer(runtime)[check] != 7)
+                    fprintf(stderr, "foreach() check %d failed: %s\n", check,
+                            p8p_runtime_error(runtime));
+                CHECK(p8p_runtime_framebuffer(runtime)[check] == 7);
+            }
+            p8p_cart_destroy(&foreach_cart);
         }
 
         {

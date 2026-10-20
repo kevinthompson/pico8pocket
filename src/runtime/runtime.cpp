@@ -28,85 +28,7 @@
 
 using z8::fix32;
 
-struct p8p_runtime {
-    lua_State *lua;
-    p8p_audio_t *audio;
-    char *cart_lua;
-    size_t cart_lua_size;
-    uint8_t ram[0x10000];
-    uint8_t cart_rom[P8P_CART_ROM_SIZE];
-    /* One byte per logical pixel is the fast drawing surface.  PICO-8's
-     * packed 4-bpp screen RAM is synchronized only when a memory API touches
-     * it, avoiding a read-modify-write for every rendered pixel.  Word
-     * aligned so fill patterns can write four pixels at a time. */
-    alignas(4) uint8_t framebuffer[128 * 128];
-    uint8_t screen_ram_dirty;
-    /* RAM address the framebuffer mirrors: the screen at 0x6000 unless the
-     * cart redirects drawing with 0x5f55 (e.g. into the sprite sheet). */
-    uint16_t draw_target;
-    /* Unpacked screen RAM for presentation while drawing is redirected. */
-    uint8_t display[128 * 128];
-    uint8_t draw_palette[16];
-    uint8_t screen_palette[16];
-    uint8_t transparent[16];
-    /* Derived fast-path state.  These flags are deliberately not serialized:
-     * they are cheap to rebuild after loading a state or draw-state RAM. */
-    uint8_t palettes_default;
-    uint8_t transparency_default;
-    uint8_t buttons;
-    uint8_t previous_buttons;
-    /* Buttons sampled at the start of the current frame; live updates
-     * during the frame may only add to them. */
-    uint8_t frame_buttons;
-    uint16_t held_frames[7];
-    uint32_t rng[2];
-    int camera_x;
-    int camera_y;
-    int clip_x0;
-    int clip_y0;
-    int clip_x1;
-    int clip_y1;
-    int draw_color;
-    uint16_t fill_pattern;
-    uint8_t fill_pattern_transparent;
-    int cursor_x;
-    int cursor_y;
-    int target_fps;
-    uint8_t draw_frame;
-    uint32_t frame_count;
-    int persist_ref;
-    int restore_ref;
-    int frame_ref;  /* Lua dispatcher that runs _update/_draw (registry) */
-    int cart_thread_ref;
-    lua_State *cart_thread;
-    uint8_t cart_thread_active;
-    uint8_t cart_thread_kind;
-    uint8_t restart_requested;
-    uint32_t cart_features;
-    uint8_t cart_request_pending;
-    uint8_t cart_halted;
-    p8p_runtime_cart_request_t cart_request;
-    char params[256];
-    char breadcrumb[64];
-    /* menuitem() entries 1-5: label ("" when empty), button filter from
-     * bits 8-15 of the index, and a registry table of callbacks. */
-    char menu_labels[5][17];
-    uint8_t menu_filters[5];
-    int menu_ref;
-    p8p_runtime_service_fn service_hook;
-    void *service_userdata;
-    p8p_runtime_profile_fn profile_hook;
-    void *profile_userdata;
-    uint32_t api_profile_calls[P8P_API_CATEGORY_COUNT];
-    uint16_t cart_instruction_slices;
-    p8p_runtime_cartdata_load_fn cartdata_load;
-    p8p_runtime_cartdata_save_fn cartdata_save;
-    void *cartdata_userdata;
-    char cartdata_id[65];
-    uint8_t cartdata_active;
-    uint8_t cartdata_dirty;
-    char error[256];
-};
+#include "runtime_internal.h"
 
 struct p8p_runtime_state_header {
     uint8_t magic[8];
@@ -149,7 +71,8 @@ static_assert(offsetof(p8p_runtime, ram) % 4 == 0,
 static_assert(offsetof(p8p_runtime, framebuffer) % 4 == 0,
               "screen packing uses word access to the framebuffer");
 
-static p8p_runtime_t *active_runtime;
+p8p_runtime_t *p8p_active_runtime;
+#define active_runtime p8p_active_runtime
 
 static void profile_api(p8p_runtime_api_category_t category) {
     if (active_runtime && active_runtime->profile_hook &&
@@ -1381,6 +1304,8 @@ static P8P_FASTTEXT void blit_tile(p8p_runtime_t *runtime, int sprite,
     int source_y = (sprite >> 4) * 8;
     int default_colors = runtime->palettes_default &&
                          runtime->transparency_default;
+    if (!runtime->palettes_default && runtime->transparency_default)
+        default_colors = p8p_draw_palette_identity(runtime->draw_palette);
     runtime->screen_ram_dirty = 1;
     for (int y = start_y; y < end_y; ++y) {
         const uint8_t *source = runtime->ram + sprite_base +
@@ -1527,7 +1452,7 @@ static void reset_transparency(p8p_runtime_t *runtime) {
     runtime->transparency_default = 1;
 }
 
-static int api_pal(lua_State *lua) {
+extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
     profile_api(P8P_API_DRAW_STATE);
     p8p_runtime_t *runtime = active_runtime;
     if (arg_count(lua) == 0) {
@@ -2683,13 +2608,17 @@ static int api_serial(lua_State *lua) {
     return 1;
 }
 
-/* all(t) iterator; upvalues are the table, the next index and the value
- * returned last.  If that value is no longer at the index (the cart deleted
- * it), the index stays, as in PICO-8.  This runs once per loop iteration in
- * most carts, so it works on the table directly and computes #t only when
- * the slot is empty. */
-static int api_all_next(lua_State *lua) {
-    profile_api(P8P_API_HELPER);
+/** @brief Yield the next all(t) value with PICO-8 deletion semantics.
+ * Uses the current C closure's table, index and previous-value upvalues. If
+ * cart code removed the previous value, visits the same index again; otherwise
+ * advances using raw equality. Skips nil slots up to the raw table boundary.
+ * Updates the iterator and its GC barrier before pushing one value, or nil
+ * when exhausted. Computes the boundary only when an empty slot requires it.
+ */
+#if defined(__GNUC__)
+__attribute__((noinline))
+#endif
+static int all_next_slow(lua_State *lua) {
     CClosure *closure = clCvalue(lua->ci->func);
     TValue *table_value = &closure->upvalue[0];
     TValue *index_value = &closure->upvalue[1];
@@ -2726,6 +2655,49 @@ static int api_all_next(lua_State *lua) {
     return 1;
 }
 
+/** @brief Yield dense actor-table entries, falling back for every other case.
+ * Reads array storage afresh on each invocation because cart code can resize
+ * or mutate it between yields. Table identity determines whether to advance.
+ * Every guard falls back before changing upvalues or the stack, so the slow
+ * iterator resumes from the original state. A hit applies the same GC barrier
+ * and pushes the same single value as all_next_slow.
+ */
+static int api_all_next(lua_State *lua) {
+    profile_api(P8P_API_HELPER);
+    CClosure *closure = clCvalue(lua->ci->func);
+    TValue *table_value = &closure->upvalue[0];
+    if (!ttistable(table_value))
+        return all_next_slow(lua);
+    Table *table = hvalue(table_value);
+    int index;
+    lua_number2int(index, nvalue(&closure->upvalue[1]));
+    unsigned int offset = static_cast<unsigned int>(index) - 1u;
+    if (offset >= static_cast<unsigned int>(table->sizearray))
+        return all_next_slow(lua);
+    const TValue *slot = &table->array[offset];
+    if (!ttistable(slot))
+        return all_next_slow(lua);
+    const TValue *previous = &closure->upvalue[2];
+    if (ttistable(previous) && hvalue(slot) == hvalue(previous)) {
+        if (++offset >= static_cast<unsigned int>(table->sizearray))
+            return all_next_slow(lua);
+        slot = &table->array[offset];
+        if (!ttistable(slot))
+            return all_next_slow(lua);
+        ++index;
+    }
+    setnvalue(&closure->upvalue[1], cast_num(index));
+    setobj(lua, &closure->upvalue[2], slot);
+    luaC_barrier(lua, closure, slot);
+    setobj2s(lua, lua->top, slot);
+    ++lua->top;
+    return 1;
+}
+
+/** @brief Create all(t)'s iterator with table, index 1 and nil previous value.
+ * Captures the supplied value (or nil) in three GC-rooted closure upvalues and
+ * returns the iterator as one Lua result; traversal validates the table later.
+ */
 static int api_all(lua_State *lua) {
     profile_api(P8P_API_HELPER);
     if (arg_count(lua) >= 1)
@@ -2738,6 +2710,10 @@ static int api_all(lua_State *lua) {
     return 1;
 }
 
+/* Keep this indirect callback helper compact and independent of caller IPA. */
+#if defined(__riscv) && defined(__GNUC__)
+__attribute__((noipa, optimize("align-loops=4")))
+#endif
 static int api_foreach(lua_State *lua) {
     profile_api(P8P_API_HELPER);
     if (!lua_istable(lua, 1) || !lua_isfunction(lua, 2))
@@ -2761,7 +2737,12 @@ static int api_foreach(lua_State *lua) {
         lua_call(lua, 1, 0);
 
         lua_rawgeti(lua, 1, index);
-        int unchanged = lua_rawequal(lua, -1, -2);
+        /* Actor lists usually contain tables; raw equality is identity here.
+         * Read the stack only after the callback, which can grow or move it. */
+        const TValue *current = lua->top - 1;
+        const TValue *previous = lua->top - 2;
+        int unchanged = ttistable(current) && ttistable(previous) ?
+            hvalue(current) == hvalue(previous) : lua_rawequal(lua, -1, -2);
         lua_pop(lua, 2);
         if (unchanged)
             ++index;
@@ -2784,7 +2765,7 @@ static const luaL_Reg runtime_api[] = {
     {"tline", api_tline},
     {"mget", api_mget}, {"mset", api_mset}, {"map", api_map},
     {"mapdraw", api_map}, {"fget", api_fget}, {"fset", api_fset},
-    {"camera", api_camera}, {"clip", api_clip}, {"pal", api_pal},
+    {"camera", api_camera}, {"clip", api_clip}, {"pal", p8p_api_pal},
     {"palt", api_palt}, {"btn", api_btn}, {"btnp", api_btnp},
     {"peek", api_peek}, {"poke", api_poke}, {"peek2", api_peek2},
     {"poke2", api_poke2}, {"peek4", api_peek4}, {"poke4", api_poke4},

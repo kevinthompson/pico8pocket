@@ -24,9 +24,9 @@ DIABLO_PATHS=(src/sdk tools)
 FORK_URL="https://github.com/zenibako/openfpgaCore.git"
 FORK_COMMIT="a58aacd940c1b433c030b97f8207d2c7e03307c8"
 FORK_PATHS=(src/firmware/api)
-# Pocket runtime published from that commit.  os20.rbf_r is the 92202ab fit
-# with its BRAM image (bootloader and the OS's .fasttext) re-patched by
-# `make firmware`: an os.bin needs the bitstream patched from the same build.
+# Pocket runtime published from that commit. The loader, OS and bitstream
+# must come from the same build: the bitstream contains the OS's .fasttext
+# and bootloader BRAM image as well as the FPGA logic.
 RUNTIME_URL="https://github.com/zenibako/openfpgaCore/releases/download/pocket-runtime-a58aacd"
 RUNTIME_FILES=(os20.rbf_r os.bin loader.bin)
 RUNTIME_SHA256=(
@@ -55,6 +55,7 @@ Z8LUA_PATCHES=(
     "$PROJECT_ROOT/patches/z8lua-inline-cache.patch"
     "$PROJECT_ROOT/patches/z8lua-vm-tuning.patch"
     "$PROJECT_ROOT/patches/z8lua-call-fastpath.patch"
+    "$PROJECT_ROOT/patches/z8lua-delegate-index.patch"
 )
 
 fetch_one() {

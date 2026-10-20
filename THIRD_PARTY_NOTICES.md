@@ -35,3 +35,15 @@ PICO-8 is a product of Lexaloffle Games LLP. Analogue Pocket and openFPGA are
 products and technologies of Analogue. Pico8Pocket is an independent,
 unofficial compatibility project and is not affiliated with, endorsed by, or
 sponsored by Lexaloffle Games LLP or Analogue.
+
+## Offline collections plugin
+
+The independent Rust offline installer is MIT-licensed. Its WASI binary includes
+Rust standard-library code and locked dependencies including Serde, png, crc32fast
+and the Extism Rust PDK. `scripts/plugin-notices.py` collects license and notice
+texts from the resolved crate sources and matching Rust standard library into
+release `TOOL-NOTICES.txt`. The two Cargo.lock files record exact dependencies;
+the Extism host SDK is used only by the test harness and is not shipped.
+
+No Go, TinyGo, or thumbnail-generator binary is included in the new tool assets.
+No PICO-8 executable, downloaded cart or generated offline bundle is included.

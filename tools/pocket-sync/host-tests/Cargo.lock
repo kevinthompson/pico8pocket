@@ -1293,6 +1293,7 @@ name = "pocket-sync-host-tests"
 version = "0.1.0"
 dependencies = [
  "extism",
+ "png",
  "pocket-sync",
  "serde_json",
 ]

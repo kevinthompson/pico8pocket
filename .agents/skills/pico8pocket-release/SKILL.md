@@ -1,10 +1,62 @@
 ---
 name: pico8pocket-release
-description: Build, package and hand Pico8Pocket test builds to the user for Analogue Pocket testing, including side-by-side A/B cores, the SD-card layout, the platform banner and the PR/CodeRabbit review flow. Use whenever producing a zip for the user, changing packaging or core metadata, or opening and merging PRs in this repo.
-argument-hint: "[card: SD mount path, e.g. /Volumes/Pocket]"
+description: Build and verify Pico8Pocket distributions, prepare matched os20 API/runtime pin updates, coordinate explicit draft releases, and hand off hardware test builds. Use for dependency refreshes, packaging, release metadata, A/B cores and release PRs in the Pico8Pocket repository.
 ---
 
 # Pico8Pocket builds, device testing and PRs
+
+For device installation, accept an optional SD mount path (`$CARD`) such as `/Volumes/Pocket`.
+This repository owns release orchestration. Read [docs/RELEASING.md](../../../docs/RELEASING.md).
+The authoritative
+dependency pins remain in `scripts/fetch-deps.sh`; app source is this repo's
+commit, not a second core repository. This skill lives in `.agents/skills/`,
+with a Claude symlink to the same file.
+
+## Matched runtime refresh
+
+- Run **Prepare runtime pin update** in this repository, with a published
+  runtime tag or an empty input for the latest stable release. It requires the
+  complete `os20.rbf_r`/`os.bin`/`loader.bin` set, resolves the tag to its source
+  commit, checks API 0.9.x/save-state headers, and produces a review patch.
+- Read `runtime-pin-candidate/REVIEW.md` and the patch. Hashes fingerprint the
+  downloaded candidate; they do not establish correctness or hardware testing.
+  Compare exact source endpoints after history rewrites. Do not substitute
+  os25, advance unrelated SDK/Fake-08/z8lua pins, or regenerate hashes merely
+  to accept an unexpected file.
+- Apply at the release checkout commit in the report, using `git apply --check`
+  first. Local preparation uses `python3 scripts/release.py prepare-runtime`
+  with `--source`, `--runtime`, `--tag`, and optional `--apply`; see the release
+  guide for fetching both source endpoints. An empty patch is a no-op.
+- Review all changed pin/documentation files, run release tests, make a signed
+  conventional commit and push a topic branch only with session authorization.
+  Preparation success alone is not build or hardware evidence.
+
+## Complete distribution and draft releases
+
+Require **Build and verify distribution** (`distribution.yml`) on the exact candidate commit:
+three native Rust platforms, actual Extism/WASI fixture integration, C/C++ host
+regressions, the pinned GCC 13.2 core build/public APF package, and final
+distribution/provenance/checksums. An older green commit does not qualify.
+Inspect annotations for runner-acquisition failures; retry only with
+authorization and at most twice. Required abandoned/cancelled jobs remain
+incomplete; do not suppress failures or retry code failures blindly.
+
+Before release, record physical-Pocket cart launch, controls/audio,
+cartdata/progress persistence, Memories and sleep/wake checks. Offline slot-20 loading, handoffs and return navigation need device evidence;
+interactive Pocket Sync UI behavior also needs an application run. Use the user's own
+carts privately and state unperformed checks. CI does not establish hardware
+compatibility.
+
+Obtain the version and explicit release authorization before dispatching with
+`create_draft=true`; `version` must be `v` plus the version already committed
+in `dist/core/core.json`. The workflow gates a complete draft on all checks:
+core ZIP, offline plugin/manifest, collections docs/licenses,
+source archive, core provenance and global checksums. Do not publish a tools-only
+latest release or include local carts/saves. Inspect the draft assets and
+report the link; stable publication requires separate explicit authorization.
+Dispatch creates a fresh tag at the tested commit and refuses existing tags.
+If it fails after tag creation, inspect state and ask before recovery; do not
+delete tags or repeatedly rerun the workflow.
 
 ## Building a test zip
 
@@ -15,38 +67,12 @@ argument-hint: "[card: SD mount path, e.g. /Volumes/Pocket]"
 - Copy the zip to the repo root under a descriptive name, for example
   `pico8-zenibako-v0.0.33-<topic>.zip` (`*.zip` is gitignored), and send it
   with SendUserFile. The user tests every change on a real Pocket.
-- Resolve dependency revisions and runtime hashes from `scripts/fetch-deps.sh`.
-  The build stages Diablo's SDK sources/tools with the API headers and Pocket
-  runtime from `zenibako/openfpgaCore` (currently `pocket-runtime-a58aacd`)
-  into `.deps/openfpgaos-sdk`, the default `SDK_ROOT`.
-- Treat `os20.rbf_r`, `os.bin` and `loader.bin` as one pinned release set.
-  The FPGA fit's BRAM bootloader and OS `.fasttext` are re-patched during the
-  firmware build; `os.bin` requires the bitstream patched from that same build.
-  Mixing runtime versions can black-screen even when the application ELF is
-  unchanged. Verify all three packaged files against the fetch-script hashes.
+- The SDK comes from the pinned Diablo source, with API headers and the
+  matched os20 runtime from the fork's pinned runtime release. Read current
+  pins from `scripts/fetch-deps.sh`; do not infer a compatible runtime from
+  whichever upstream commit happens to be newest.
 - Public zips never contain carts. `make package-local` bundles local carts
   and is for private use only.
-
-## Match simulator evidence to the device build
-
-- The pinned shipped platform is `os20`: dual-issue RV32 at 90 MHz, with
-  32 KiB I-cache and 64 KiB D-cache (`docs/architecture.md`). Performance
-  acceptance uses the separate os20 adapter in `openfpga-os25-harness`, with
-  explicit `--platform os20` and a verified final Lua seed; follow
-  `../pico8pocket-performance/SKILL.md`. The harness still defaults to os25.
-- Record source revision, ELF SHA-256, compiler version/flags, libc, alignment
-  and BRAM size for the packaged hardware build. Compare the bitstream, OS and
-  loader hashes with the pins in `scripts/fetch-deps.sh`; a core name or version
-  alone does not identify the installed binary.
-- The os20 simulator uses frozen OS `8318f25` and its own runtime/checkpoint
-  build. The current fork retains that CPU/cache/SDRAM configuration but adds
-  save-state gateware and firmware. Source-profile agreement does not establish
-  fitted-bitstream or device timing parity; presentation, adaptive skipping,
-  OS/SD and live audio scheduling are omitted. Recheck the production source
-  profile whenever the runtime pin changes. Report simulated results separately
-  from device FPS; require the same scene's device A/B evidence for a hardware
-  performance claim.
-  The Butterscotch os25 calibration cannot establish Pico8Pocket os20 parity.
 
 ## SD-card layout (core zenibako.pico8, platform pico8)
 
@@ -82,8 +108,8 @@ scripts/variant-core.sh releases/pico8pocket-v<VER>.zip b "Test build B" b.zip
 - Name the variants A and B, say exactly what differs, and ask for the same
   scene's overlay from each. One screenshot can catch a spike, so don't
   call a regression from a single device overlay; ask for the A/B pair.
-- To install both from a Mac, set `$CARD` to the card's mount path from the
-  **card** argument, asking the user if it wasn't given. The files the two
+- To install both from a Mac, set `$CARD` from the optional SD mount path,
+  asking the user if it wasn't given. The files the two
   zips share are identical, so order doesn't matter:
   ```sh
   unzip -o pico8-zenibako-<VER>-A-<topic>.zip -d "$CARD"
@@ -145,3 +171,12 @@ renames. `Cores/zenibako.pico8b` only shows that some B core is installed.
   3. Reply on the thread with the commit and resolve it.
   4. For findings not worth their code, explain why and leave the call to
      the user.
+
+## Offline plugin replacement
+
+The root `plugin.json` is canonical and retains the same repository install URL.
+`make offline-plugin-tools` builds Rust 1.93.0/WASI artifacts and resolved notices
+in `build/offline-plugin/`. Run native tests/Clippy and the actual Extism harness
+with `--fixtures --catalog`; CI must not download real carts. Do not restore Go,
+TinyGo or retired thumbnail assets to satisfy old release inventories.
+Preserve existing SD artwork, installed bundles, cartridges and saves.

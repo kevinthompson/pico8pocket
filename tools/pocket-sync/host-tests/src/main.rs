@@ -42,17 +42,103 @@ fn answer(p: &mut Plugin, name: &str, value: &str) -> Value {
         json!({"Answer":{"name":name,"value":value}}),
     )
 }
+#[derive(Debug)]
+struct Options {
+    wasm: PathBuf,
+    root: PathBuf,
+    source: Option<PathBuf>,
+    live: bool,
+    throttle: bool,
+    catalog: bool,
+}
+
+fn parse_options(args: &[String]) -> Result<Options, String> {
+    if args.len() < 3 {
+        return Err("usage: host-tests plugin.wasm test-root (verified-cache-dir | --fixtures) [--catalog] [--live] [--live-throttle]".into());
+    }
+    let source = if args[2] == "--fixtures" {
+        None
+    } else if args[2].starts_with("--") {
+        return Err("Expected verified-cache-dir or --fixtures".into());
+    } else {
+        Some(PathBuf::from(&args[2]))
+    };
+    let mut options = Options {
+        wasm: PathBuf::from(&args[0]),
+        root: PathBuf::from(&args[1]),
+        source,
+        live: false,
+        throttle: false,
+        catalog: false,
+    };
+    for flag in &args[3..] {
+        match flag.as_str() {
+            "--live" => options.live = true,
+            "--live-throttle" => options.throttle = true,
+            "--catalog" => options.catalog = true,
+            _ => return Err(format!("Unknown option: {flag}")),
+        }
+    }
+    if options.source.is_none() && (options.live || options.throttle) {
+        return Err("--fixtures cannot use live network options".into());
+    }
+    Ok(options)
+}
+
+fn fixture_carts() -> Result<Carts, String> {
+    let mut carts = Carts::new();
+    for (index, (id, _, _)) in pocket_sync::catalog()?.into_iter().enumerate() {
+        let mut data = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut data, 160, 205);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder.add_text_chunk(
+                "Description".into(),
+                format!("PROJECT-OWNED FIXTURE {id}: generated transaction test image; no game content"),
+            ).map_err(|e| e.to_string())?;
+            // Distinct project-owned pixels let byte-identity checks detect ID swaps.
+            let pixels = [index as u8, 64, 128, 255].repeat(160 * 205);
+            encoder
+                .write_header()
+                .map_err(|e| e.to_string())?
+                .write_image_data(&pixels)
+                .map_err(|e| e.to_string())?;
+        }
+        pocket_sync::validate_png(&data)?;
+        carts.insert(id, data);
+    }
+    Ok(carts)
+}
+
+fn write_fixtures(root: &Path) -> PathBuf {
+    let source = root.join("source-fixtures");
+    fs::create_dir_all(&source).unwrap();
+    for (id, bytes) in fixture_carts().unwrap() {
+        atomic_write(&source.join(format!("{id}.p8.png")), &bytes).unwrap();
+    }
+    fs::write(source.join("README.txt"),
+        "PROJECT-OWNED FIXTURES: generated 160x205 RGBA8 PNGs for installer transactions.\nThese images contain no games and establish no game compatibility.\n").unwrap();
+    println!("Generated all 36 project-owned PNG fixtures; no game content or HTTP access");
+    source
+}
+
 fn main() {
-    let a = std::env::args().collect::<Vec<_>>();
-    assert!(
-        a.len() >= 4,
-        "usage: host-tests plugin.wasm test-root verified-cache-dir [--live] [--live-throttle]"
-    );
-    let wasm = PathBuf::from(&a[1]);
-    let root = PathBuf::from(&a[2]);
-    let source = PathBuf::from(&a[3]);
-    let live = a.iter().any(|x| x == "--live");
-    let throttle = a.iter().any(|x| x == "--live-throttle");
+    let options =
+        parse_options(&std::env::args().skip(1).collect::<Vec<_>>()).unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(2)
+        });
+    let fixtures = options.source.is_none();
+    let Options {
+        wasm,
+        root,
+        source,
+        live,
+        throttle,
+        catalog,
+    } = options;
+    let source = source.unwrap_or_else(|| write_fixtures(&root));
     let pocket = root.join("pocket");
     let host = root.join("host");
     fs::create_dir_all(&pocket).unwrap();
@@ -108,7 +194,7 @@ fn main() {
     call(&mut p, "start", Value::Null);
     answer(&mut p, "main-menu", "Installed / cache status");
     assert_eq!(answer(&mut p, "main-menu", "Exit"), json!("Exit"));
-    if a.iter().any(|x| x == "--catalog") {
+    if catalog {
         let imported = pocket_sync::import_cache(&source, &host, "both").unwrap();
         assert_eq!(imported, 36);
         let mut real = load(&wasm, &pocket, &host, false);
@@ -130,9 +216,12 @@ fn main() {
                 "original bytes changed for {id}"
             );
         }
-        println!(
-            "All36 curated originals installed by actual WASI plugin from verified cache, bytes preserved: PASS"
-        );
+        let kind = if fixtures {
+            "project-owned fixtures"
+        } else {
+            "curated originals"
+        };
+        println!("All 36 {kind} installed by actual WASI plugin from cache, bytes preserved: PASS");
     }
     // Labeled transaction fixtures: this does not establish each named game's semantics.
     let fixture = fs::read(source.join("15133.p8.png")).unwrap();
@@ -196,4 +285,59 @@ fn main() {
     println!(
         "REAL EXTISM/WASI ABI, automatic cache install, kill, merge, denied HTTP preservation: PASS"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_fixtures_validate_and_round_trip_all_catalog_entries() {
+        let carts = fixture_carts().expect("generate project-owned PNG fixtures");
+        assert_eq!(carts.len(), 36);
+        for (id, _, _) in pocket_sync::catalog().unwrap() {
+            let data = &carts[&id];
+            pocket_sync::validate_png(data).unwrap();
+            let label = b"PROJECT-OWNED FIXTURE";
+            assert!(data.windows(label.len()).any(|part| part == label));
+        }
+        assert_eq!(decode_pack(&encode_pack(&carts).unwrap()).unwrap(), carts);
+    }
+
+    fn options(arguments: &[&str]) -> Result<Options, String> {
+        parse_options(&arguments.iter().map(|x| x.to_string()).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn fixture_invocation_needs_no_external_cache() {
+        let parsed = options(&["plugin.wasm", "test-root", "--fixtures", "--catalog"]).unwrap();
+        assert!(parsed.source.is_none());
+        assert!(parsed.catalog);
+        assert!(!parsed.live && !parsed.throttle);
+    }
+
+    #[test]
+    fn fixture_invocation_rejects_live_network_options() {
+        for flag in ["--live", "--live-throttle"] {
+            assert!(
+                options(&["plugin.wasm", "test-root", "--fixtures", flag])
+                    .unwrap_err()
+                    .contains("cannot use live network")
+            );
+        }
+    }
+
+    #[test]
+    fn existing_verified_cache_invocation_is_preserved() {
+        let parsed = options(&[
+            "plugin.wasm",
+            "test-root",
+            "verified-cache",
+            "--live",
+            "--catalog",
+        ])
+        .unwrap();
+        assert_eq!(parsed.source, Some(PathBuf::from("verified-cache")));
+        assert!(parsed.live && parsed.catalog);
+    }
 }

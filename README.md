@@ -170,12 +170,13 @@ remove its fingerprint once the support path is verified.
 
 ## Offline Pico Arcade and Sorcerer
 
-The [Pocket Sync plugin](tools/pocket-sync/README.md) downloads Pico Arcade's
+The [Pocket Sync plugin](docs/OFFLINE-COLLECTIONS.md) downloads Pico Arcade's
 35 referenced games and Trail of the Sorcerer's `mot_sorcerergame` companion.
 Build `tools/pocket-sync/plugin.wasm` with the included `build.sh`; it also copies
 the distribution pair into `releases/pocket-sync/`. Pocket Sync installs plugins
 from GitHub releases containing `plugin.wasm` and `plugin.json`. These artifacts
-have not been published. The native helper can install a verified local cache
+replace the former Cart Thumbnails plugin in the next complete release, using
+the same repository URL. Existing SD artwork is preserved. The native helper can install a verified local cache
 before publication; see the linked instructions. Once distributed, choose
 **Install both collections**, **Install Arcade**, or **Install Sorcerer**.
 Downloads are cached and paced; a rate limit stops the batch so it can resume
@@ -196,10 +197,24 @@ return history after a fresh launch. Version-1 save states remain readable.
 
 The plugin cannot launch the PICO-8 app or browse your Mac's files. If you prefer
 your existing PICO-8 BBS cache, use the explicit native importer in the
-[plugin instructions](tools/pocket-sync/README.md#optional-explicit-cache-importer).
+[plugin instructions](docs/OFFLINE-COLLECTIONS.md#optional-explicit-cache-importer).
 Game assets and the licensed PICO-8 executable are never included in this repo
 or the plugin. Host tests cover the loader and actual Extism plugin execution;
 the new offline path still needs a physical Pocket run.
+
+## AI development disclosure
+
+Pico8Pocket has been developed with substantial assistance from OpenAI Codex
+and Claude Code for implementation, tests, documentation and companion tools.
+The maintainer directs changes and tests on hardware; the original creator's
+[personal note](ABOUT_ME.md) also describes AI use. This disclosure does not
+attribute every inherited Fake-08, z8lua, SDK or runtime component to AI.
+
+The core package includes a `declare_ai` list in `updaters.json`. Pocket Sync's
+numeric AI-ness score comes from the separate
+[openFPGA AI report](https://github.com/openfpga-library/openfpga-ai-check),
+not a measured percentage of AI-written source. A missing report is not a
+claim that AI was unused.
 
 ## Build
 
@@ -288,6 +303,10 @@ The core is `zenibako.pico8` on the `pico8` platform (shown as PICO-8):
 On launch, Pocket's native asset picker asks for a `.p8` or `.p8.png`
 cartridge.
 
+Pocket Sync associates the core with the cartridge slot. Fixed internal files
+(including the JSON launch descriptor) have no game-file filters. The `png`
+filter covers `.p8.png` carts; ZIP archives must be extracted first.
+
 Upgrading from a release that installed `Askent.pico8pocket`: move your carts
 from `/Assets/pico8pocket/common/cards/` to `/Assets/pico8/common/cards/`, then
 delete `/Cores/Askent.pico8pocket`, `/Assets/pico8pocket` and
@@ -346,3 +365,13 @@ PICO-8 is a product of Lexaloffle Games LLP. Analogue Pocket and openFPGA are
 products and technologies of Analogue. Pico8Pocket is an independent,
 unofficial compatibility project and is not affiliated with, endorsed by, or
 sponsored by Lexaloffle Games LLP or Analogue.
+
+## Releases and plugin migration
+
+The [release guide](docs/RELEASING.md) covers the complete core/plugin distribution,
+matched runtime pins, provenance, checksums and explicit draft/publication steps.
+`make offline-plugin-tools` builds the public offline plugin files; native tests
+run on Linux, macOS and Windows, and actual WASI tests use project-owned fixtures.
+Cart thumbnail generation and its native/WASI downloads are retired. Keep
+`https://github.com/zenibako/pico8pocket` configured as the Pocket Sync plugin URL
+to receive the offline installer with the next complete release.

@@ -7,8 +7,7 @@
                 "name": "Game",
                 "required": true,
                 "filename": "pico8pocket.json",
-                "parameters": 275,
-                "extensions": ["json"]
+                "parameters": 275
             },
             {
                 "id": 1,
@@ -16,7 +15,6 @@
                 "required": true,
                 "parameters": 0,
                 "filename": "os.bin",
-                "extensions": ["bin"],
                 "deferload": true
             },
             {
@@ -25,7 +23,6 @@
                 "required": true,
                 "parameters": 0,
                 "filename": "pico8pocket.ini",
-                "extensions": ["ini"],
                 "deferload": true
             },
             {
@@ -34,7 +31,6 @@
                 "required": true,
                 "parameters": 0,
                 "filename": "pico8pocket.elf",
-                "extensions": ["elf"],
                 "deferload": true
             },
             {
@@ -42,7 +38,7 @@
                 "name": "Cartridge",
                 "required": true,
                 "parameters": 129,
-                "extensions": ["p8", "png", "zip"],
+                "extensions": ["p8", "png"],
                 "deferload": true
             },
             {
@@ -51,7 +47,6 @@
                 "required": true,
                 "parameters": 0,
                 "filename": "p8p_pad5.bin",
-                "extensions": ["bin"],
                 "deferload": true
             },
             {
@@ -60,7 +55,6 @@
                 "required": true,
                 "parameters": 0,
                 "filename": "p8p_pad6.bin",
-                "extensions": ["bin"],
                 "deferload": true
             },
             {
@@ -69,7 +63,6 @@
                 "required": true,
                 "parameters": 0,
                 "filename": "p8p_pad7.ofsf",
-                "extensions": ["ofsf"],
                 "deferload": true
             },
             {

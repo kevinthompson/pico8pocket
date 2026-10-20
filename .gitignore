@@ -16,3 +16,6 @@ __pycache__/
 /assets/cards/*.p8
 /assets/cards/*.p8.png
 /assets/cards/*.zip
+
+# Python packaging-test caches.
+__pycache__/
