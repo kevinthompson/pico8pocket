@@ -1,5 +1,14 @@
 # Offline BBS implementation plan
 
+> Go port note (2026-10-20): The implemented installer retains the repository's
+> Go/TinyGo architecture. `offline/` owns validation/cache/bundle operations,
+> `pocketplugin/` owns the session and transaction, and `cmd/pocket-plugin/`
+> exports the WASI ABI. The native helper is `cmd/pocket-sync-cache/`; real
+> Extism tests are in `integration/`. Build with `make offline-plugin-tools`
+> and test with `make offline-plugin-test`. Rust paths/tool commands below
+> describe the superseded implementation; the collection and bundle contract
+> remains unchanged. Current operations are in `docs/OFFLINE-COLLECTIONS.md`.
+
 **Goal:** Install the requested BBS games with a Pocket Sync plugin and execute
 launcher handoffs offline in Pico8Pocket.
 

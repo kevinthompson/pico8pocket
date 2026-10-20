@@ -1,5 +1,14 @@
 # Offline BBS collections and cartridge handoffs
 
+> Go port note (2026-10-20): The implemented installer retains the repository's
+> Go/TinyGo architecture. `offline/` owns validation/cache/bundle operations,
+> `pocketplugin/` owns the session and transaction, and `cmd/pocket-plugin/`
+> exports the WASI ABI. The native helper is `cmd/pocket-sync-cache/`; real
+> Extism tests are in `integration/`. Build with `make offline-plugin-tools`
+> and test with `make offline-plugin-test`. Rust paths/tool commands below
+> describe the superseded implementation; the collection and bundle contract
+> remains unchanged. Current operations are in `docs/OFFLINE-COLLECTIONS.md`.
+
 The user approved a Pocket Sync downloader and core-side offline loader, initially
 Pico Arcade's 35 referenced games and Trail of the Sorcerer's companion. This
 implements the two cooperating pieces discussed in this task. The user supplied

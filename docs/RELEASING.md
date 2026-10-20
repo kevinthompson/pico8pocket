@@ -4,7 +4,8 @@ This repository owns the Pico8Pocket app, offline collections plugin and release
 The existing [architecture](architecture.md#hardware-and-runtime) defines the
 matched os20 SDK/API/runtime combination. The approved
 [offline BBS design](superpowers/specs/2026-10-20-offline-bbs-design.md)
-defines the Rust WASI installer and optional offline bundle loader. The
+defines the offline installer and optional bundle loader; its Go port note
+records the retained Go/TinyGo implementation. The
 [collections guide](OFFLINE-COLLECTIONS.md) documents the thumbnail-plugin migration.
 `scripts/fetch-deps.sh` remains the authoritative dependency lock; no second
 copy of those pins is introduced. Release app source is the exact Git commit.
@@ -54,8 +55,9 @@ Review and sign a conventional commit on a topic branch. **Build and verify
 distribution** (`distribution.yml`) runs on pushes, PRs and explicit
 dispatches. It requires:
 
-- Locked Rust tests/Clippy on Linux, macOS and Windows using Rust 1.93.0.
-- A `wasm32-wasip1` plugin build and real Extism/WASI tests using generated
+- Go 1.25.0 native tests and vet on Linux, macOS and Windows.
+- A TinyGo 0.43.0 WASI plugin build with Binaryen 133 and real Extism/WASI
+  tests using generated
   project-owned fixtures; no private cartridges or live BBS requests are needed.
 - Host C/C++ regression tests with pinned dependencies. Local Celeste acceptance
   checks skip without the user's cart; this is reported, not hardware evidence.
@@ -108,19 +110,23 @@ Keep `https://github.com/zenibako/pico8pocket` as the updater plugin URL. The
 root `plugin.json` is canonical; the new display name is **Pico8Pocket Offline
 Collections**. The latest complete release still exposes `plugin.wasm` and
 `plugin.json`, so existing installations follow their normal update path.
-Thumbnail menus, Go/TinyGo tooling, native thumbnail bundles and the thumbnail
-WASI CLI are retired. Previously generated artwork on users' cards is preserved.
+Thumbnail menus, native thumbnail bundles and the thumbnail WASI CLI are
+retired. Go/TinyGo now build the offline collection installer. Previously
+generated artwork on users' cards is preserved.
 
 `make offline-plugin-tools` writes exactly the plugin pair, `OFFLINE-COLLECTIONS.md`,
 `LICENSE.txt`, `TOOL-NOTICES.txt` and intermediate `SHA256SUMS` in
-`build/offline-plugin/`. Notices come from the locked dependency graph and matching
-Rust standard library; missing notices fail the build. `scripts/release.py assemble`
+`build/offline-plugin/`. Complete notices for the pinned Go/TinyGo toolchain and
+Extism PDK are retained in `tools/plugin-licenses/`; missing notices fail the build. `scripts/release.py assemble`
 rejects retired assets, extra downloads/cache files, mismatched manifests and
 partial output. The complete distribution retains the core ZIP, source archive,
 `CORE-PROVENANCE.json` and one checksum manifest covering every shipped file.
 The optional native cache importer is built from source; no native thumbnail
 archive or downloaded cart, cache, PICO-8 binary or `bbs.p8pack` is published.
 
-Do not include live-network flags in CI. The fixture harness exercises complete
-collection installation, denied HTTP preservation and hard cancellation. Keep
+Run `make offline-plugin-test` for native checks. After building, run
+`REQUIRE_PLUGIN_TESTS=1 POCKET_PLUGIN_WASM="$PWD/build/offline-plugin/plugin.wasm" go test ./integration -count=1`
+for actual WASI checks. The fixture harness exercises complete collection
+installation, denied HTTP preservation, hard cancellation and courtesy pacing
+with local HTTP mocks. It has no live-network mode. Keep
 real-game and physical-device verification separate and record unperformed checks.

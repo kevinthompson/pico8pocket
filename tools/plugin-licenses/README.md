@@ -1,18 +1,14 @@
-# Supplemental plugin dependency licenses
+# Go/TinyGo plugin notices
 
-The published crates `extism-convert`, `extism-convert-macros`, and
-`extism-manifest` version 1.41.0 declare BSD-3-Clause but omit the repository
-license file from their crate archives. `extism-1.41.0.txt` is the complete,
-unmodified repository license from their recorded source revision:
+These complete license texts are retained from the existing Go/TinyGo toolchain:
 
-- Repository: https://github.com/extism/extism
-- Revision: `051b765bb6abe4fe95d5e4f489f03ad7b137edbc`
-- Source: https://raw.githubusercontent.com/extism/extism/051b765bb6abe4fe95d5e4f489f03ad7b137edbc/LICENSE
-- SHA-256: `d01e60805075b591cbecc63b8582788e54e190f699037f1af19fb5294b7a47ab`
+- `go.txt`: Go standard library (Go 1.25).
+- `tinygo.txt`: TinyGo 0.43.0 runtime and compiler.
+- `compiler-rt.txt`: LLVM compiler-rt support linked by TinyGo.
+- `extism-go-pdk.txt`: Extism Go PDK v1.1.3.
 
-Each published crate records this revision in `.cargo_vcs_info.json` (with
-`dirty: true`). The notice collector accepts this supplement only for these
-three exact crate versions, the matching repository, BSD-3-Clause declaration,
-and recorded source revision. A new version or changed provenance requires
-reviewing and pinning its actual license text; no generic SPDX substitution is
-used. The release collector reads this local file and makes no network request.
+The shipped plugin imports only the Go standard library and Extism Go PDK.
+The native test host uses the Go SDK and wazero; those test-only dependencies
+are pinned in `go.mod` and `go.sum` and are not linked into `plugin.wasm`.
+`scripts/build-tools.sh` includes all four notices in `TOOL-NOTICES.txt` and
+fails if one is missing. No license collection requires network access.

@@ -21,33 +21,40 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2025]
     runs-on: ${{ matrix.os }}
-    env:
-      RUSTUP_TOOLCHAIN: 1.93.0
     steps:
       - uses: actions/checkout@v7
-      - name: Install pinned Rust toolchain
-        run: rustup toolchain install 1.93.0 --profile minimal --component clippy
-      - run: cargo test --locked --manifest-path tools/pocket-sync/Cargo.toml
-      - run: cargo clippy --locked --manifest-path tools/pocket-sync/Cargo.toml --all-targets -- -D warnings
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - run: go vet ./...
   wasm:
     runs-on: ubuntu-24.04
-    env:
-      RUSTUP_TOOLCHAIN: 1.93.0
     steps:
       - uses: actions/checkout@v7
-      - name: Install pinned Rust and WASI target
-        run: rustup toolchain install 1.93.0 --profile minimal --component clippy --target wasm32-wasip1
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Install pinned WASM toolchains
+        run: |
+          curl -fL -o "$RUNNER_TEMP/tinygo.tar.gz" https://github.com/tinygo-org/tinygo/releases/download/v0.43.0/tinygo0.43.0.linux-amd64.tar.gz
+          echo "ca9fc6d055e3889462dea4450a2e42a92242d88b5c362a7ec39bdb563413d78a  $RUNNER_TEMP/tinygo.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/tinygo.tar.gz" -C "$RUNNER_TEMP"
+          curl -fL -o "$RUNNER_TEMP/binaryen.tar.gz" https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz
+          echo "2dc9c7813f5375db93d96ead4b78222fcc3e2677bbb832297af4797782a37489  $RUNNER_TEMP/binaryen.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/binaryen.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/tinygo/bin" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/binaryen-version_133/bin" >> "$GITHUB_PATH"
       - name: Check release contracts
         run: |
           python3 -m unittest discover -s tests -p 'test_release.py'
           python3 -m unittest discover -s tests -p 'test_package_metadata.py'
-          python3 -m unittest discover -s tests -p 'test_plugin_notices.py'
       - run: make offline-plugin-tools
-      - name: Test actual plugin with project-owned fixtures and no network
-        run: |
-          cargo test --locked --manifest-path tools/pocket-sync/host-tests/Cargo.toml
-          cargo clippy --locked --manifest-path tools/pocket-sync/host-tests/Cargo.toml --all-targets -- -D warnings
-          cargo run --locked --manifest-path tools/pocket-sync/host-tests/Cargo.toml -- tools/pocket-sync/plugin.wasm build/pocket-sync-host-ci --fixtures --catalog
+      - name: Test compiled plugin with project-owned fixtures and no network
+        env:
+          REQUIRE_PLUGIN_TESTS: '1'
+          POCKET_PLUGIN_WASM: ${{ github.workspace }}/build/offline-plugin/plugin.wasm
+        run: go test ./integration -count=1
       - uses: actions/upload-artifact@v7
         with:
           name: offline-plugin

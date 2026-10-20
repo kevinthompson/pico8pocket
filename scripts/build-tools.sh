@@ -1,15 +1,31 @@
 #!/usr/bin/env bash
-# Build public offline plugin artifacts; never packages downloaded carts.
+# Build the Go/TinyGo offline plugin; never packages downloaded carts.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUTPUT="${1:-build/offline-plugin}"
 mkdir -p "$OUTPUT"
-./tools/pocket-sync/build.sh
-cp tools/pocket-sync/plugin.wasm "$OUTPUT/plugin.wasm"
+OUTPUT="$(cd "$OUTPUT" && pwd)"
+TINYGO="${TINYGO:-tinygo}"
+WASMOPT="${WASMOPT:-wasm-opt}"
+command -v "$TINYGO" >/dev/null || { echo 'TinyGo 0.43.0 is required' >&2; exit 1; }
+command -v "$WASMOPT" >/dev/null || { echo 'Binaryen 133 wasm-opt is required' >&2; exit 1; }
+"$TINYGO" version | grep -q 'tinygo version 0.43.0 ' || { echo 'Expected TinyGo 0.43.0' >&2; exit 1; }
+"$WASMOPT" --version | grep -q 'version 133' || { echo 'Expected Binaryen 133' >&2; exit 1; }
+SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/pico8-offline-build.XXXXXX")"
+trap 'rm -rf "$SCRATCH"' EXIT
+{
+ printf 'Offline collections plugin third-party notices\n\n'
+ for notice in go tinygo compiler-rt extism-go-pdk; do
+  printf '\n--- %s ---\n' "$notice"
+  cat "tools/plugin-licenses/$notice.txt"
+ done
+} > "$SCRATCH/TOOL-NOTICES.txt"
+"$TINYGO" build -p 2 -trimpath -target wasip1 -buildmode=c-shared -o "$SCRATCH/plugin.wasm" ./cmd/pocket-plugin
+"$WASMOPT" -Oz --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext "$SCRATCH/plugin.wasm" -o "$OUTPUT/plugin.wasm"
 cp plugin.json "$OUTPUT/plugin.json"
 cp docs/OFFLINE-COLLECTIONS.md "$OUTPUT/OFFLINE-COLLECTIONS.md"
 cp LICENSE "$OUTPUT/LICENSE.txt"
-python3 scripts/plugin-notices.py "$OUTPUT/TOOL-NOTICES.txt"
+cp "$SCRATCH/TOOL-NOTICES.txt" "$OUTPUT/TOOL-NOTICES.txt"
 python3 - "$OUTPUT" <<'PY'
 import hashlib
 from pathlib import Path

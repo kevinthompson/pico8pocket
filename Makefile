@@ -165,8 +165,8 @@ clean:
 
 # Host-side offline collection tools; no private cartridge dependency.
 offline-plugin-test:
-	cargo test --locked --manifest-path tools/pocket-sync/Cargo.toml
-	cargo clippy --locked --manifest-path tools/pocket-sync/Cargo.toml --all-targets -- -D warnings
+	go test ./...
+	go vet ./...
 
 offline-plugin-tools:
 	./scripts/build-tools.sh

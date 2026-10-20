@@ -47,22 +47,25 @@ the bundle becomes visible only after the complete selected set is ready.
 
 ## Build
 
-Rust edition 2024, Rust 1.93.0+, and `wasm32-wasip1` are required:
+Go 1.25.0, TinyGo 0.43.0 and Binaryen 133 are the pinned build tools. The
+root `go.mod` and `go.sum` lock the Go dependencies, including Extism Go PDK
+1.1.3. Build and test from the repository root:
 
 ```sh
-rustup target add wasm32-wasip1
-./tools/pocket-sync/build.sh
-cargo test --locked --manifest-path tools/pocket-sync/Cargo.toml
+make offline-plugin-tools
+make offline-plugin-test
 ```
 
-Dependencies are pinned in Cargo.lock; the matching `extism-pdk-derive = 1.3.0`
-is pinned explicitly because the newer 1.4 macro requires a different PDK API.
-The outputs are ignored `tools/pocket-sync/plugin.wasm` and the distribution pair
-`releases/pocket-sync/plugin.wasm` + `releases/pocket-sync/plugin.json`.
-`make offline-plugin-tools` builds the release tool set under `build/offline-plugin/`,
-including this guide, the project license and generated dependency notices.
-Ship the distribution pair together; generated binaries are not committed.
-Keep generated cartridges and test SD folders inside ignored `build/` directories.
+`make offline-plugin-tools` writes the distribution pair
+`build/offline-plugin/plugin.wasm` + `build/offline-plugin/plugin.json`, this
+guide, the project license and generated dependency notices. Ship the pair
+together; generated binaries are not committed. Keep generated cartridges and
+test SD folders inside ignored `build/` directories.
+
+The pure Go `offline/` library validates carts and packs, while `pocketplugin/`
+owns the conversation and atomic installation transaction. The TinyGo ABI is
+`cmd/pocket-plugin/`; it persists conversation state in Extism variables across
+calls. Native tools use the same installer and validators.
 
 Pocket Sync [v7.0.2 host source](https://github.com/neil-morrison44/pocket-sync/blob/0565ed1a1ed7d8d2eba9c3216dfb485e9fdb944b/src-tauri/src/commands/plugins.rs)
 sets no per-call timeout and exposes a cancellation handle. The courtesy wait
@@ -84,7 +87,7 @@ containing `<id>.p8.png` files. The WASI plugin cannot launch PICO-8 or inspect 
 Mac home. Point the importer at the updater's plugin host directory:
 
 ```sh
-cargo run --locked --manifest-path tools/pocket-sync/Cargo.toml --bin pocket-sync-cache -- import /explicit/cache/directory /explicit/plugin/host both
+go run ./cmd/pocket-sync-cache import /explicit/cache/directory /explicit/plugin/host both
 ```
 
 All selected input cartridges validate before cache writes start. Existing valid
@@ -92,42 +95,31 @@ cache files survive malformed inputs. For a test SD folder, the same native
 transaction engine can assemble the pack with no network:
 
 ```sh
-cargo run --locked --manifest-path tools/pocket-sync/Cargo.toml --bin pocket-sync-cache -- install /explicit/plugin/host /explicit/fake-pocket both
-cargo run --locked --manifest-path tools/pocket-sync/Cargo.toml --bin pocket-sync-cache -- verify /explicit/fake-pocket/Assets/pico8/common/cards/bbs.p8pack
+go run ./cmd/pocket-sync-cache install /explicit/plugin/host /explicit/fake-pocket both
+go run ./cmd/pocket-sync-cache verify /explicit/fake-pocket/Assets/pico8/common/cards/bbs.p8pack
 ```
 
 ## Real WASI host check
 
-`host-tests/` uses the actual Extism engine with the official demo host's WASI
-mounts, `print_msg`/`open_url` host signatures, and JSON enum protocol. It verifies
-automatic cache-only install, cancellation, merge, rejected HTTP, and optional live HTTPS.
-It does not touch a real SD card:
+`integration/` uses the actual Extism engine with the official demo host's WASI
+mounts, `print_msg`/`open_url` signatures and JSON enum protocol. It verifies
+complete cache-only installation, mount ordering, cancellation, collection
+merging, rejected HTTP and the 15-second courtesy delay with local HTTP mocks.
+It creates project-owned PNG fixtures and isolated temporary SD folders. It
+does not download games or touch a real SD card.
+
+Build the plugin first, then require the actual WASI checks:
 
 ```sh
-cargo run --locked --manifest-path tools/pocket-sync/host-tests/Cargo.toml -- tools/pocket-sync/plugin.wasm build/pocket-sync-host-check /explicit/verified-cache --live
+make offline-plugin-tools
+REQUIRE_PLUGIN_TESTS=1 POCKET_PLUGIN_WASM="$PWD/build/offline-plugin/plugin.wasm" go test ./integration -count=1
 ```
 
-For cartridge-free CI use:
-
-```sh
-cargo run --locked --manifest-path tools/pocket-sync/host-tests/Cargo.toml -- tools/pocket-sync/plugin.wasm build/pocket-sync-host-ci --fixtures --catalog
-```
-
-This creates clearly labeled project-owned PNG fixtures and tests all 36 bundle
-entries, cache-only installation, denied HTTP and hard cancellation. It rejects
-combining fixture mode with live-network flags. Physical game behavior remains
-covered by separate private cart checks.
-
-The real-cache mode needs `15133.p8.png` and `mot_sorcerergame.p8.png`. The test folder is
-created and deliberately retained for inspection. Use a fresh folder per run.
-Add `--catalog` with all 36 source files to verify actual WASI installation
-of every original cartridge and byte-identical bundle contents.
-Add `--live-throttle` to fetch two known public carts and empirically exercise
-the 15-second WASI sleep between requests. This diagnostic deliberately fills
-other IDs with clearly labeled transaction fixtures; it proves installer behavior,
-not the named games' contents. Do not point these tests at a real SD card.
-The native tests use generated project-owned PNG fixtures. Physical Pocket and
-interactive Pocket Sync UI testing are separate from this automated host check.
+Without `POCKET_PLUGIN_WASM`, the native test suite skips plugin execution unless
+`REQUIRE_PLUGIN_TESTS=1` requires it. The harness has no live-network mode; local
+mocks exercise network behavior without making BBS requests. Native tests also
+use project-owned PNG fixtures. Physical game behavior and interactive Pocket
+Sync UI testing remain separate checks.
 
 ## Migration from Cart Thumbnails
 

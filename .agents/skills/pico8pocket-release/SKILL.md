@@ -34,7 +34,7 @@ with a Claude symlink to the same file.
 ## Complete distribution and draft releases
 
 Require **Build and verify distribution** (`distribution.yml`) on the exact candidate commit:
-three native Rust platforms, actual Extism/WASI fixture integration, C/C++ host
+three native Go platforms, actual Extism/WASI fixture integration, C/C++ host
 regressions, the pinned GCC 13.2 core build/public APF package, and final
 distribution/provenance/checksums. An older green commit does not qualify.
 Inspect annotations for runner-acquisition failures; retry only with
@@ -175,8 +175,12 @@ renames. `Cores/zenibako.pico8b` only shows that some B core is installed.
 ## Offline plugin replacement
 
 The root `plugin.json` is canonical and retains the same repository install URL.
-`make offline-plugin-tools` builds Rust 1.93.0/WASI artifacts and resolved notices
-in `build/offline-plugin/`. Run native tests/Clippy and the actual Extism harness
-with `--fixtures --catalog`; CI must not download real carts. Do not restore Go,
-TinyGo or retired thumbnail assets to satisfy old release inventories.
+`make offline-plugin-tools` builds Go 1.25.0/TinyGo 0.43.0 WASI artifacts with
+Binaryen 133 and retained complete notices in `build/offline-plugin/`. Run
+`make offline-plugin-test`, then require the actual Extism fixture harness with
+`REQUIRE_PLUGIN_TESTS=1 POCKET_PLUGIN_WASM="$PWD/build/offline-plugin/plugin.wasm" go test ./integration -count=1`.
+The harness uses generated carts and local HTTP mocks, including 15-second
+courtesy pacing; it has no live-network mode. CI must not download real carts.
+The native importer is `go run ./cmd/pocket-sync-cache`. Do not restore retired
+thumbnail assets or tools to satisfy old release inventories.
 Preserve existing SD artwork, installed bundles, cartridges and saves.

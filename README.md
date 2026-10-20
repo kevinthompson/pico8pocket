@@ -172,8 +172,8 @@ remove its fingerprint once the support path is verified.
 
 The [Pocket Sync plugin](docs/OFFLINE-COLLECTIONS.md) downloads Pico Arcade's
 35 referenced games and Trail of the Sorcerer's `mot_sorcerergame` companion.
-Build `tools/pocket-sync/plugin.wasm` with the included `build.sh`; it also copies
-the distribution pair into `releases/pocket-sync/`. Pocket Sync installs plugins
+Build the Go/TinyGo plugin with `make offline-plugin-tools`; its distribution
+pair is written to `build/offline-plugin/`. Pocket Sync installs plugins
 from GitHub releases containing `plugin.wasm` and `plugin.json`. These artifacts
 replace the former Cart Thumbnails plugin in the next complete release, using
 the same repository URL. Existing SD artwork is preserved. The native helper can install a verified local cache
