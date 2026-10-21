@@ -90,7 +90,7 @@ func TestMenuProtocol(t *testing.T) {
 	p, h := roots(t)
 	s := New(p, h, nil, nil)
 	c := start(t, s)
-	want := "Install both collections|Install Arcade|Install Sorcerer|Update both collections|Update Arcade|Update Sorcerer|Installed / cache status|Exit"
+	want := "Install both collections|Install Arcade|Install Sorcerer|Update both collections|Update Arcade|Update Sorcerer|Installed / cache status|Browse recent carts|Browse popular carts|Exit"
 	if strings.Join(c.Choice.Choices, "|") != want {
 		t.Fatal(c)
 	}

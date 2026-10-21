@@ -10,10 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zenibako/pico8pocket/bbs"
 	"github.com/zenibako/pico8pocket/offline"
 )
 
-// FetchFunc retrieves only the catalog ID supplied by the installer.
+// FetchFunc retrieves a validated cart ID supplied by the collection installer or browser.
 type FetchFunc func(id string) (status int, body []byte, retryAfter string, err error)
 
 // ErrCancelled lets native hosts interrupt preparation without publishing a bundle.
@@ -21,6 +22,9 @@ var ErrCancelled = errors.New("installation cancelled")
 
 // Session owns one conversation and roots supplied by the host, never by answers.
 type Session struct {
+	List                 ListingFetchFunc
+	OpenURL              func(string) error
+	browser              *browserState
 	pocketRoot, hostRoot string
 	logger               func(string)
 	fetch                FetchFunc
@@ -67,9 +71,13 @@ func (s *Session) Start() ([]byte, error) {
 	return s.menu("Pocket Sync: offline Pico Arcade and Sorcerer collections. Install uses verified cache; Update refreshes downloads.")
 }
 func (s *Session) menu(query string) ([]byte, error) {
+	s.browser = nil
+	return s.prompt(query, []string{"Install both collections", "Install Arcade", "Install Sorcerer", "Update both collections", "Update Arcade", "Update Sorcerer", "Installed / cache status", "Browse recent carts", "Browse popular carts", "Exit"})
+}
+func (s *Session) prompt(query string, choices []string) ([]byte, error) {
 	s.sequence++
 	s.name = fmt.Sprintf("pico8-offline-%d", s.sequence)
-	s.choices = []string{"Install both collections", "Install Arcade", "Install Sorcerer", "Update both collections", "Update Arcade", "Update Sorcerer", "Installed / cache status", "Exit"}
+	s.choices = choices
 	return json.Marshal(struct {
 		Choice struct {
 			Name    string   `json:"name"`
@@ -108,6 +116,15 @@ func (s *Session) Handle(input []byte) ([]byte, error) {
 	}
 	if value == "Exit" {
 		return s.finish()
+	}
+	if s.browser != nil {
+		return s.handleBrowser(value)
+	}
+	if value == "Browse recent carts" {
+		return s.loadListing(bbs.Recent, 1)
+	}
+	if value == "Browse popular carts" {
+		return s.loadListing(bbs.Popular, 1)
 	}
 	var summary string
 	if value == "Installed / cache status" {
@@ -300,12 +317,13 @@ func (s *Session) Install(collection string, refresh bool) (string, error) {
 // conversationState is saved in Extism variables, which survive guest reinitialization.
 // Paths and executable callbacks always come from the host's new Session.
 type conversationState struct {
-	Started     bool     `json:"started"`
-	Exited      bool     `json:"exited"`
-	Sequence    uint64   `json:"sequence"`
-	Name        string   `json:"name"`
-	Choices     []string `json:"choices"`
-	LastRequest int64    `json:"last_request,omitempty"`
+	Started     bool          `json:"started"`
+	Exited      bool          `json:"exited"`
+	Sequence    uint64        `json:"sequence"`
+	Name        string        `json:"name"`
+	Choices     []string      `json:"choices"`
+	LastRequest int64         `json:"last_request,omitempty"`
+	Browser     *browserState `json:"browser,omitempty"`
 }
 
 func (s *Session) Snapshot() ([]byte, error) {
@@ -313,7 +331,7 @@ func (s *Session) Snapshot() ([]byte, error) {
 	if !s.LastRequest.IsZero() {
 		stamp = s.LastRequest.UnixNano()
 	}
-	return json.Marshal(conversationState{s.started, s.exited, s.sequence, s.name, s.choices, stamp})
+	return json.Marshal(conversationState{s.started, s.exited, s.sequence, s.name, s.choices, stamp, s.browser})
 }
 func (s *Session) Restore(data []byte) error {
 	var state conversationState
@@ -323,6 +341,10 @@ func (s *Session) Restore(data []byte) error {
 	if !state.Started || state.Sequence == 0 || (!state.Exited && (state.Name == "" || len(state.Choices) == 0)) {
 		return errors.New("invalid saved conversation")
 	}
+	if err := validateBrowser(state.Browser); err != nil {
+		return err
+	}
+	s.browser = state.Browser
 	s.started = state.Started
 	s.exited = state.Exited
 	s.sequence = state.Sequence
@@ -363,7 +385,7 @@ func (s *Session) beforeRequest(id string) error {
 	if err := s.cancel(); err != nil {
 		return err
 	}
-	s.log("Downloading #" + id + "...")
+	s.log("Requesting " + id + "...")
 	s.recordRequest()
 	return nil
 }

@@ -1,0 +1,82 @@
+package bbs
+
+import (
+	"strings"
+	"testing"
+)
+
+// Project-owned metadata with the BBS lister's observed 24-field row shape.
+const sample = "<a href=#sub=2&page=2&mode=carts&orderby=ts>Next</a><script id=cart_data_script>\npdat=[\n['90001', 42, `Forum title`,\"/bbs/thumbs/example.png\",256,170.5,\"2026-10-20 01:00:00\",7,\"Author_8\",\"date\",0,\"\",10,3,0,7,2,'0',[\"puzzle\",],2,21,7,`A &amp; B`,``],\n];\nvar unrelated=1;</script>"
+
+func TestPublicListingMetadataAndPagination(t *testing.T) {
+	p, err := Parse([]byte(sample), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Carts) != 1 || p.Carts[0] != (Cart{ID: "90001", Title: "A & B", Author: "Author_8"}) || !p.HasNext {
+		t.Fatalf("%+v", p)
+	}
+	// Numeric post IDs resolve get_cart.php; display titles are not cart aliases.
+	if !strings.Contains(p.Carts[0].URL(), "?pid=90001") {
+		t.Fatal(p.Carts[0])
+	}
+	p, err = Parse([]byte(strings.Replace(sample, "page=2", "page=1", 1)), 2)
+	if err != nil || p.HasNext {
+		t.Fatalf("%+v %v", p, err)
+	}
+}
+func TestListingOnlyReadsLiteralData(t *testing.T) {
+	for _, bad := range []string{
+		strings.Replace(sample, "`A &amp; B`", "`${fetch('https://evil.invalid')}`", 1),
+		strings.Replace(sample, "`A &amp; B`", "evil()", 1),
+		strings.Replace(sample, "'90001'", "'../escape'", 1),
+		strings.Replace(sample, "`A &amp; B`", "`bad\\u0000title`", 1),
+		strings.Replace(sample, "<script id=cart_data_script>", "<script>", 1),
+		strings.Replace(sample, "\n];", "\n", 1),
+		sample + strings.Repeat(" ", MaxListing),
+	} {
+		if _, err := Parse([]byte(bad), 1); err == nil {
+			t.Fatalf("accepted invalid listing: %.100s", bad)
+		}
+	}
+}
+func TestDuplicateCartsAndWrongConsoleRejected(t *testing.T) {
+	row := sample[strings.Index(sample, "['90001'"):strings.Index(sample, "\n];")]
+	duplicate := strings.Replace(sample, "\n];", row+"\n];", 1)
+	if _, err := Parse([]byte(duplicate), 1); err == nil {
+		t.Fatal("duplicate carts accepted")
+	}
+	wrong := strings.Replace(sample, ",21,7,", ",21,8,", 1)
+	if _, err := Parse([]byte(wrong), 1); err == nil {
+		t.Fatal("other console accepted")
+	}
+}
+func TestListingURLConstrainsSourceAndSort(t *testing.T) {
+	for _, tc := range []struct {
+		order Order
+		want  string
+	}{
+		{Recent, "https://www.lexaloffle.com/bbs/lister.php?cat=7&mode=carts&orderby=ts&page=2&sub=2&use_hurl=1"},
+		{Popular, "https://www.lexaloffle.com/bbs/lister.php?cat=7&mode=carts&orderby=ts&page=2&popular=1&sub=2&use_hurl=1"},
+	} {
+		got, err := ListingURL(tc.order, 2)
+		if err != nil || got != tc.want {
+			t.Fatalf("%s %v", got, err)
+		}
+	}
+	for _, tc := range []struct {
+		order Order
+		page  int
+	}{{Order("https://evil.invalid"), 1}, {Recent, 0}, {Recent, MaxPage + 1}} {
+		if _, err := ListingURL(tc.order, tc.page); err == nil {
+			t.Fatal("invalid source accepted")
+		}
+	}
+}
+
+func TestSparseArrayEntriesCountTowardLimit(t *testing.T) {
+	bad := strings.Replace(sample, `["puzzle",]`, "["+strings.Repeat(",", 9000)+"]", 1)
+	if _, err := Parse([]byte(bad), 1); err == nil {
+		t.Fatal("accepted 9000 sparse values past metadata node budget")
+	}
+}

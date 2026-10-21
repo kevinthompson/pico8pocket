@@ -1,5 +1,7 @@
 {
   "name": "Pico8Pocket Offline Collections",
-  "description": "Install and update Pico Arcade's 35 games and the Trail of the Sorcerer companion for offline Pico8Pocket handoffs. Verified local cache supports offline reinstalls.",
-  "allowed_hosts": ["www.lexaloffle.com"]
+  "description": "Browse recent and popular public BBS carts and download selected carts to Pocket. Install Pico Arcade's 35 games and the Trail of the Sorcerer companion for offline handoffs; verified cache supports offline reinstalls.",
+  "allowed_hosts": [
+    "www.lexaloffle.com"
+  ]
 }

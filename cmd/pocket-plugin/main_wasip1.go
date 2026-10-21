@@ -9,12 +9,16 @@ import (
 	"time"
 
 	"github.com/extism/go-pdk"
+	"github.com/zenibako/pico8pocket/bbs"
 	"github.com/zenibako/pico8pocket/offline"
 	"github.com/zenibako/pico8pocket/pocketplugin"
 )
 
 //go:wasmimport extism:host/user print_msg
 func printMsg(uint64) uint64
+
+//go:wasmimport extism:host/user open_url
+func openURL(uint64) uint64
 
 func logMessage(message string) {
 	memory := pdk.AllocateString(message + "\n")
@@ -26,7 +30,17 @@ func fetchCart(id string) (int, []byte, string, error) {
 	if err := offline.ValidateID(id); err != nil {
 		return 0, nil, "", err
 	}
-	request := pdk.NewHTTPRequest(pdk.MethodGet, "https://www.lexaloffle.com/bbs/get_cart.php?cat=7&play_src=2&lid="+id)
+	return fetchURL("https://www.lexaloffle.com/bbs/get_cart.php?cat=7&play_src=2&lid="+id, offline.MaxCart)
+}
+func fetchListing(order bbs.Order, page int) (int, []byte, string, error) {
+	url, err := bbs.ListingURL(order, page)
+	if err != nil {
+		return 0, nil, "", err
+	}
+	return fetchURL(url, bbs.MaxListing)
+}
+func fetchURL(url string, limit int) (int, []byte, string, error) {
+	request := pdk.NewHTTPRequest(pdk.MethodGet, url)
 	response := request.Send()
 	memory := response.Memory()
 	if memory.Offset() != 0 {
@@ -42,8 +56,8 @@ func fetchCart(id string) (int, []byte, string, error) {
 	if status == 429 {
 		return status, nil, retryAfter, nil
 	}
-	if memory.Length() > offline.MaxCart {
-		return status, nil, retryAfter, errors.New("HTTP response exceeds 2 MiB cartridge limit")
+	if memory.Length() > uint64(limit) {
+		return status, nil, retryAfter, errors.New("BBS response exceeds allowed size")
 	}
 	if status != 200 {
 		return status, nil, retryAfter, nil
@@ -57,6 +71,17 @@ const requestKey = "pico8-offline-last-request"
 func newSession() *pocketplugin.Session {
 	// Absolute preopen names avoid depending on WASI directory enumeration order.
 	session := pocketplugin.New("/pocket", "/host", logMessage, fetchCart)
+	session.List = fetchListing
+	session.OpenURL = func(url string) error {
+		const prefix = "https://www.lexaloffle.com/bbs/?pid="
+		if !strings.HasPrefix(url, prefix) || offline.ValidateID(strings.TrimPrefix(url, prefix)) != nil {
+			return errors.New("invalid BBS page URL")
+		}
+		memory := pdk.AllocateString(url)
+		defer memory.Free()
+		openURL(memory.Offset())
+		return nil
+	}
 	// This variable is intentionally independent of conversation state. Record it
 	// before HTTP for cancellation, then refresh it after the response so a fresh
 	// start retains the full cooldown without counting host-call setup latency.

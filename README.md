@@ -172,6 +172,8 @@ remove its fingerprint once the support path is verified.
 
 The [Pocket Sync plugin](docs/OFFLINE-COLLECTIONS.md) downloads Pico Arcade's
 35 referenced games and Trail of the Sorcerer's `mot_sorcerergame` companion.
+Its Recent and Popular menus also list public BBS releases and offer downloading
+a selected cart to the Pocket as a standalone file, without logging in.
 Build the Go/TinyGo plugin with `make offline-plugin-tools`; its distribution
 pair is written to `build/offline-plugin/`. Pocket Sync installs plugins
 from GitHub releases containing `plugin.wasm` and `plugin.json`. These artifacts

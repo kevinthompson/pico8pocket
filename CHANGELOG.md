@@ -2,10 +2,15 @@
 
 ## Unreleased
 
+- Browse paginated Recent and Popular public BBS releases in the Pocket Sync
+  plugin. View a cart's BBS page or download its original PNG to the Pocket.
+  Listing and cart requests share pacing; cached installs work offline and
+  individual downloads preserve managed dependency bundles.
+
 - Replace the Cart Thumbnails plugin with Offline Collections under the same
-  repository URL. Release CI uses pinned Rust/native tests, cartridge-free actual
+  repository URL. Release CI uses pinned Go/TinyGo builds, cartridge-free actual
   WASI tests, complete core provenance and a new exact plugin asset inventory.
-  Retire thumbnail CLIs and Go/TinyGo tooling; preserve existing SD artwork.
+  Retire thumbnail CLIs and reuse the existing Go/TinyGo tooling; preserve SD artwork.
 
 - Add a Pocket Sync / pupdate plugin for Pico Arcade's 35 BBS games and Trail
   of the Sorcerer's companion, with verified cache reuse, paced downloads and

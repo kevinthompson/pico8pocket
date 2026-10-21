@@ -4,6 +4,7 @@
 The plugin installs the curated 35-game Pico Arcade collection and Trail of the
 Sorcerer's companion from `compatibility/offline-carts.json`. No game assets or
 PICO-8 executable are included. PICO-8 is not required for plugin downloads.
+It also browses public BBS releases and downloads individually selected carts.
 
 ## Use
 
@@ -44,6 +45,31 @@ and rename preserve the last published file during a cancelled write. A cancelle
 session can leave `.pocket-sync-tmp` files; the next write replaces these. Some
 standalone carts may already be updated if cancellation occurs during publication;
 the bundle becomes visible only after the complete selected set is ready.
+
+## Browse public BBS carts
+
+Choose **Browse recent carts** or **Browse popular carts**. Recent uses the BBS's
+New Carts listing for PICO-8 releases; Popular uses its New & Popular filter.
+Each page shows cart titles, authors and numeric BBS IDs. Previous/Next moves
+through the listing; choosing a cart shows its BBS link and offers **Open BBS
+page** and **Download to Pocket**. No account or credentials are required.
+
+Downloads reuse verified originals in the existing host cache and atomically
+install `Assets/pico8/common/cards/bbs/<id>.p8.png`. Select that file in the Pocket
+asset browser. Individual downloads leave `bbs.p8pack` unchanged; use the managed
+collection actions for Arcade/Sorcerer dependencies. Other multicart games may
+need additional carts, and downloaded games still depend on core compatibility.
+
+Listing requests and cart downloads share the 15-second network cooldown,
+including across menu actions. Only the explicitly requested page/cart is fetched;
+there is no background crawl or bulk-download action. Cached cart reinstalls do
+not make network requests. HTTP 429 stops the action without automatic retries.
+Errors preserve existing installed files and report a retryable menu.
+
+The source is the BBS website's public `lister.php` metadata, with `cat=7`,
+`sub=2`, `mode=carts`, `orderby=ts` and `popular=1` for Popular. The parser reads
+bounded data literals without executing JavaScript. It rejects unexpected schema
+or malformed data; a BBS format change may require updating the adapter.
 
 ## Build
 

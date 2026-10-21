@@ -33,6 +33,7 @@ type harness struct {
 	pocket, host string
 	preserved    map[string][]byte
 	onLog        func(string)
+	onOpen       func(string)
 }
 
 func artifact(t *testing.T) string {
@@ -77,8 +78,13 @@ func newHarness(t *testing.T, first string, allowedHosts ...string) *harness {
 		}
 		stack[0] = 0
 	}, []extism.ValueType{extism.ValueTypeI64}, []extism.ValueType{extism.ValueTypeI64})
-	openURL := extism.NewHostFunctionWithStack("open_url", func(_ context.Context, _ *extism.CurrentPlugin, stack []uint64) {
-		t.Error("offline install unexpectedly requested open_url")
+	openURL := extism.NewHostFunctionWithStack("open_url", func(_ context.Context, p *extism.CurrentPlugin, stack []uint64) {
+		if h.onOpen == nil {
+			t.Error("offline install unexpectedly requested open_url")
+		} else {
+			url, _ := p.ReadString(stack[0])
+			h.onOpen(url)
+		}
 		stack[0] = 0
 	}, []extism.ValueType{extism.ValueTypeI64}, []extism.ValueType{extism.ValueTypeI64})
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -436,5 +442,75 @@ func TestCompiledPluginCrossCallCourtesyTimer(t *testing.T) {
 		t.Fatalf("WASI courtesy interval reset across start/handle_response: %v, want at least 15s", gap)
 	}
 	assertPack(t, h.pack(), offline.Carts{"mot_sorcerergame": latest})
+	h.assertPreserved()
+}
+
+func TestCompiledPluginBrowseAndDownload(t *testing.T) {
+	h := newHarness(t, "host", "www.lexaloffle.com")
+	const listing = "<script id=cart_data_script>\npdat=[['90001',42,`Forum title`,\"thumb\",256,170,\"date\",7,\"FixtureAuthor\",\"date\",0,\"\",3,1,0,7,2,'0',[],2,21,7,`Fixture cart`,``],];</script>"
+	png := testcart.PNG(90)
+	oldPack := []byte("untouched user bundle")
+	write(t, filepath.Join(h.pocket, offline.PackPath), oldPack)
+	previous := http.DefaultClient
+	var paths []string
+	var times []time.Time
+	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != "GET" || r.URL.Scheme != "https" || r.URL.Host != "www.lexaloffle.com" {
+			t.Fatalf("unexpected request %s", r.URL)
+		}
+		paths = append(paths, r.URL.Path)
+		times = append(times, time.Now())
+		body := []byte(listing)
+		switch r.URL.Path {
+		case "/bbs/lister.php":
+			q := r.URL.Query()
+			if q.Get("cat") != "7" || q.Get("sub") != "2" || q.Get("mode") != "carts" || q.Get("orderby") != "ts" || q.Get("page") != "1" || q.Get("popular") != "1" {
+				t.Fatalf("wrong public Popular listing: %s", r.URL)
+			}
+		case "/bbs/get_cart.php":
+			if r.URL.Query().Get("lid") != "90001" {
+				t.Fatalf("wrong selected cart: %s", r.URL)
+			}
+			body = png
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: r}, nil
+	})}
+	t.Cleanup(func() { http.DefaultClient = previous })
+	c := menu(t, h.call("start", nil))
+	list := menu(t, h.call("handle_response", answer(t, c, "Browse popular carts")))
+	if !strings.Contains(list.Choice.Choices[0], "Fixture cart") {
+		t.Fatal(list)
+	}
+	detail := menu(t, h.call("handle_response", answer(t, list, list.Choice.Choices[0])))
+	opened := ""
+	h.onOpen = func(url string) { opened = url }
+	detail = menu(t, h.call("handle_response", answer(t, detail, "Open BBS page")))
+	if opened != "https://www.lexaloffle.com/bbs/?pid=90001" {
+		t.Fatal(opened)
+	}
+	done := menu(t, h.call("handle_response", answer(t, detail, "Download to Pocket")))
+	if !strings.Contains(done.Choice.Query, "Downloaded") {
+		t.Fatal(done)
+	}
+	if len(paths) != 2 || paths[0] != "/bbs/lister.php" || paths[1] != "/bbs/get_cart.php" {
+		t.Fatal(paths)
+	}
+	if gap := times[1].Sub(times[0]); gap < 15*time.Second {
+		t.Fatalf("listing/cart request interval %v", gap)
+	}
+	standalone, err := os.ReadFile(filepath.Join(h.pocket, offline.CartPath, "90001.p8.png"))
+	if err != nil || !bytes.Equal(standalone, png) {
+		t.Fatalf("download changed bytes: %v", err)
+	}
+	if !bytes.Equal(h.pack(), oldPack) {
+		t.Fatal("browsing altered dependency bundle")
+	}
+	// A repeated install uses the original cache with zero extra HTTP calls.
+	h.call("handle_response", answer(t, done, "Download to Pocket"))
+	if len(paths) != 2 {
+		t.Fatal("cached standalone redownloaded")
+	}
 	h.assertPreserved()
 }
