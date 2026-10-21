@@ -50,12 +50,12 @@ func (s *Session) TidyFilenames() (string, error) {
 	if skipped > 0 {
 		counts.reasons = map[string]int{"unrecognized filename or unreadable entry": skipped}
 	}
-	loggedSkips := 0
+	loggedReasons := map[string]bool{}
 	skip := func(file offline.StandaloneFile, reason string) {
 		counts.skip(reason)
-		if loggedSkips < 5 {
+		if !loggedReasons[reason] && len(loggedReasons) < 5 {
 			s.log("Skipped " + filepath.ToSlash(filepath.Join(file.Dir, file.Name)) + ": " + reason + ".")
-			loggedSkips++
+			loggedReasons[reason] = true
 		}
 	}
 	catalog, err := offline.Catalog()
@@ -82,8 +82,25 @@ func (s *Session) TidyFilenames() (string, error) {
 		title, metaErr := offline.CachedTitle(s.hostRoot, file.ID, data)
 		if metaErr != nil {
 			cached, cacheErr := offline.CachedCart(s.hostRoot, file.ID)
-			if cacheErr != nil || !bytes.Equal(cached, data) {
-				reason, verifyErr := s.verifyTidyCart(file.ID, titles[file.ID] != "", data)
+			verified := cacheErr == nil && bytes.Equal(cached, data)
+			title = titles[file.ID]
+			if title == "" {
+				if !verified && s.Details == nil {
+					skip(file, "no saved identity")
+					continue
+				}
+				var reason string
+				title, reason, e = s.tidyTitle(file.ID, data)
+				if e != nil {
+					return counts.summary(), e
+				}
+				if reason != "" {
+					skip(file, reason)
+					continue
+				}
+			}
+			if !verified {
+				reason, verifyErr := s.verifyTidyCart(file.ID, data)
 				if verifyErr != nil {
 					return counts.summary(), verifyErr
 				}
@@ -92,40 +109,8 @@ func (s *Session) TidyFilenames() (string, error) {
 					continue
 				}
 			}
-			title = titles[file.ID]
-			if title == "" {
-				if s.Details == nil {
-					skip(file, "title unavailable")
-					continue
-				}
-				if _, e = bbs.DetailURL(file.ID); e != nil {
-					skip(file, "title unavailable")
-					continue
-				}
-				if e = s.beforeRequest("BBS metadata #" + file.ID); e != nil {
-					return counts.summary(), e
-				}
-				status, body, retry, fetchErr := s.Details(file.ID)
-				s.recordRequest()
-				if status == 429 {
-					return counts.summary(), httpStatus(status, retry)
-				}
-				if errors.Is(fetchErr, ErrCancelled) {
-					return counts.summary(), fetchErr
-				}
-				if fetchErr == nil {
-					fetchErr = httpStatus(status, retry)
-				}
-				if fetchErr != nil {
-					skip(file, "title unavailable")
-					continue
-				}
-				cart, parseErr := bbs.ParseDetail(body, file.ID)
-				if parseErr != nil {
-					skip(file, "title unavailable")
-					continue
-				}
-				title = cart.Title
+			if e = s.cancel(); e != nil {
+				return counts.summary(), e
 			}
 			if e = offline.RememberTitle(s.hostRoot, file.ID, title, data); e != nil {
 				return counts.summary(), e
@@ -151,11 +136,14 @@ func (s *Session) TidyFilenames() (string, error) {
 }
 
 // verifyTidyCart establishes identity without trusting the filename alone.
-// Only numeric BBS IDs and curated catalog aliases are eligible for a request.
+// Metadata resolves noncatalog aliases before they reach this verification step.
 // A newer or otherwise different cart is left untouched, including its cache.
-func (s *Session) verifyTidyCart(id string, catalogued bool, data []byte) (string, error) {
-	if _, err := bbs.DetailURL(id); !catalogued && err != nil {
+func (s *Session) verifyTidyCart(id string, data []byte) (string, error) {
+	if _, err := bbs.DetailURL(id); err != nil {
 		return "no saved identity", nil
+	}
+	if cached, err := offline.CachedCart(s.hostRoot, id); err == nil && bytes.Equal(cached, data) {
+		return "", nil
 	}
 	if s.fetch == nil {
 		return "no saved identity (network unavailable)", nil
@@ -184,4 +172,64 @@ func (s *Session) verifyTidyCart(id string, catalogued bool, data []byte) (strin
 		return "", err
 	}
 	return "", nil
+}
+
+// tidyTitle resolves exact aliases and disambiguates multi-cart posts by bytes.
+// A successful HTTP page alone never establishes a cart identity.
+func (s *Session) tidyTitle(id string, data []byte) (string, string, error) {
+	if s.Details == nil {
+		return "", "title unavailable", nil
+	}
+	if _, err := bbs.DetailURL(id); err != nil {
+		return "", "BBS identity unavailable", nil
+	}
+	if err := s.beforeRequest("BBS metadata #" + id); err != nil {
+		return "", "", err
+	}
+	status, body, retry, fetchErr := s.Details(id)
+	s.recordRequest()
+	if status == 429 {
+		return "", "", httpStatus(status, retry)
+	}
+	if errors.Is(fetchErr, ErrCancelled) {
+		return "", "", fetchErr
+	}
+	if err := s.cancel(); err != nil {
+		return "", "", err
+	}
+	if fetchErr != nil || httpStatus(status, retry) != nil {
+		return "", "title unavailable", nil
+	}
+	carts, err := bbs.ParseDetails(body, id)
+	if err != nil {
+		return "", "BBS identity unavailable", nil
+	}
+	if len(carts) == 1 {
+		return carts[0].Title, "", nil
+	}
+	title, matches := "", 0
+	for _, cart := range carts {
+		if err := s.cancel(); err != nil {
+			return "", "", err
+		}
+		reason, err := s.verifyTidyCart(cart.Alias, data)
+		if err != nil {
+			return "", "", err
+		}
+		if reason == "different BBS cart bytes" {
+			continue
+		}
+		if reason != "" {
+			return "", "cart title verification unavailable", nil
+		}
+		matches++
+		title = cart.Title
+	}
+	if matches == 0 {
+		return "", "no matching BBS cart title", nil
+	}
+	if matches != 1 {
+		return "", "ambiguous BBS cart title", nil
+	}
+	return title, "", nil
 }

@@ -41,7 +41,7 @@ func TestTidyVerifiesUncachedCatalogCartThroughWASI(t *testing.T) {
 	data := testcart.PNG(83)
 	common := filepath.Join(h.pocket, offline.CommonPath)
 	write(t, filepath.Join(common, "11437.p8.png"), data)
-	manual := filepath.Join(common, "celeste_classic_2.p8.png")
+	manual := filepath.Join(common, "Manual cart.p8.png")
 	write(t, manual, data)
 	oldPack := []byte("unchanged dependency bundle")
 	write(t, filepath.Join(h.pocket, offline.PackPath), oldPack)
@@ -58,7 +58,7 @@ func TestTidyVerifiesUncachedCatalogCartThroughWASI(t *testing.T) {
 	main := menu(t, h.call("start", nil))
 	library := menu(t, h.call("handle_response", answer(t, main, "Library")))
 	done := menu(t, h.call("handle_response", answer(t, library, "Tidy filenames")))
-	if !strings.Contains(done.Choice.Query, "Renamed 1") || !strings.Contains(done.Choice.Query, "no saved identity: 1") || requests != 1 {
+	if !strings.Contains(done.Choice.Query, "Renamed 1") || !strings.Contains(done.Choice.Query, "unrecognized filename or unreadable entry: 1") || requests != 1 {
 		t.Fatal(done, requests)
 	}
 	got, err := os.ReadFile(filepath.Join(common, "picoman [11437].p8.png"))
@@ -78,6 +78,59 @@ func TestTidyVerifiesUncachedCatalogCartThroughWASI(t *testing.T) {
 	got, err = os.ReadFile(manual)
 	if err != nil || !bytes.Equal(got, data) || !bytes.Equal(h.pack(), oldPack) {
 		t.Fatal("manual cart or bundle changed", err)
+	}
+	h.assertPreserved()
+}
+
+func TestTidyResolvesNamedAliasThroughWASI(t *testing.T) {
+	h := newHarness(t, "host", "www.lexaloffle.com")
+	data := testcart.PNG(84)
+	common := filepath.Join(h.pocket, offline.CommonPath)
+	write(t, filepath.Join(common, "fixture_named.p8.png"), data)
+	previous := http.DefaultClient
+	var requests []time.Time
+	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != "GET" || r.URL.Scheme != "https" || r.URL.Host != "www.lexaloffle.com" {
+			t.Fatal(r.URL)
+		}
+		requests = append(requests, time.Now())
+		var body []byte
+		switch len(requests) {
+		case 1:
+			if r.URL.Path != "/bbs/" || r.URL.RawQuery != "pid=fixture_named" {
+				t.Fatal(r.URL)
+			}
+			body = []byte("<script id=cart_data_script>\npdat=[['fixture_named-0',42,`Named Game`,\"thumb\",256,170,\"date\",7,\"Author\",\"date\",0,\"\",1,2,90001,7,2,'0',[],0,1,,``,``],];</script>")
+		case 2:
+			if r.URL.Path != "/bbs/get_cart.php" || r.URL.RawQuery != "cat=7&play_src=2&lid=fixture_named" {
+				t.Fatal(r.URL)
+			}
+			body = data
+		default:
+			t.Fatalf("unexpected request %s", r.URL)
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: r}, nil
+	})}
+	t.Cleanup(func() { http.DefaultClient = previous })
+	main := menu(t, h.call("start", nil))
+	library := menu(t, h.call("handle_response", answer(t, main, "Library")))
+	done := menu(t, h.call("handle_response", answer(t, library, "Tidy filenames")))
+	if !strings.Contains(done.Choice.Query, "Renamed 1") || len(requests) != 2 {
+		t.Fatal(done, requests)
+	}
+	if requests[1].Sub(requests[0]) < 15*time.Second {
+		t.Fatal("alias metadata and download bypassed cooldown")
+	}
+	got, err := os.ReadFile(filepath.Join(common, "Named Game [fixture_named].p8.png"))
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatal("alias cart changed", err)
+	}
+	if _, err := os.Stat(filepath.Join(common, "fixture_named.p8.png")); !os.IsNotExist(err) {
+		t.Fatal("legacy alias remains", err)
+	}
+	done = menu(t, h.call("handle_response", answer(t, done, "Tidy filenames")))
+	if !strings.Contains(done.Choice.Query, "already tidy 1") || len(requests) != 2 {
+		t.Fatal("repeat alias tidy used network", done, requests)
 	}
 	h.assertPreserved()
 }

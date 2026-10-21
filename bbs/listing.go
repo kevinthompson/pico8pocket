@@ -325,43 +325,92 @@ func parseRows(data []byte) ([]any, error) {
 	return rows, nil
 }
 
-// DetailURL restricts legacy-file metadata lookups to numeric public BBS posts.
+// DetailURL accepts numeric public posts or bounded cart aliases on the same host.
 func DetailURL(id string) (string, error) {
-	if !numericID(id) {
+	if !validAlias(id) {
 		return "", fmt.Errorf("invalid BBS post ID")
 	}
-	n, err := strconv.ParseUint(id, 10, 64)
-	if err != nil || n > 9007199254740991 {
-		return "", fmt.Errorf("BBS post ID exceeds metadata numeric range")
+	if strings.Trim(id, "0123456789") == "" {
+		n, err := strconv.ParseUint(id, 10, 64)
+		if !numericID(id) || err != nil || n > 9007199254740991 {
+			return "", fmt.Errorf("BBS post ID exceeds metadata numeric range")
+		}
 	}
 	return "https://www.lexaloffle.com/bbs/?pid=" + id, nil
 }
 
-// ParseDetail binds the detail-page schema to the exact requested PICO-8 release.
-// A missing cart-display title falls back to the public post title.
+// DetailCart retains the versioned download identity when a post has several carts.
+type DetailCart struct {
+	Cart
+	Alias string
+}
+
+// ParseDetail refuses ambiguous posts. Use ParseDetails and compare cart bytes
+// when multiple cart titles belong to the requested post.
 func ParseDetail(data []byte, id string) (Cart, error) {
-	if _, err := DetailURL(id); err != nil {
-		return Cart{}, err
-	}
-	rows, err := parseRows(data)
+	carts, err := ParseDetails(data, id)
 	if err != nil {
 		return Cart{}, err
 	}
-	if len(rows) != 1 {
-		return Cart{}, fmt.Errorf("unexpected BBS detail cart count")
+	if len(carts) != 1 {
+		return Cart{}, fmt.Errorf("ambiguous BBS detail cart count")
 	}
-	row, ok := rows[0].([]any)
-	if !ok || len(row) != 24 || row[15] != float64(7) || row[16] != float64(2) {
-		return Cart{}, fmt.Errorf("unexpected BBS detail console or schema")
+	return carts[0].Cart, nil
+}
+
+// ParseDetails binds candidates to the requested numeric post or exact alias
+// (with an optional numeric revision). General-list fallback pages do not match.
+func ParseDetails(data []byte, id string) ([]DetailCart, error) {
+	if _, err := DetailURL(id); err != nil {
+		return nil, err
 	}
-	postID, ok := row[14].(float64)
-	if !ok || strconv.FormatFloat(postID, 'f', 0, 64) != id || postID != float64(uint64(postID)) {
-		return Cart{}, fmt.Errorf("BBS detail does not match requested post")
+	rows, err := parseRows(data)
+	if err != nil {
+		return nil, err
 	}
-	alias, ok := row[0].(string)
-	if !ok || !validAlias(alias) {
-		return Cart{}, fmt.Errorf("invalid BBS detail cart identity")
+	var result []DetailCart
+	seen := map[string]bool{}
+	for _, value := range rows {
+		row, ok := value.([]any)
+		if !ok || len(row) != 24 {
+			return nil, fmt.Errorf("unexpected BBS detail schema")
+		}
+		alias, ok := row[0].(string)
+		if !ok || !validAlias(alias) {
+			return nil, fmt.Errorf("invalid BBS detail cart identity")
+		}
+		postID, ok := row[14].(float64)
+		if !ok || postID < 1 || postID > 9007199254740991 || postID != float64(uint64(postID)) {
+			continue
+		}
+		post := strconv.FormatFloat(postID, 'f', 0, 64)
+		matches := post == id
+		if !numericID(id) {
+			matches = alias == id
+			if at := strings.LastIndex(alias, "-"); !matches && at > 0 && at < len(alias)-1 {
+				matches = alias[:at] == id && strings.Trim(alias[at+1:], "0123456789") == ""
+			}
+		}
+		if !matches {
+			continue
+		}
+		if row[15] != float64(7) || row[16] != float64(2) || seen[alias] {
+			return nil, fmt.Errorf("unexpected BBS detail console or duplicate cart")
+		}
+		seen[alias] = true
+		cart, err := detailCart(row, post)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, DetailCart{Cart: cart, Alias: alias})
 	}
+	if len(result) == 0 {
+		return nil, fmt.Errorf("BBS detail does not match requested post or alias")
+	}
+	return result, nil
+}
+
+func detailCart(row []any, post string) (Cart, error) {
 	title, ok := row[22].(string)
 	if !ok {
 		return Cart{}, fmt.Errorf("invalid BBS detail title")
@@ -376,7 +425,7 @@ func ParseDetail(data []byte, id string) (Cart, error) {
 	if !ok {
 		return Cart{}, fmt.Errorf("BBS author missing")
 	}
-	title, err = plainText(title, 200)
+	title, err := plainText(title, 200)
 	if err != nil {
 		return Cart{}, err
 	}
@@ -384,7 +433,7 @@ func ParseDetail(data []byte, id string) (Cart, error) {
 	if err != nil {
 		return Cart{}, err
 	}
-	return Cart{ID: id, Title: title, Author: author}, nil
+	return Cart{ID: post, Title: title, Author: author}, nil
 }
 func validAlias(id string) bool {
 	if len(id) < 1 || len(id) > 47 {

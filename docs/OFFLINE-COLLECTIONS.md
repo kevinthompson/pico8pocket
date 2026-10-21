@@ -102,19 +102,26 @@ The BBS ID suffix stays intact. Cache files and bundle entries keep their origin
 IDs, preserving collection handoffs.
 
 Tidy uses byte-matched saved metadata or the verified cart cache to establish a
-file's identity. If neither matches, numeric BBS IDs and curated catalog aliases
-can be verified by downloading the current BBS cart and comparing every byte.
+file's identity. If neither matches, BBS IDs and aliases can be verified by
+downloading the current BBS cart and comparing every byte. For noncatalog names,
+Tidy first checks public BBS metadata for the exact alias (optionally followed by
+a numeric revision). A successful HTTP response containing a general listing
+does not establish identity and is skipped without downloading a cart.
 Only an exact match is cached and eligible for renaming; different revisions or
 modified carts stay untouched. It uses saved titles or the curated catalog first; missing titles
-for known numeric IDs are retrieved from their public BBS posts. The public post
-title is used when a separate cart title is unavailable. The same 15-second
+are retrieved from their public BBS posts. When a post contains several carts,
+Tidy compares their versioned downloads with the local file and requires exactly
+one byte match before selecting a title. The public post title is used when a
+separate cart title is unavailable. The same 15-second
 request cooldown, cancellation and HTTP 429 stop behavior apply. Saved metadata
 lets subsequent tidy operations work offline.
 
 The result reports renamed, already tidy, unmatched, conflicting and invalid
-files, with counts of unmatched reasons and up to five example paths in the log.
-Manually named carts without a saved identity, such as `celeste_classic_2.p8.png`,
-are left in place: a filename alone does not identify a public BBS release.
+files, with counts of unmatched reasons and one example path per reason, up to
+five paths in the log. Manually named carts whose names do not resolve to BBS
+aliases are left in place: Tidy does not guess titles or search for similarly
+named games. Existing alias IDs are retained in filenames, metadata and cache
+keys so collection references continue to match.
 An ID-only cart such as `11437.p8.png` can be verified online even if it was copied
 from another computer or its original host cache is missing. Verification downloads
 and title lookups share the same 15-second cooldown, so a large uncached library

@@ -81,7 +81,7 @@ func TestTidyLooksUpMissingTitlesOnceAndRemainsOfflineAfterward(t *testing.T) {
 		put(t, filepath.Join(p, offline.CartPath, id+".p8.png"), data)
 	}
 	put(t, filepath.Join(p, offline.CartPath, "90003.p8.png"), []byte("invalid PNG"))
-	put(t, filepath.Join(p, offline.CartPath, "manual_cart.p8.png"), data)
+	put(t, filepath.Join(p, offline.CartPath, "Manual cart.p8.png"), data)
 	now := time.Unix(1700000000, 0)
 	s.Now = func() time.Time { return now }
 	waits, calls := 0, 0

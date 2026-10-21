@@ -126,3 +126,50 @@ func TestDetailMetadataBindsRequestedPostAndFallsBackToPublicTitle(t *testing.T)
 		t.Fatal("unsafe detail URL")
 	}
 }
+
+func TestDetailAliasesResolveOnlyTheirOwnCart(t *testing.T) {
+	other := strings.ReplaceAll(detailSample, "fixture_cart-0", "other_cart-0")
+	other = strings.ReplaceAll(other, "Public Game Title", "Other Game")
+	row := other[strings.Index(other, "['other_cart-0'"):strings.Index(other, ",];")]
+	multi := strings.Replace(detailSample, ",];", ","+row+",];", 1)
+	for _, id := range []string{"fixture_cart", "fixture_cart-0"} {
+		cart, err := ParseDetail([]byte(multi), id)
+		if err != nil || cart.Title != "Public Game Title" || cart.ID != "90001" {
+			t.Fatal(cart, err)
+		}
+		url, err := DetailURL(id)
+		if err != nil || url != "https://www.lexaloffle.com/bbs/?pid="+id {
+			t.Fatal(url, err)
+		}
+	}
+	for _, id := range []string{"fixture", "fixture_cart-1", "../escape", "a&pid=90001", "", "9007199254740992", "0"} {
+		if _, err := ParseDetail([]byte(multi), id); err == nil {
+			t.Fatal("unbound alias accepted", id)
+		}
+	}
+}
+
+func TestDetailCandidatesRetainDistinctCartsWithinOnePost(t *testing.T) {
+	other := strings.ReplaceAll(detailSample, "fixture_cart-0", "other_cart-0")
+	other = strings.ReplaceAll(other, "Public Game Title", "Other Game")
+	row := other[strings.Index(other, "['other_cart-0'"):strings.Index(other, ",];")]
+	multi := strings.Replace(detailSample, ",];", ","+row+",];", 1)
+	if _, err := ParseDetail([]byte(multi), "90001"); err == nil {
+		t.Fatal("ambiguous numeric post guessed a title")
+	}
+	carts, err := ParseDetails([]byte(multi), "90001")
+	if err != nil || len(carts) != 2 {
+		t.Fatal(carts, err)
+	}
+	if carts[0].Alias != "fixture_cart-0" || carts[0].Title != "Public Game Title" || carts[1].Alias != "other_cart-0" || carts[1].Title != "Other Game" {
+		t.Fatal(carts)
+	}
+	duplicate := strings.ReplaceAll(multi, "other_cart-0", "fixture_cart-0")
+	if _, err := ParseDetails([]byte(duplicate), "90001"); err == nil {
+		t.Fatal("duplicate candidate identity accepted")
+	}
+	wrongPost := strings.ReplaceAll(multi, "90001,7,2", "90002,7,2")
+	if _, err := ParseDetail([]byte(wrongPost), "90001"); err == nil {
+		t.Fatal("wrong post accepted")
+	}
+}

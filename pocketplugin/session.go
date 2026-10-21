@@ -14,7 +14,7 @@ import (
 	"github.com/zenibako/pico8pocket/offline"
 )
 
-// FetchFunc retrieves a validated cart ID supplied by the collection installer or browser.
+// FetchFunc retrieves a validated cart ID for collections, browsing or library verification.
 type FetchFunc func(id string) (status int, body []byte, retryAfter string, err error)
 
 // ErrCancelled lets native hosts interrupt preparation without publishing a bundle.

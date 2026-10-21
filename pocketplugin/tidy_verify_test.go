@@ -124,7 +124,7 @@ func TestTidyVerificationAndMetadataShareRequestPacing(t *testing.T) {
 		return 200, []byte(detailFixture), "", nil
 	}
 	summary, err := s.TidyFilenames()
-	if err != nil || !strings.Contains(summary, "Renamed 1") || strings.Join(events, ",") != "cart,wait,metadata" {
+	if err != nil || !strings.Contains(summary, "Renamed 1") || strings.Join(events, ",") != "metadata,wait,cart" {
 		t.Fatal(summary, err, events)
 	}
 	if !bytes.Equal(read(t, filepath.Join(p, offline.CommonPath, "Public Game Title [90001].p8.png")), data) {
@@ -132,16 +132,17 @@ func TestTidyVerificationAndMetadataShareRequestPacing(t *testing.T) {
 	}
 }
 
-func TestTidyBoundsUnmatchedExamples(t *testing.T) {
+func TestTidyShowsDistinctUnmatchedReasons(t *testing.T) {
 	p, h := roots(t)
 	data := fixture(t, 36)
 	for _, id := range []string{"a", "b", "c", "d", "e", "f", "g"} {
 		put(t, filepath.Join(p, offline.CommonPath, id+".p8.png"), data)
 	}
+	put(t, filepath.Join(p, offline.CommonPath, "11437.p8.png"), data)
 	var logs []string
 	s := New(p, h, func(msg string) { logs = append(logs, msg) }, nil)
 	summary, err := s.TidyFilenames()
-	if err != nil || !strings.Contains(summary, "no saved identity: 7") || len(logs) != 5 {
+	if err != nil || !strings.Contains(summary, "no saved identity: 7") || len(logs) != 2 || !strings.Contains(strings.Join(logs, "\n"), "11437.p8.png") {
 		t.Fatal("skip reasons missing or unbounded log output", summary, err, logs)
 	}
 }

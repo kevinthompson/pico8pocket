@@ -125,18 +125,21 @@ The desktop plugin also browses public Recent, Popular and search release listin
 and cart GETs share the session's request cooldown. Selecting an individual cart
 installs its original PNG as a standalone asset; it does not modify the dependency
 bundle. Browser state persists across Extism calls; the WASI adapter constructs
-fixed same-host URLs from validated listing modes/pages, bounded URL-encoded search terms and numeric cart IDs.
+fixed same-host URLs from validated listing modes/pages, bounded URL-encoded search terms and validated cart IDs or aliases.
 Pocket Sync text prompts collect search terms; prompt kind, menu position and query
 persist across Extism calls. Home separates Browse BBS, Collections and Library,
 and collection selection precedes Install or Refresh downloads. Standalone SD
 assets use sanitized title-plus-ID filenames while cache and bundle keys stay ID
 based. Library holds status and an explicit tidy operation. Byte-bound title
-metadata is stored beside the host cache; missing numeric-ID titles use a bounded
-public BBS detail parser that checks the exact post ID and PICO-8 release category.
-When local identity records do not match, numeric IDs and curated aliases can be
+metadata is stored beside the host cache; missing titles use a bounded public
+BBS detail parser that checks the exact numeric post or cart alias and PICO-8
+release category. Multi-cart posts require a unique byte match against their
+versioned candidates. Noncatalog aliases require matching metadata before a
+download; general-list fallback pages are rejected.
+When local identity records do not match, BBS IDs and resolved aliases can be
 verified against an exact-byte BBS download through the shared request cooldown.
 Different revisions and unassociated manual filenames remain untouched; the result
-groups unmatched reasons and logs at most five example paths.
+groups unmatched reasons and logs one example per reason, at most five paths.
 Tidy scans `Assets/pico8/common/` recursively, verifies file bytes, preserves
 conflicts, and uses exclusive publication before removing an original filename.
 Carts keep their containing directory. Symlinks are excluded and the entire scan
