@@ -3,7 +3,7 @@
 This repository owns the Pico8Pocket app, thumbnail tools and release process.
 The existing [architecture](architecture.md#hardware-and-runtime) defines the
 matched os20 SDK/API/runtime combination. The approved
-[thumbnail-tools design](superpowers/specs/2026-10-19-cart-thumbnails-design.md)
+[thumbnail-tools design](https://github.com/zenibako/pico8pocket/issues/23)
 defines the independent Go CLI/WASI/plugin and its hardware verification limit.
 `scripts/fetch-deps.sh` remains the authoritative dependency lock; no second
 copy of those pins is introduced. Release app source is the exact Git commit.
