@@ -89,9 +89,9 @@ started and how you can help improve it.
   newline correctly. This fixes minified cartridges such as Moss Moss where a
   nested one-line `if` previously swallowed the following movement code into
   the wrong branch.
-- The interpreter is tuned for the Pocket's 100 MHz RV32 CPU (no
-  double-precision FPU, 8 KB instruction cache, 14 KB of zero-wait BRAM that
-  holds the dispatch loop). z8lua is patched (`patches/`) to keep the program
+- The interpreter is tuned for os20's dual-issue 90 MHz RV32 CPU (no
+  double-precision FPU, 32 KiB instruction and 64 KiB data caches, 14 KiB of
+  zero-wait BRAM that holds the dispatch loop). z8lua is patched (`patches/`) to keep the program
   counter in a register, check its service hook only at jumps and calls,
   cache the hash slot of every constant-name table access, compare numbers,
   strings and nil inline, follow `__index` chains for `_ENV` objects, call
@@ -129,12 +129,86 @@ started and how you can help improve it.
 - Cartridge `menuitem()` entries appear in the Select system menu right after
   RESUME, with their callbacks, left/right input and button filters.
 
-This is still an alpha, not a full-compatibility release. Local multicart
-switching, ZIP extraction and the indexed in-core browser are not implemented
-yet. Save-state persistence, menu/input behavior, profiling and the current 2X
+This is still an alpha, not a full-compatibility release. Offline BBS handoffs
+use the separately installed collection described below. Arbitrary local-path
+multicart switching, ZIP extraction and the indexed in-core browser remain
+unfinished. Save-state persistence, menu/input behavior, profiling and the current 2X
 presentation path have been validated on physical Pocket hardware. CPU-heavy
 cartridges and scaler behavior beyond the established 2X path still need more
 compatibility and performance work.
+
+## Known incompatible cartridges
+
+The core checks the exact cartridge revisions below before running their Lua.
+Launchers require their complete offline collection; other blocked revisions
+display the reason and workaround. Press Select to open the system menu.
+Matching uses decoded ROM and Lua content, so renaming a cart or changing its
+PNG label does not bypass the list. Different content is checked independently;
+an unlisted cart is not a compatibility guarantee.
+
+<!-- incompatible-carts:begin -->
+| Cartridge revision | Status | Reason | Workaround / support |
+|---|---|---|---|
+| Pico Arcade (`pico_arcade.p8.png`) | Offline collection required | Needs the offline Arcade collection and cartridge-loading support. | Install the Arcade collection with the Pocket Sync plugin. [Issue](https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/68) |
+| Trail of the Sorcerer (`trail_of_the_sorcerer.p8.png`) | Offline collection required | Gameplay needs the offline Sorcerer companion collection. | Install the Sorcerer collection with the Pocket Sync plugin. [Issue](https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/68) |
+| Pico Backrooms (`pico_backrooms-1.p8.png`) | Blocked | Crashes during gameplay: this revision calls unsupported rrectfill(). | Use a compatible revision when available; rounded-rectangle support is tracked. [Issue](https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/69) |
+| Peral (`peral.p8.png`) | Blocked | Needs #peral_game and launch parameters larger than the current 255-byte limit. | This launcher is outside the initial offline collection. Use another cartridge. [Issue](https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/68) |
+| Pico Night Funkin (`pico_night_funkin.p8.png`) | Blocked | Needs #fnf_select and further game carts outside the initial offline collection. | Use another cartridge until the full companion collection is supported. [Issue](https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/68) |
+<!-- incompatible-carts:end -->
+
+The list records confirmed launch/gameplay blockers, not low frame rates or
+test-harness nondeterminism. Historical Yarn, Snail, Tetyis and Moss fixes are
+not blocked. The Pocket runs installed BBS carts offline; downloads run on the
+computer through the plugin below. Unlisted revisions can still fail at runtime.
+
+Maintainers: edit [the registry](compatibility/incompatible-carts.json), then run
+`python3 scripts/incompatible-carts.py` to update the compiled list and this table.
+`make test` checks that both match. `make compat-scan` builds a tool whose
+`CART --identity` mode prints a decoded content hash without executing the cart.
+Add only reproduced failures, record the tested revision and evidence, and
+remove its fingerprint once the support path is verified.
+
+## Offline Pico Arcade and Sorcerer
+
+The [Pocket Sync plugin](docs/OFFLINE-COLLECTIONS.md) downloads Pico Arcade's
+35 referenced games and Trail of the Sorcerer's `mot_sorcerergame` companion.
+Its **Browse BBS** menu offers Recent, Popular and text search of public BBS
+releases, with paginated results and downloading a selected cart to the Pocket
+as a standalone file, without logging in.
+Build the Go/TinyGo plugin with `make offline-plugin-tools`; its distribution
+pair is written to `build/offline-plugin/`. Pocket Sync installs plugins
+from GitHub releases containing `plugin.wasm` and `plugin.json`. These artifacts
+replace the former Cart Thumbnails plugin in the next complete release, using
+the same repository URL. Existing SD artwork is preserved. The native helper can install a verified local cache
+before publication; see the linked instructions. Once distributed, choose
+**Collections**, select **Pico Arcade**, **Sorcerer**, or **Both collections**,
+then **Install**. **Refresh downloads** retrieves fresh copies; **Library → Status** reports installed and cached counts. **Library → Tidy
+filenames** updates existing verified downloads to `Title [BBS ID].p8.png`, using
+saved metadata or paced BBS title lookups. Unmatched files and conflicts are preserved.
+Downloads are cached and paced; a rate limit stops the batch so it can resume
+later from the cache. No PICO-8 installation is needed for these downloads.
+
+Standalone filenames use `Title [BBS ID].p8.png`; cache and bundle keys retain
+the original IDs so collection handoffs still match. The plugin writes standalone
+carts into `Assets/pico8/common/cards/bbs/` and
+the core's offline bundle into `Assets/pico8/common/cards/bbs.p8pack`. Keep your
+launcher carts in the normal card directory and select them as usual. Install
+the matching complete collection to clear its launch restriction. The core
+checks each requested payload's CRC and cartridge encoding before loading it.
+Core update packages omit the bundle so updates preserve your installed games.
+
+Cart `load("#id", "return label", "parameters")` requests switch outside Lua.
+Select opens a return row when the cart supplied a label; `extcmd("go_back")`
+also returns. Returning restarts the parent cart. Up to eight parents are kept
+for the current session. Save states retain parameters, but do not recreate
+return history after a fresh launch. Version-1 save states remain readable.
+
+The plugin cannot launch the PICO-8 app or browse your Mac's files. If you prefer
+your existing PICO-8 BBS cache, use the explicit native importer in the
+[plugin instructions](docs/OFFLINE-COLLECTIONS.md#optional-explicit-cache-importer).
+Game assets and the licensed PICO-8 executable are never included in this repo
+or the plugin. Host tests cover the loader and actual Extism plugin execution;
+the new offline path still needs a physical Pocket run.
 
 ## AI development disclosure
 
@@ -149,13 +223,6 @@ numeric AI-ness score comes from the separate
 [openFPGA AI report](https://github.com/openfpga-library/openfpga-ai-check),
 not a measured percentage of AI-written source. A missing report is not a
 claim that AI was unused.
-
-## Experimental cart thumbnails
-
-A Go CLI and Pocket Sync plugin can generate Analogue Library artwork from
-your carts’ labels. Native picker display still needs a physical Pocket test.
-See the [one-cart test and tools guide](docs/THUMBNAILS.md). These tools do not
-modify cartridges or saves.
 
 ## Build
 
@@ -286,13 +353,11 @@ planned in-core browser will consume an index stored beside the cards; see
 
 These revisions are pinned by `scripts/fetch-deps.sh` so builds do not silently
 change when upstream moves. Diablo is fetched as a shallow, sparse Git checkout
-of the pinned commit (only `runtime/pocket`, `src/sdk` and `tools`), and the
-three Pocket runtime files are additionally verified by SHA-256.
-
-See [Pin updates and releases](docs/RELEASING.md) for the read-only runtime
-update workflow, complete distribution CI, provenance and explicit draft
-release process. The repo's `pico8pocket-release` skill coordinates these
-checks with hardware verification.
+of the pinned commit (only `src/sdk` and `tools`); the fork checkout supplies
+`src/firmware/api`. The three Pocket runtime files are downloaded from the fork's
+pinned release and verified by SHA-256. Keep `os20.rbf_r`, `os.bin` and
+`loader.bin` together: the bitstream's BRAM contents must match its OS firmware
+build. The assembled SDK is staged at `.deps/openfpgaos-sdk`.
 
 ## License and disclaimer
 
@@ -308,3 +373,13 @@ PICO-8 is a product of Lexaloffle Games LLP. Analogue Pocket and openFPGA are
 products and technologies of Analogue. Pico8Pocket is an independent,
 unofficial compatibility project and is not affiliated with, endorsed by, or
 sponsored by Lexaloffle Games LLP or Analogue.
+
+## Releases and plugin migration
+
+The [release guide](docs/RELEASING.md) covers the complete core/plugin distribution,
+matched runtime pins, provenance, checksums and explicit draft/publication steps.
+`make offline-plugin-tools` builds the public offline plugin files; native tests
+run on Linux, macOS and Windows, and actual WASI tests use project-owned fixtures.
+Cart thumbnail generation and its native/WASI downloads are retired. Keep
+`https://github.com/zenibako/pico8pocket` configured as the Pocket Sync plugin URL
+to receive the offline installer with the next complete release.

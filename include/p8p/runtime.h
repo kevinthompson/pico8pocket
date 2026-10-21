@@ -41,6 +41,29 @@ typedef int (*p8p_runtime_cartdata_save_fn)(void *userdata, const char *id,
 p8p_runtime_t *p8p_runtime_create(void);
 void p8p_runtime_destroy(p8p_runtime_t *runtime);
 int p8p_runtime_load(p8p_runtime_t *runtime, const p8p_cart_t *cart);
+/* Context strings are copied; requests are serviced by the host outside Lua. */
+int p8p_runtime_load_context(p8p_runtime_t *runtime, const p8p_cart_t *cart,
+                              const char *params, const char *breadcrumb);
+void p8p_runtime_set_cart_features(p8p_runtime_t *runtime, uint32_t features);
+typedef enum p8p_runtime_cart_request_kind {
+    P8P_RUNTIME_CART_REQUEST_LOAD,
+    P8P_RUNTIME_CART_REQUEST_BACK
+} p8p_runtime_cart_request_kind_t;
+typedef struct p8p_runtime_cart_request {
+    p8p_runtime_cart_request_kind_t kind;
+    char id[64];
+    char breadcrumb[64];
+    char params[256];
+} p8p_runtime_cart_request_t;
+const p8p_runtime_cart_request_t *p8p_runtime_cart_request(
+    p8p_runtime_t *runtime);
+/* Acknowledges the request; the retired cart remains halted until a load. */
+void p8p_runtime_clear_cart_request(p8p_runtime_t *runtime);
+const char *p8p_runtime_breadcrumb(p8p_runtime_t *runtime);
+const char *p8p_runtime_parameters(p8p_runtime_t *runtime);
+int p8p_runtime_request_back(p8p_runtime_t *runtime);
+/* A registered incompatible revision was rejected before its Lua ran. */
+#define P8P_RUNTIME_INCOMPATIBLE_CART (-5)
 int p8p_runtime_step(p8p_runtime_t *runtime, uint8_t buttons);
 int p8p_runtime_step_with_draw(p8p_runtime_t *runtime, uint8_t buttons,
                                int draw_frame);

@@ -87,10 +87,23 @@ description: Debug PICO-8 cart compatibility problems and change the patched z8l
 
 ## Determinism caveats when comparing builds
 
-- Use `scripts/compare-frames.sh`: it fixes the Lua seed and runs under
-  `setarch -R`.
-- Kiloman and Grippy still change with binary layout alone; prove such a DIFF
-  is layout before treating it as a regression.
+- `scripts/compare-frames.sh` is a legacy frame-hash check using
+  `luai_makeseed()=0u` and `setarch -R`; it does not verify the final `g->seed`
+  after address mixing. Do not dismiss a DIFF as layout without investigating it.
+- For deterministic target replay, follow `../pico8pocket-performance/SKILL.md`
+  and the harness's `pico8/README.md`: create independent baseline/candidate
+  cases with explicit `--platform os20 --hash-seed 0x5eed1234`. Confirm the final
+  seed in native/QEMU (`PICOSEED 1592594996`) and the 90 MHz MMIO clock in RTL
+  (`PICOCPU 90000000`). Keep setup, input, window, audio and build flags equal.
+  Require `capture.json`'s `native_output_equal=true` as well as `passed=true`.
+- Compare pixels, display palette, PCM and sample-pair counts independently;
+  require raw exports before asserting byte identity. Same-ELF pointer-bearing
+  checkpoint hashes are not cross-build or cross-version save-state oracles.
+  Standard harness commands export channel hashes, not raw channel bytes;
+  use a separately reviewed collector or limit the claim to hash agreement.
+- os20 matches the documented CPU configuration. Exact shipped-bitstream,
+  compiler and OS/presentation parity remain separate evidence; retain device
+  error/input and save-load checks where the change affects those paths.
 - Changes to hook timing shift when scripted input lands in carts with long
   `_init` slicing. Check those carts for errors and plausible frames rather
   than identical hashes.

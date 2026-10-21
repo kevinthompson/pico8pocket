@@ -1,5 +1,6 @@
 #include "p8p/cart.h"
 #include "p8p/menu.h"
+#include "p8p/multicart.h"
 #include "p8p/platform.h"
 #include "p8p/runtime.h"
 #include "p8p/scheduler.h"
@@ -402,6 +403,7 @@ int main(int argc, char **argv) {
     p8p_cart_t loaded_cart = {0};
     p8p_runtime_t *runtime = NULL;
     p8p_menu_t *menu = NULL;
+    p8p_multicart_t *multicart = NULL;
     p8p_settings_t settings;
     p8p_cart_hash_t cart_hash = {{0}};
     uint8_t *framebuffer;
@@ -457,24 +459,37 @@ int main(int argc, char **argv) {
     if ((cart.kind == P8P_CART_TEXT || cart.kind == P8P_CART_PNG) && cart.valid &&
         p8p_cart_load_file(cart_path, &loaded_cart) == 0) {
         runtime = p8p_runtime_create();
+        if (runtime) {
+            const char *pack_path = "slot:20";
+#ifdef OF_PC
+            pack_path = getenv("P8P_BBS_PACK");
+            if (!pack_path)
+                pack_path = "bbs.p8pack";
+#endif
+            multicart = p8p_multicart_create(runtime, &loaded_cart, pack_path);
+        }
+        p8p_cart_content_hash(&loaded_cart, &cart_hash);
+        if (runtime) {
+            /* Load rejections need the same Select-menu recovery as errors
+             * reached during gameplay. */
+            menu = p8p_menu_create(&settings, &cart_hash,
+                                   p8p_cart_kind_name(cart.kind));
+            if (!menu)
+                printf("pico8pocket: system menu allocation failed\n");
+        }
         if (runtime)
             p8p_runtime_set_cartdata_hooks(runtime, runtime_cartdata_load,
                                            runtime_cartdata_save, NULL);
         if (runtime && p8p_runtime_load(runtime, &loaded_cart) == 0) {
             running = 1;
-            p8p_cart_content_hash(&loaded_cart, &cart_hash);
             /* The OS then refuses another cart's Memory before it is
              * copied out; the state's own cart hash still backs it up. */
             p8p_platform_savestate_set_id(cart_hash.bytes,
                                           sizeof cart_hash.bytes);
             if (p8p_platform_savestate_enable(P8P_STATE_BLOB_MAX) != 0)
                 printf("pico8pocket: save states unavailable\n");
-            menu = p8p_menu_create(&settings, &cart_hash,
-                                   p8p_cart_kind_name(cart.kind));
             p8p_runtime_set_service_hook(runtime, input_latch_service,
                                          &input_latch);
-            if (!menu)
-                printf("pico8pocket: system menu allocation failed\n");
             printf("pico8pocket: z8lua cart started at %d fps\n",
                    p8p_runtime_target_fps(runtime));
         } else {
@@ -509,6 +524,39 @@ int main(int argc, char **argv) {
         int drew_game_frame = 1;
         int present_required = 1;
         enum p8p_system_input_action system_action;
+
+        /* A load request has already stopped Lua. Resolve it here, outside
+         * every VM callback, before polling native Memory requests. */
+        if (running && p8p_runtime_cart_request(runtime)) {
+            p8p_platform_audio_set_paused(1);
+            int switched = p8p_multicart_poll(multicart, runtime_error,
+                                               sizeof(runtime_error));
+            if (switched > 0) {
+                p8p_cart_content_hash(&loaded_cart, &cart_hash);
+                p8p_platform_savestate_set_id(cart_hash.bytes,
+                                              sizeof(cart_hash.bytes));
+                p8p_menu_destroy(menu);
+                menu = p8p_menu_create(&settings, &cart_hash, "p8 / BBS");
+                p8p_runtime_set_service_hook(runtime, input_latch_service,
+                                             &input_latch);
+                runtime_failed = 0;
+                runtime_error[0] = '\0';
+                render_divisor = 1;
+                render_phase = probe_frames = overload_frames = recovery_frames = 0;
+                average_period_us = average_draw_runtime_us = average_update_runtime_us = 0;
+                average_audio_us = average_present_us = average_instructions = 0;
+                memset(&runtime_profile, 0, sizeof(runtime_profile));
+                memset(&input_latch.pending, 0, sizeof(input_latch.pending));
+                next_frame_us = previous_frame_us = p8p_platform_time_us();
+            } else if (switched < 0) {
+                running = 0;
+                runtime_failed = 1;
+                printf("pico8pocket: offline cartridge load failed: %s\n", runtime_error);
+            }
+            menu_open = 0;
+            suppress_buttons |= previous_physical;
+            p8p_platform_audio_set_paused(0);
+        }
 
         if (service_savestate(runtime, running, &cart_hash) && menu_open) {
             menu_open = 0;
@@ -564,7 +612,8 @@ int main(int argc, char **argv) {
                 suppress_buttons = physical;
                 p8p_platform_audio_set_paused(0);
             } else if (action == P8P_MENU_RESTART) {
-                if (p8p_runtime_load(runtime, &loaded_cart) != 0) {
+                if ((multicart ? p8p_multicart_restart(multicart) :
+                     p8p_runtime_load(runtime, &loaded_cart)) != 0) {
                     printf("pico8pocket: restart failed: %s\n",
                            p8p_runtime_error(runtime));
                     running = 0;
@@ -698,7 +747,7 @@ int main(int argc, char **argv) {
                 present_required = drew_game_frame;
             }
         }
-        if (!running) {
+        if (!running && !menu_open) {
             if (runtime_failed) {
                 draw_runtime_error_frame(framebuffer, runtime_error);
             } else {

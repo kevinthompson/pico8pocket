@@ -168,6 +168,46 @@ static void test_render_scheduler(void) {
     CHECK(p8p_render_divisor_for_load(30, 45000, 15000, 5000, 3000) == 2);
 }
 
+static void test_cart_identity_and_incompatibility(void) {
+    p8p_cart_t cart = {0};
+    p8p_cart_hash_t hash;
+    static const uint8_t expected[16] = {
+        0x65, 0xfc, 0x8f, 0xb3, 0x2d, 0xa6, 0x75, 0xe8,
+        0x8a, 0x85, 0xbb, 0xf4, 0x3f, 0xf8, 0xc5, 0x51
+    };
+    char source[] = "x=1\n";
+    cart.lua = source;
+    cart.lua_size = sizeof(source) - 1;
+    p8p_cart_content_hash(&cart, &hash);
+    CHECK(memcmp(hash.bytes, expected, sizeof(expected)) == 0);
+    CHECK(p8p_cart_find_incompatibility(&hash) == NULL);
+    source[2] = '2';
+    p8p_cart_content_hash(&cart, &hash);
+    CHECK(memcmp(hash.bytes, expected, sizeof(expected)) != 0);
+    source[2] = '1';
+    cart.rom[0] = 1;
+    p8p_cart_content_hash(&cart, &hash);
+    CHECK(memcmp(hash.bytes, expected, sizeof(expected)) != 0);
+    CHECK(p8p_cart_find_incompatibility(NULL) == NULL);
+
+    /* Recorded identities, independent of the generated registry. */
+    static const p8p_cart_hash_t arcade = {{
+        0x48, 0x9d, 0x91, 0xb8, 0x1a, 0xcb, 0xb4, 0x1e,
+        0xfc, 0xbb, 0xf4, 0x65, 0xb1, 0x9e, 0x47, 0x40
+    }};
+    const p8p_cart_incompatibility_t *entry =
+        p8p_cart_find_incompatibility(&arcade);
+    CHECK(entry != NULL);
+    if (entry) {
+        CHECK(strcmp(entry->title, "Pico Arcade") == 0);
+        CHECK(entry->reason[0] != '\0');
+        CHECK(entry->workaround[0] != '\0');
+    }
+    hash = arcade;
+    hash.bytes[0] ^= 1;
+    CHECK(p8p_cart_find_incompatibility(&hash) == NULL);
+}
+
 int main(void) {
     test_text_cart();
     test_text_cart_with_bom();
@@ -177,6 +217,7 @@ int main(void) {
     test_sharp_bilinear_scaling();
     test_system_input();
     test_render_scheduler();
+    test_cart_identity_and_incompatibility();
 
     if (failures) {
         fprintf(stderr, "%d test(s) failed\n", failures);

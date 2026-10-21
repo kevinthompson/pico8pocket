@@ -1,0 +1,56 @@
+[
+  {
+    "title": "Pico Arcade",
+    "filename": "pico_arcade.p8.png",
+    "content_hash": "489d91b81acbb41efcbbf465b19e4740",
+    "reason": "Needs the offline Arcade collection and cartridge-loading support.",
+    "workaround": "Install the Arcade collection with the Pocket Sync plugin.",
+    "evidence": "2026-10-20 host probe: all 35 selections reach load() and remain in the launcher after an ignored Lua compiler error.",
+    "issue": "https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/68",
+    "requires": [
+      "arcade"
+    ]
+  },
+  {
+    "title": "Trail of the Sorcerer",
+    "filename": "trail_of_the_sorcerer.p8.png",
+    "content_hash": "df1e27c4cf07a185ba9864a96378a7a5",
+    "reason": "Gameplay needs the offline Sorcerer companion collection.",
+    "workaround": "Install the Sorcerer collection with the Pocket Sync plugin.",
+    "evidence": "2026-10-10 supplied-cart report and session probe: rungame() calls load(\"#mot_sorcerergame\"); the companion is absent and the intro never hands off.",
+    "issue": "https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/68",
+    "requires": [
+      "sorcerer"
+    ]
+  },
+  {
+    "title": "Pico Backrooms",
+    "filename": "pico_backrooms-1.p8.png",
+    "content_hash": "43ddca7322ce6d19e797ab664858e896",
+    "reason": "Crashes during gameplay: this revision calls unsupported rrectfill().",
+    "workaround": "Use a compatible revision when available; rounded-rectangle support is tracked.",
+    "evidence": "2026-10-20 current host replay reproduces the older native/RV32 failure at frame 122, cart.p8:554: rrectfill is nil.",
+    "issue": "https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/69",
+    "requires": []
+  },
+  {
+    "title": "Peral",
+    "filename": "peral.p8.png",
+    "content_hash": "f07a8e246f7df4fca15c4c3e23a3332b",
+    "reason": "Needs #peral_game and launch parameters larger than the current 255-byte limit.",
+    "workaround": "This launcher is outside the initial offline collection. Use another cartridge.",
+    "evidence": "2026-10-20 current host 600-frame seed-7 smoke fails at frame 234, cart.p8:121. launch_game loads #peral_game with get_translations(); a direct eval measures 730 parameter bytes.",
+    "issue": "https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/68",
+    "requires": []
+  },
+  {
+    "title": "Pico Night Funkin",
+    "filename": "pico_night_funkin.p8.png",
+    "content_hash": "924379ecba67228089265b12ab910726",
+    "reason": "Needs #fnf_select and further game carts outside the initial offline collection.",
+    "workaround": "Use another cartridge until the full companion collection is supported.",
+    "evidence": "2026-10-20 current host 600-frame seed-7 smoke reaches load(\"#fnf_select\") at cart.p8:49; the curated Arcade/Sorcerer bundle has no such target.",
+    "issue": "https://gitlab.zenibako.cloud/zenibako/dotfiles/-/work_items/68",
+    "requires": []
+  }
+]

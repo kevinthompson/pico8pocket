@@ -59,6 +59,12 @@ struct p8p_runtime {
     uint8_t cart_thread_active;
     uint8_t cart_thread_kind;
     uint8_t restart_requested;
+    uint32_t cart_features;
+    uint8_t cart_request_pending;
+    uint8_t cart_halted;
+    p8p_runtime_cart_request_t cart_request;
+    char params[256];
+    char breadcrumb[64];
     /* menuitem() entries 1-5: label ("" when empty), button filter from
      * bits 8-15 of the index, and a registry table of callbacks. */
     char menu_labels[5][17];

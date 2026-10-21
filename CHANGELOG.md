@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- Browse paginated Recent and Popular public BBS releases in the Pocket Sync
+  plugin. View a cart's BBS page or download its original PNG to the Pocket.
+  Listing and cart requests share pacing; cached installs work offline and
+  individual downloads preserve managed dependency bundles.
+
+- Replace the Cart Thumbnails plugin with Offline Collections under the same
+  repository URL. Release CI uses pinned Go/TinyGo builds, cartridge-free actual
+  WASI tests, complete core provenance and a new exact plugin asset inventory.
+  Retire thumbnail CLIs and reuse the existing Go/TinyGo tooling; preserve SD artwork.
+
+- Add a Pocket Sync / pupdate plugin for Pico Arcade's 35 BBS games and Trail
+  of the Sorcerer's companion, with verified cache reuse, paced downloads and
+  atomic offline-bundle updates. No game assets or PICO-8 binaries are bundled.
+- Add offline BBS cart handoffs, parameters and session return history, with a
+  Select-menu return row and refreshed per-cart save/control identities. The
+  optional bundle occupies tail slot 20; existing save slots stay in place.
+  Runtime state version 2 preserves parameters and still reads version 1.
+  Launcher compatibility restrictions clear when their collection is installed.
+- Legacy compressed carts ending in a source terminator, including Space
+  Picanoid, compile without changing decoded cart bytes or save identities.
+- Known incompatible cartridge revisions are blocked before execution with an
+  explanation and Select-menu recovery. The compiled list and README table
+  share one registry, initially covering Pico Arcade, Trail of the Sorcerer
+  and Pico Backrooms. Matching uses decoded content rather than filenames.
 - Lua-to-Lua calls set up and tear down their frames inside the
   interpreter loop instead of through `luaD_precall`/`luaD_poscall`, and C
   functions reached by a tail call (`return peek(...)`) or used as a `for ...

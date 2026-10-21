@@ -1,10 +1,12 @@
 # Pin updates and releases
 
-This repository owns the Pico8Pocket app, thumbnail tools and release process.
+This repository owns the Pico8Pocket app, offline collections plugin and release process.
 The existing [architecture](architecture.md#hardware-and-runtime) defines the
 matched os20 SDK/API/runtime combination. The approved
-[thumbnail-tools design](https://github.com/zenibako/pico8pocket/issues/23)
-defines the independent Go CLI/WASI/plugin and its hardware verification limit.
+[offline BBS design](https://github.com/zenibako/pico8pocket/issues/26)
+defines the offline installer and optional bundle loader; its Go port note
+records the retained Go/TinyGo implementation. The
+[collections guide](OFFLINE-COLLECTIONS.md) documents the thumbnail-plugin migration.
 `scripts/fetch-deps.sh` remains the authoritative dependency lock; no second
 copy of those pins is introduced. Release app source is the exact Git commit.
 
@@ -36,7 +38,7 @@ python3 scripts/release.py prepare-runtime --source /path/to/runtime-source \
 # After reviewing build/runtime-update/REVIEW.md and runtime-pin.patch:
 python3 scripts/release.py prepare-runtime --source /path/to/runtime-source \
   --runtime /path/to/downloaded-bundle --tag pocket-runtime-COMMIT --apply
-python3 -m unittest discover -s tests -p 'test_*.py'
+python3 -m unittest discover -s tests -p 'test_release.py'
 ```
 
 The helper updates the API source SHA, runtime URL/hashes and current runtime
@@ -50,11 +52,13 @@ user's dependency modifications.
 ## Verify the committed candidate
 
 Review and sign a conventional commit on a topic branch. **Build and verify
-distribution** (`thumbnail-tools.yml`) runs on pushes, PRs and explicit
+distribution** (`distribution.yml`) runs on pushes, PRs and explicit
 dispatches. It requires:
 
-- Go tests/vet on Linux, macOS and Windows.
-- Pinned TinyGo/Binaryen tool builds and actual compiled plugin/WASI tests.
+- Go 1.25.0 native tests and vet on Linux, macOS and Windows.
+- A TinyGo 0.43.0 WASI plugin build with Binaryen 133 and real Extism/WASI
+  tests using generated
+  project-owned fixtures; no private cartridges or live BBS requests are needed.
 - Host C/C++ regression tests with pinned dependencies. Local Celeste acceptance
   checks skip without the user's cart; this is reported, not hardware evidence.
 - The public, cartridge-free core built with Ubuntu 24.04 GCC 13.2.0
@@ -63,7 +67,7 @@ dispatches. It requires:
   RISC-V ELF identity, per-file provenance and global checksum verification.
 
 `pico8pocket-distribution` contains the versioned core ZIP, plugin and manifest,
-six native thumbnail bundles, WASI CLI, thumbnail docs/licenses, source archive,
+`OFFLINE-COLLECTIONS.md`, project/dependency licenses, source archive,
 `CORE-PROVENANCE.json` and `SHA256SUMS`. The old tools-only checksum file is
 replaced by one covering the complete set. Provenance records this repository's
 commit, dependency pins and per-core-file hashes. The source archive is the
@@ -81,8 +85,9 @@ public artifacts. Neither workflow downloads cartridges or includes saves.
 Complete CI must be green on the intended commit. Test the candidate on a real
 Pocket using private carts: launch, controls/audio, persistence, Memories and
 sleep/wake. Record missing checks explicitly; a runtime or API change needs
-renewed hardware compatibility checks. Native-picker thumbnail rendering also
-requires device evidence, as described in the thumbnail design.
+renewed hardware compatibility checks. The new offline path additionally needs
+slot-20 bundle loading, Arcade/Sorcerer handoffs and return navigation tested on
+Pocket. Real Extism tests do not establish interactive Pocket Sync UI behavior.
 
 After choosing and committing the core version, explicitly dispatch the build
 workflow on that ref with `version=vMAJOR.MINOR.PATCH` and `create_draft=true`.
@@ -98,3 +103,30 @@ existing tag/release or publish a tools-only latest release.
 The repository-owned [release skill](../.agents/skills/pico8pocket-release/SKILL.md)
 coordinates this process and retains the device/A-B installation guidance.
 Claude reads the same skill through a symlink.
+
+## Replacing Cart Thumbnails
+
+Keep `https://github.com/zenibako/pico8pocket` as the updater plugin URL. The
+root `plugin.json` is canonical; the new display name is **Pico8Pocket Offline
+Collections**. The latest complete release still exposes `plugin.wasm` and
+`plugin.json`, so existing installations follow their normal update path.
+Thumbnail menus, native thumbnail bundles and the thumbnail WASI CLI are
+retired. Go/TinyGo now build the offline collection installer. Previously
+generated artwork on users' cards is preserved.
+
+`make offline-plugin-tools` writes exactly the plugin pair, `OFFLINE-COLLECTIONS.md`,
+`LICENSE.txt`, `TOOL-NOTICES.txt` and intermediate `SHA256SUMS` in
+`build/offline-plugin/`. Complete notices for the pinned Go/TinyGo toolchain and
+Extism PDK are retained in `tools/plugin-licenses/`; missing notices fail the build. `scripts/release.py assemble`
+rejects retired assets, extra downloads/cache files, mismatched manifests and
+partial output. The complete distribution retains the core ZIP, source archive,
+`CORE-PROVENANCE.json` and one checksum manifest covering every shipped file.
+The optional native cache importer is built from source; no native thumbnail
+archive or downloaded cart, cache, PICO-8 binary or `bbs.p8pack` is published.
+
+Run `make offline-plugin-test` for native checks. After building, run
+`REQUIRE_PLUGIN_TESTS=1 POCKET_PLUGIN_WASM="$PWD/build/offline-plugin/plugin.wasm" go test ./integration -count=1`
+for actual WASI checks. The fixture harness exercises complete collection
+installation, denied HTTP preservation, hard cancellation and courtesy pacing
+with local HTTP mocks. It has no live-network mode. Keep
+real-game and physical-device verification separate and record unperformed checks.

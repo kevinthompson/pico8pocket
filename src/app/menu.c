@@ -24,6 +24,7 @@ enum menu_screen {
  * only appear when the cart has added them. */
 enum main_row {
     ROW_RESUME,
+    ROW_BREADCRUMB,
     ROW_CART1, ROW_CART2, ROW_CART3, ROW_CART4, ROW_CART5,
     ROW_QUICK_SAVE, ROW_QUICK_LOAD, ROW_STATES, ROW_RESTART, ROW_SELECT_CART,
     ROW_CONTROLS, ROW_DISPLAY, ROW_AUDIO, ROW_LANGUAGE, ROW_INFO, ROW_EXIT,
@@ -263,6 +264,8 @@ static void refresh_states(p8p_menu_t *menu) {
 static int main_rows(const p8p_menu_t *menu, int rows[ROW_COUNT]) {
     int count = 0;
     rows[count++] = ROW_RESUME;
+    if (menu->cart_running && p8p_runtime_breadcrumb(menu->runtime)[0])
+        rows[count++] = ROW_BREADCRUMB;
     for (int slot = 1; slot <= 5; ++slot)
         if (menu->cart_running && p8p_runtime_menu_item(menu->runtime, slot))
             rows[count++] = ROW_CART1 + slot - 1;
@@ -293,6 +296,8 @@ static const char *main_label(const p8p_menu_t *menu, int row) {
     };
     if (row == ROW_RESUME)
         return tr(menu, "RESUME", "ПРОДОЛЖИТЬ");
+    if (row == ROW_BREADCRUMB)
+        return p8p_runtime_breadcrumb(menu->runtime);
     if (row >= ROW_CART1 && row <= ROW_CART5)
         return p8p_runtime_menu_item(menu->runtime, row - ROW_CART1 + 1);
     return menu->settings->language ? ru[row - ROW_QUICK_SAVE] :
@@ -607,6 +612,9 @@ static enum p8p_menu_action update_main(p8p_menu_t *menu,
         return P8P_MENU_NONE;
     switch (row) {
     case ROW_RESUME: return P8P_MENU_CLOSE;
+    case ROW_BREADCRUMB:
+        return p8p_runtime_request_back(runtime) == 0 ?
+               P8P_MENU_CLOSE : P8P_MENU_NONE;
     case ROW_QUICK_SAVE:
         if (p8p_state_save(P8P_STATE_QUICK, &menu->cart_hash, runtime) == 0) {
             refresh_state(menu, P8P_STATE_QUICK);

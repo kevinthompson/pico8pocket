@@ -2340,8 +2340,10 @@ static int api_stat(lua_State *lua) {
         lua_pushnumber(lua, fix32::frombits(0xc000));
         break;
     case 4:
-    case 6:
         lua_pushstring(lua, "");
+        break;
+    case 6:
+        lua_pushstring(lua, runtime->params);
         break;
     case 5:
         push_int(lua, 42);
@@ -2393,8 +2395,13 @@ static int api_stat(lua_State *lua) {
         push_int(lua, 0);
         break;
     case 31:
-    case 100:
         lua_pushstring(lua, "");
+        break;
+    case 100:
+        if (runtime->breadcrumb[0])
+            lua_pushstring(lua, runtime->breadcrumb);
+        else
+            lua_pushnil(lua);
         break;
     case 101:
         lua_pushnil(lua);
@@ -2417,8 +2424,105 @@ static int api_stat(lua_State *lua) {
 }
 
 static int api_run(lua_State *lua) {
-    (void)lua;
+    if (!lua_isnoneornil(lua, 1)) {
+        size_t size;
+        const char *params = luaL_checklstring(lua, 1, &size);
+        if (size >= sizeof(active_runtime->params) || memchr(params, 0, size))
+            return luaL_error(lua, "run parameters too long or contain NUL");
+        memcpy(active_runtime->params, params, size + 1);
+    }
     active_runtime->restart_requested = 1;
+    return 0;
+}
+
+/* These replacements are installed only after legacy permanent numbering. */
+static int api_load_cart(lua_State *lua) {
+    size_t length = 0;
+    const char *id = lua_type(lua, 1) == LUA_TSTRING ?
+        lua_tolstring(lua, 1, &length) : NULL;
+    if (!id || !length || id[0] != '#') {
+        int arguments = lua_gettop(lua);
+        lua_pushvalue(lua, lua_upvalueindex(1));
+        lua_insert(lua, 1);
+        lua_call(lua, arguments, LUA_MULTRET);
+        return lua_gettop(lua);
+    }
+    p8p_runtime_cart_request_t request = {};
+    request.kind = P8P_RUNTIME_CART_REQUEST_LOAD;
+    if (length < 2 || length > sizeof(request.id) || memchr(id, 0, length))
+        return luaL_error(lua, "invalid cart id length");
+    memcpy(request.id, id + 1, length - 1);
+    size_t breadcrumb_size = 0, params_size = 0;
+    const char *breadcrumb = luaL_optlstring(lua, 2, "", &breadcrumb_size);
+    const char *params = luaL_optlstring(lua, 3, "", &params_size);
+    if (breadcrumb_size >= sizeof(request.breadcrumb) ||
+        params_size >= sizeof(request.params) ||
+        memchr(breadcrumb, 0, breadcrumb_size) || memchr(params, 0, params_size))
+        return luaL_error(lua, "cart context too long or contains NUL");
+    memcpy(request.breadcrumb, breadcrumb, breadcrumb_size);
+    memcpy(request.params, params, params_size);
+    active_runtime->cart_request = request;
+    active_runtime->cart_request_pending = 1;
+    active_runtime->cart_halted = 1;
+    return lua_yield(lua, 0);
+}
+
+/* A child coroutine's handoff must also stop the caller of resume(). */
+static int api_resume_cart(lua_State *lua) {
+    int arguments = lua_gettop(lua);
+    lua_pushvalue(lua, lua_upvalueindex(1));
+    lua_insert(lua, 1);
+    lua_call(lua, arguments, LUA_MULTRET);
+    if (active_runtime->cart_halted)
+        return lua_yield(lua, 0);
+    return lua_gettop(lua);
+}
+
+static int api_protected_call_finish(lua_State *lua) {
+    if (active_runtime->cart_halted)
+        return lua_yield(lua, 0);
+    int status = lua_getctx(lua, NULL);
+    if (status != LUA_OK && status != LUA_YIELD)
+        return lua_error(lua);
+    return lua_gettop(lua);
+}
+
+static int api_handoff_error_handler(lua_State *lua) {
+    if (active_runtime->cart_halted)
+        return luaL_error(lua, "cart handoff pending");
+    lua_pushvalue(lua, lua_upvalueindex(1));
+    lua_insert(lua, 1);
+    lua_call(lua, lua_gettop(lua) - 1, LUA_MULTRET);
+    return lua_gettop(lua);
+}
+
+/* Native callbacks such as sort/gsub cannot yield. Even if native pcall
+ * catches that error, the pending handoff stops its caller before return. */
+static int api_protected_call(lua_State *lua) {
+    int arguments = lua_gettop(lua);
+    if (lua_toboolean(lua, lua_upvalueindex(2)) && lua_isfunction(lua, 2)) {
+        lua_pushvalue(lua, 2);
+        lua_pushcclosure(lua, api_handoff_error_handler, 1);
+        lua_replace(lua, 2);
+    }
+    lua_pushvalue(lua, lua_upvalueindex(1));
+    lua_insert(lua, 1);
+    /* Eris records C continuations on protected-call frames. A plain callk
+     * frame loses its continuation when a suspended coroutine is restored. */
+    int status = lua_pcallk(lua, arguments, LUA_MULTRET, 0, 0,
+                            api_protected_call_finish);
+    if (active_runtime->cart_halted)
+        return lua_yield(lua, 0);
+    if (status != LUA_OK)
+        return lua_error(lua);
+    return lua_gettop(lua);
+}
+
+static int api_extcmd(lua_State *lua) {
+    const char *command = lua_tostring(lua, 1);
+    if (command && strcmp(command, "go_back") == 0 &&
+        p8p_runtime_request_back(active_runtime) == 0)
+        return lua_yield(lua, 0);
     return 0;
 }
 
@@ -2775,6 +2879,92 @@ static void register_api(lua_State *lua) {
         lua_register(lua, entry->name, entry->func);
 }
 
+/* Stack: eris, perm, unperm, originals, replacement. Leave replacement. */
+static void append_handoff_permanent(lua_State *lua, int *next) {
+    lua_pushvalue(lua, -1);
+    lua_pushinteger(lua, ++*next);
+    lua_rawset(lua, -6);
+    lua_pushvalue(lua, -1);
+    lua_rawseti(lua, -4, *next);
+}
+
+static int register_handoff_api(lua_State *lua) {
+    lua_getglobal(lua, "eris");
+    lua_getfield(lua, -1, "__p8p_perm");
+    lua_getfield(lua, -2, "__p8p_unperm");
+    lua_getfield(lua, -3, "__p8p_original");
+    int next = (int)lua_rawlen(lua, -2);
+    /* Provide the native compiler alias without changing the old sorted
+     * globals. Its function is already numbered as the original load. */
+    lua_getglobal(lua, "loadstring");
+    int have_loadstring = !lua_isnil(lua, -1);
+    lua_pop(lua, 1);
+    if (!have_loadstring) {
+        lua_getglobal(lua, "load");
+        lua_pushvalue(lua, -1);
+        lua_setfield(lua, -3, "loadstring");
+        lua_setglobal(lua, "loadstring");
+    }
+    const char *names[] = {"load", "extcmd", "coresume"};
+    for (int i = 0; i < 3; ++i) {
+        if (i == 1) {
+            lua_pushcfunction(lua, api_extcmd);
+        } else {
+            lua_getglobal(lua, names[i]);
+            lua_pushcclosure(lua, i == 0 ? api_load_cart : api_resume_cart, 1);
+        }
+        append_handoff_permanent(lua, &next);
+        lua_pushvalue(lua, -1);
+        lua_setfield(lua, -3, names[i]);
+        lua_setglobal(lua, names[i]);
+    }
+    lua_getglobal(lua, "coroutine");
+    lua_getglobal(lua, "coresume");
+    lua_setfield(lua, -2, "resume");
+    lua_pop(lua, 1);
+    /* wrap() normally resumes a child through a private C function. Route
+     * it through the same boundary; returned Lua closures remain saveable. */
+    static const char wrap_lua[] =
+        "local create,resume,pack,unpack,raise=... "
+        "return function(f) local co=create(f) return function(...) "
+        "local r=pack(resume(co,...)) if not r[1] then raise(r[2],2) end "
+        "return unpack(r,2,r.n) end end";
+    if (luaL_loadstring(lua, wrap_lua) != LUA_OK)
+        return -1;
+    lua_getglobal(lua, "cocreate");
+    lua_getglobal(lua, "coresume");
+    lua_getglobal(lua, "table");
+    lua_getfield(lua, -1, "pack");
+    lua_getfield(lua, -2, "unpack");
+    lua_remove(lua, -3);
+    lua_getglobal(lua, "error");
+    if (lua_pcall(lua, 5, 1, 0) != LUA_OK)
+        return -1;
+    append_handoff_permanent(lua, &next);
+    lua_getglobal(lua, "coroutine");
+    lua_pushvalue(lua, -2);
+    lua_setfield(lua, -2, "wrap");
+    lua_pop(lua, 2);
+    const char *protected_names[] = {"pcall", "xpcall"};
+    for (const char *name : protected_names) {
+        lua_getglobal(lua, name);
+        lua_pushboolean(lua, strcmp(name, "xpcall") == 0);
+        lua_pushcclosure(lua, api_protected_call, 2);
+        append_handoff_permanent(lua, &next);
+        lua_pushvalue(lua, -1);
+        lua_setfield(lua, -3, name);
+        lua_setglobal(lua, name);
+    }
+    lua_pushcfunction(lua, api_protected_call_finish);
+    append_handoff_permanent(lua, &next);
+    lua_pop(lua, 1);
+    lua_pushcfunction(lua, api_handoff_error_handler);
+    append_handoff_permanent(lua, &next);
+    lua_pop(lua, 1);
+    lua_pop(lua, 4);
+    return 0;
+}
+
 static void set_thread_error(p8p_runtime_t *runtime, const char *prefix,
                              lua_State *thread) {
     const char *message = thread ? lua_tostring(thread, -1) : NULL;
@@ -2792,6 +2982,45 @@ static void release_cart_thread(p8p_runtime_t *runtime) {
     runtime->cart_thread_active = 0;
 }
 
+extern "C" void p8p_runtime_set_cart_features(p8p_runtime_t *runtime,
+                                              uint32_t features) {
+    if (runtime)
+        runtime->cart_features = features;
+}
+
+extern "C" const p8p_runtime_cart_request_t *p8p_runtime_cart_request(
+    p8p_runtime_t *runtime) {
+    return runtime && runtime->cart_request_pending ? &runtime->cart_request : NULL;
+}
+
+extern "C" void p8p_runtime_clear_cart_request(p8p_runtime_t *runtime) {
+    if (!runtime)
+        return;
+    runtime->cart_request_pending = 0;
+    memset(&runtime->cart_request, 0, sizeof(runtime->cart_request));
+    /* The retired cart cannot continue if the host fails to load its target. */
+    if (runtime->cart_halted && runtime->lua)
+        release_cart_thread(runtime);
+}
+
+extern "C" const char *p8p_runtime_breadcrumb(p8p_runtime_t *runtime) {
+    return runtime ? runtime->breadcrumb : "";
+}
+
+extern "C" const char *p8p_runtime_parameters(p8p_runtime_t *runtime) {
+    return runtime ? runtime->params : "";
+}
+
+extern "C" int p8p_runtime_request_back(p8p_runtime_t *runtime) {
+    if (!runtime || !runtime->breadcrumb[0] || runtime->cart_request_pending)
+        return -1;
+    memset(&runtime->cart_request, 0, sizeof(runtime->cart_request));
+    runtime->cart_request.kind = P8P_RUNTIME_CART_REQUEST_BACK;
+    runtime->cart_request_pending = 1;
+    runtime->cart_halted = 1;
+    return 0;
+}
+
 static int start_init_thread(p8p_runtime_t *runtime) {
     lua_getglobal(runtime->lua, "_init");
     if (!lua_isfunction(runtime->lua, -1)) {
@@ -2805,6 +3034,10 @@ static int start_init_thread(p8p_runtime_t *runtime) {
     runtime->cart_instruction_slices = 0;
     install_service_hook(runtime);
     int status = lua_resume(runtime->cart_thread, runtime->lua, 0);
+    if (runtime->cart_request_pending) {
+        release_cart_thread(runtime);
+        return 0;
+    }
     if (status == LUA_YIELD) {
         runtime->cart_thread_active = 1;
         return 0;
@@ -2862,6 +3095,10 @@ static int start_frame_thread(p8p_runtime_t *runtime) {
     lua_pushboolean(runtime->cart_thread, runtime->draw_frame);
     install_service_hook(runtime);
     int status = lua_resume(runtime->cart_thread, runtime->lua, 2);
+    if (runtime->cart_request_pending) {
+        release_cart_thread(runtime);
+        return 0;
+    }
     if (status == LUA_YIELD) {
         runtime->cart_thread_active = 1;
         return 0;
@@ -2913,13 +3150,59 @@ extern "C" void p8p_runtime_destroy(p8p_runtime_t *runtime) {
 }
 
 extern "C" int p8p_runtime_load(p8p_runtime_t *runtime, const p8p_cart_t *cart) {
+    return p8p_runtime_load_context(runtime, cart, "", "");
+}
+
+struct runtime_load_context_guard {
+    p8p_runtime_t *runtime;
+    char params[256];
+    char breadcrumb[64];
+    bool committed = false;
+    explicit runtime_load_context_guard(p8p_runtime_t *value) : runtime(value) {
+        memcpy(params, value->params, sizeof params);
+        memcpy(breadcrumb, value->breadcrumb, sizeof breadcrumb);
+    }
+    ~runtime_load_context_guard() {
+        if (committed) return;
+        memcpy(runtime->params, params, sizeof params);
+        memcpy(runtime->breadcrumb, breadcrumb, sizeof breadcrumb);
+        runtime->cart_request_pending = 0;
+        runtime->cart_halted = 1;
+    }
+};
+
+extern "C" int p8p_runtime_load_context(p8p_runtime_t *runtime,
+    const p8p_cart_t *cart, const char *params, const char *breadcrumb) {
     if (!runtime || !cart || !cart->lua)
         return -1;
+    if (!params)
+        params = "";
+    if (!breadcrumb)
+        breadcrumb = "";
+    if (strlen(params) >= sizeof(runtime->params) ||
+        strlen(breadcrumb) >= sizeof(runtime->breadcrumb))
+        return -1;
+    char next_params[256], next_breadcrumb[64];
+    strcpy(next_params, params);
+    strcpy(next_breadcrumb, breadcrumb);
+    p8p_cart_hash_t cart_hash;
+    p8p_cart_content_hash(cart, &cart_hash);
+    const p8p_cart_incompatibility_t *incompatible =
+        p8p_cart_find_incompatibility(&cart_hash);
+    if (incompatible && (!incompatible->required_features ||
+        (runtime->cart_features & incompatible->required_features) !=
+            incompatible->required_features)) {
+        snprintf(runtime->error, sizeof(runtime->error),
+                 "%s incompatible.\n%s\n%s", incompatible->title,
+                 incompatible->reason, incompatible->workaround);
+        return P8P_RUNTIME_INCOMPATIBLE_CART;
+    }
     char *cart_lua = (char *)malloc(cart->lua_size + 1);
     if (!cart_lua)
         return -2;
     memcpy(cart_lua, cart->lua, cart->lua_size);
     cart_lua[cart->lua_size] = '\0';
+    runtime_load_context_guard context_guard(runtime);
     cartdata_flush(runtime);
     runtime->cartdata_active = 0;
     runtime->cartdata_dirty = 0;
@@ -2928,6 +3211,10 @@ extern "C" int p8p_runtime_load(p8p_runtime_t *runtime, const p8p_cart_t *cart) 
         lua_close(runtime->lua);
     free(runtime->cart_lua);
     runtime->cart_lua = cart_lua;
+    strcpy(runtime->params, next_params);
+    strcpy(runtime->breadcrumb, next_breadcrumb);
+    runtime->cart_request_pending = 0;
+    runtime->cart_halted = 0;
     runtime->cart_lua_size = cart->lua_size;
     runtime->cart_thread = NULL;
     runtime->cart_thread_ref = LUA_NOREF;
@@ -3000,6 +3287,10 @@ extern "C" int p8p_runtime_load(p8p_runtime_t *runtime, const p8p_cart_t *cart) 
     lua_getfield(runtime->lua, -1, "__p8p_load");
     runtime->restore_ref = luaL_ref(runtime->lua, LUA_REGISTRYINDEX);
     lua_pop(runtime->lua, 1);
+    if (register_handoff_api(runtime->lua) != 0) {
+        set_error(runtime, "handoff API");
+        return -3;
+    }
     /* PICO-8 has no debug library, and carts such as Tetyis use a global
      * named debug as their own flag.  Hide it only after Eris has numbered
      * the built-ins so state files keep the same permanent-object IDs. */
@@ -3019,9 +3310,15 @@ extern "C" int p8p_runtime_load(p8p_runtime_t *runtime, const p8p_cart_t *cart) 
     runtime->cart_thread_ref = luaL_ref(runtime->lua, LUA_REGISTRYINDEX);
     runtime->cart_thread_kind = 0;
     runtime->restart_requested = 0;
+    /* Legacy compressed carts include source terminators in their decoded
+     * byte count. Keep identity/ROM bytes intact and omit only trailing NULs
+     * at the compiler boundary. */
+    size_t compile_size = runtime->cart_lua_size;
+    while (compile_size && runtime->cart_lua[compile_size - 1] == '\0')
+        --compile_size;
     if (!runtime->cart_thread ||
         luaL_loadbufferx(runtime->cart_thread, runtime->cart_lua,
-                         runtime->cart_lua_size, "cart.p8",
+                         compile_size, "cart.p8",
                          "t") != LUA_OK) {
         set_thread_error(runtime, "cart", runtime->cart_thread);
         return -4;
@@ -3029,6 +3326,11 @@ extern "C" int p8p_runtime_load(p8p_runtime_t *runtime, const p8p_cart_t *cart) 
     runtime->cart_instruction_slices = 0;
     install_service_hook(runtime);
     int cart_status = lua_resume(runtime->cart_thread, runtime->lua, 0);
+    if (runtime->cart_request_pending) {
+        release_cart_thread(runtime);
+        context_guard.committed = true;
+        return 0;
+    }
     if (cart_status == LUA_YIELD) {
         runtime->cart_thread_active = 1;
         runtime->target_fps = 30;
@@ -3041,6 +3343,7 @@ extern "C" int p8p_runtime_load(p8p_runtime_t *runtime, const p8p_cart_t *cart) 
         return -4;
     }
     install_service_hook(runtime);
+    context_guard.committed = true;
     return 0;
 }
 
@@ -3099,7 +3402,7 @@ static int restart_current_cart(p8p_runtime_t *runtime) {
     memcpy(cart->rom, runtime->cart_rom, sizeof(cart->rom));
     cart->lua = runtime->cart_lua;
     cart->lua_size = runtime->cart_lua_size;
-    int result = p8p_runtime_load(runtime, cart);
+    int result = p8p_runtime_load_context(runtime, cart, runtime->params, runtime->breadcrumb);
     free(cart);
     return result;
 }
@@ -3121,6 +3424,8 @@ extern "C" int p8p_runtime_step_with_draw(p8p_runtime_t *runtime,
                                             int draw_frame) {
     if (!runtime || !runtime->lua)
         return -1;
+    if (runtime->cart_halted)
+        return 0;
     if (runtime->restart_requested)
         return restart_current_cart(runtime);
     active_runtime = runtime;
@@ -3147,6 +3452,10 @@ extern "C" int p8p_runtime_step_with_draw(p8p_runtime_t *runtime,
         int thread_kind = runtime->cart_thread_kind;
         runtime->cart_instruction_slices = 0;
         int status = lua_resume(runtime->cart_thread, runtime->lua, 0);
+        if (runtime->cart_request_pending) {
+            release_cart_thread(runtime);
+            return 0;
+        }
         if (status == LUA_YIELD)
             return 0;
         if (status != LUA_OK) {
@@ -3235,9 +3544,13 @@ extern "C" int p8p_runtime_save_state(p8p_runtime_t *runtime, void **data,
 
     if (!runtime || !runtime->lua || !data || !size)
         return -1;
-    cartdata_flush(runtime);
     *data = NULL;
     *size = 0;
+    if (runtime->cart_halted) {
+        snprintf(runtime->error, sizeof(runtime->error), "save state: cart handoff pending");
+        return -1;
+    }
+    cartdata_flush(runtime);
     active_runtime = runtime;
     lua_sethook(runtime->lua, NULL, 0, 0);
     lua_rawgeti(runtime->lua, LUA_REGISTRYINDEX, runtime->persist_ref);
@@ -3255,12 +3568,12 @@ extern "C" int p8p_runtime_save_state(p8p_runtime_t *runtime, void **data,
     }
     audio_size = p8p_audio_state_size();
     if (lua_size > UINT32_MAX || audio_size > UINT32_MAX ||
-        lua_size > SIZE_MAX - sizeof(header) - sizeof(fixed) - audio_size) {
+        lua_size > SIZE_MAX - sizeof(header) - sizeof(*fixed) - audio_size - sizeof(runtime->params)) {
         lua_pop(runtime->lua, 1);
         snprintf(runtime->error, sizeof(runtime->error), "save state: too large");
         return -4;
     }
-    total_size = sizeof(header) + sizeof(*fixed) + audio_size + lua_size;
+    total_size = sizeof(header) + sizeof(*fixed) + audio_size + sizeof(runtime->params) + lua_size;
     output = (uint8_t *)malloc(total_size);
     if (!output) {
         lua_pop(runtime->lua, 1);
@@ -3268,7 +3581,7 @@ extern "C" int p8p_runtime_save_state(p8p_runtime_t *runtime, void **data,
         return -5;
     }
     memcpy(header.magic, runtime_state_magic, sizeof(header.magic));
-    header.version = 1;
+    header.version = 2;
     header.fixed_size = (uint32_t)sizeof(*fixed);
     header.audio_size = (uint32_t)audio_size;
     header.lua_size = (uint32_t)lua_size;
@@ -3283,11 +3596,36 @@ extern "C" int p8p_runtime_save_state(p8p_runtime_t *runtime, void **data,
         return -6;
     }
     memcpy(output + sizeof(header) + sizeof(*fixed) + audio_size,
+           runtime->params, sizeof(runtime->params));
+    memcpy(output + sizeof(header) + sizeof(*fixed) + audio_size + sizeof(runtime->params),
            lua_blob, lua_size);
     lua_pop(runtime->lua, 1);
     *data = output;
     *size = total_size;
     return 0;
+}
+
+/* V1 carts could save aliases of native resume/pcall. Upgrade just those
+ * read-side aliases during unpersist; v2 wrapper upvalues still require the
+ * original native functions, and the old source compiler stays untouched. */
+static void map_legacy_handoff_aliases(lua_State *lua, int native_values) {
+    lua_getglobal(lua, "eris");
+    lua_getfield(lua, -1, "__p8p_perm");
+    lua_getfield(lua, -2, "__p8p_unperm");
+    lua_getfield(lua, -3, "__p8p_original");
+    const char *names[] = {"coresume", "pcall", "xpcall"};
+    for (const char *name : names) {
+        lua_getfield(lua, -1, name);
+        lua_getupvalue(lua, -1, 1);
+        lua_pushvalue(lua, -1);
+        lua_rawget(lua, -6);
+        int id = (int)lua_tointeger(lua, -1);
+        lua_pop(lua, 1);
+        lua_pushvalue(lua, native_values ? -1 : -2);
+        lua_rawseti(lua, -5, id);
+        lua_pop(lua, 2);
+    }
+    lua_pop(lua, 4);
 }
 
 extern "C" int p8p_runtime_load_state(p8p_runtime_t *runtime,
@@ -3303,37 +3641,57 @@ extern "C" int p8p_runtime_load_state(p8p_runtime_t *runtime,
         return -1;
     memcpy(&header, input, sizeof(header));
     if (memcmp(header.magic, runtime_state_magic, sizeof(header.magic)) != 0 ||
-        header.version != 1 || header.fixed_size != sizeof(*fixed) ||
+        (header.version != 1 && header.version != 2) || header.fixed_size != sizeof(*fixed) ||
         header.audio_size != p8p_audio_state_size()) {
         snprintf(runtime->error, sizeof(runtime->error), "load state: incompatible data");
         return -2;
     }
     expected = sizeof(header) + (size_t)header.fixed_size +
-               (size_t)header.audio_size + (size_t)header.lua_size;
-    if (expected != size) {
+               (size_t)header.audio_size +
+               (header.version == 2 ? sizeof(runtime->params) : 0);
+    if (header.lua_size > SIZE_MAX - expected ||
+        expected + (size_t)header.lua_size != size) {
         snprintf(runtime->error, sizeof(runtime->error), "load state: truncated data");
         return -3;
     }
     fixed = (const p8p_runtime_fixed_state *)(input + sizeof(header));
     audio = input + sizeof(header) + header.fixed_size;
-    lua_blob = audio + header.audio_size;
+    const char *saved_params = (const char *)(audio + header.audio_size);
+    if (header.version == 2 && !memchr(saved_params, 0, sizeof(runtime->params))) {
+        snprintf(runtime->error, sizeof(runtime->error), "load state: invalid parameters");
+        return -3;
+    }
+    lua_blob = audio + header.audio_size + (header.version == 2 ? sizeof(runtime->params) : 0);
     active_runtime = runtime;
     lua_sethook(runtime->lua, NULL, 0, 0);
+    if (header.version == 1)
+        map_legacy_handoff_aliases(runtime->lua, 0);
     lua_rawgeti(runtime->lua, LUA_REGISTRYINDEX, runtime->restore_ref);
     lua_pushlstring(runtime->lua, (const char *)lua_blob, header.lua_size);
     int restore_status = lua_pcall(runtime->lua, 1, 0, 0);
+    if (header.version == 1)
+        map_legacy_handoff_aliases(runtime->lua, 1);
     install_service_hook(runtime);
     if (restore_status != LUA_OK) {
         set_error(runtime, "load state");
         return -4;
     }
+    if (header.version == 2)
+        memcpy(runtime->params, saved_params, sizeof(runtime->params));
+    else
+        runtime->params[0] = 0;
+    int retire_thread = runtime->cart_halted;
+    runtime->cart_request_pending = 0;
+    runtime->cart_halted = 0;
+    runtime->restart_requested = 0;
     restore_fixed_state(runtime, fixed);
     if (p8p_audio_load_state(runtime->audio, runtime->ram, audio,
                              header.audio_size) != 0)
         return -5;
     /* A frame suspended in flip() belongs to the pre-load state; start the
      * next frame afresh instead of resuming it. */
-    if (runtime->cart_thread_active && runtime->cart_thread_kind == 2)
+    if (runtime->cart_thread_active &&
+        (runtime->cart_thread_kind == 2 || retire_thread))
         release_cart_thread(runtime);
     return 0;
 }
@@ -3394,13 +3752,34 @@ extern "C" int p8p_runtime_menu_select(p8p_runtime_t *runtime, int slot,
     }
     /* Called from the host loop, outside any C function, so use the checked
      * API push rather than push_int. */
-    lua_pushnumber(runtime->lua, fix32(buttons));
-    if (lua_pcall(runtime->lua, 1, 1, 0) != LUA_OK) {
-        set_error(runtime, "menu item");
-        return -1;
+    if (runtime->cart_halted) {
+        lua_pop(runtime->lua, 1);
+        return 0;
     }
-    keep_open = !choose || lua_toboolean(runtime->lua, -1);
-    lua_pop(runtime->lua, 1);
+    lua_State *thread = lua_newthread(runtime->lua);
+    int reference = luaL_ref(runtime->lua, LUA_REGISTRYINDEX);
+    lua_xmove(runtime->lua, thread, 1);
+    lua_pushnumber(thread, fix32(buttons));
+    int status = lua_resume(thread, runtime->lua, 1);
+    /* Menu callbacks formerly ran on the main thread, where flip() and the
+     * cooperative stubs returned immediately. Drain ordinary yields here while
+     * still stopping at a cart handoff; bound explicit yield loops. */
+    for (int resumes = 1; status == LUA_YIELD &&
+         !runtime->cart_request_pending && resumes < 1024; ++resumes) {
+        lua_settop(thread, 0);
+        status = lua_resume(thread, runtime->lua, 0);
+    }
+    if (runtime->cart_request_pending) keep_open = 0;
+    else if (status == LUA_YIELD) {
+        snprintf(runtime->error, sizeof(runtime->error),
+                 "menu item: callback yielded too many times");
+        keep_open = -1;
+    } else if (status != LUA_OK) {
+        set_thread_error(runtime, "menu item", thread);
+        keep_open = -1;
+    } else keep_open = !choose ||
+        (lua_gettop(thread) > 0 && lua_toboolean(thread, 1));
+    luaL_unref(runtime->lua, LUA_REGISTRYINDEX, reference);
     return keep_open;
 }
 

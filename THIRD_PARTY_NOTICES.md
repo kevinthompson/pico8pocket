@@ -36,15 +36,14 @@ products and technologies of Analogue. Pico8Pocket is an independent,
 unofficial compatibility project and is not affiliated with, endorsed by, or
 sponsored by Lexaloffle Games LLP or Analogue.
 
-## Optional thumbnail tools
+## Offline collections plugin
 
-The independent Go thumbnail tooling is MIT-licensed. Its compiled distributions
-include Go and TinyGo runtime code and the Extism Go PDK; compiler runtime
-builtins may be linked by TinyGo. Their license texts are retained in
-`tools/thumbnail-licenses/` and bundled as `TOOL-NOTICES.txt`. The Extism host
-SDK and wazero are test-only dependencies, not included in the native CLI.
+The independent Rust offline installer is MIT-licensed. Its WASI binary includes
+Rust standard-library code and locked dependencies including Serde, png, crc32fast
+and the Extism Rust PDK. `scripts/plugin-notices.py` collects license and notice
+texts from the resolved crate sources and matching Rust standard library into
+release `TOOL-NOTICES.txt`. The two Cargo.lock files record exact dependencies;
+the Extism host SDK is used only by the test harness and is not shipped.
 
-Sources: Go 1.25+ (BSD-3-Clause), TinyGo 0.43.0 (BSD-3-Clause),
-Extism go-pdk 1.1.3 (BSD-3-Clause), compiler-rt (Apache-2.0 with LLVM exceptions
-and legacy license notices as reproduced). No Butterscotch implementation
-source is incorporated into these tools.
+No Go, TinyGo, or thumbnail-generator binary is included in the new tool assets.
+No PICO-8 executable, downloaded cart or generated offline bundle is included.

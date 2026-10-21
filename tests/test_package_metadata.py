@@ -61,7 +61,7 @@ class PackageMetadataTests(unittest.TestCase):
         candidates = ['game.p8', 'game.p8.png', 'pico8pocket.json', 'app.elf', 'game.zip']
         accepted = [name for name in candidates if any(name.endswith('.' + ext) for ext in selected['extensions'])]
         self.assertEqual(accepted, ['game.p8', 'game.p8.png'])
-        self.assertEqual([slot['id'] for slot in slots], [0,1,2,3,4,5,6,7,8,10,11,12,13,14,15,16,17,18,19])
+        self.assertEqual([slot['id'] for slot in slots], [0,1,2,3,4,5,6,7,8,10,11,12,13,14,15,16,17,18,19,20])
         self.assertEqual(slots[0]['filename'], 'pico8pocket.json')
         self.assertEqual(slots[0]['parameters'], 275)
         self.assertEqual(selected['parameters'], 129)
@@ -71,6 +71,15 @@ class PackageMetadataTests(unittest.TestCase):
                 self.assertNotIn('extensions', slot)
         instance = json.loads((self.tree / 'Assets/pico8/zenibako.pico8/pico8pocket.json').read_text())['instance']
         names = {slot['id']: slot['filename'] for slot in instance['data_slots']}
+        offline = slots[-1]
+        self.assertEqual(offline['id'], 20)
+        self.assertIs(offline['required'], False)
+        self.assertEqual(offline['parameters'], 8)
+        self.assertIs(offline['deferload'], True)
+        self.assertEqual(offline['filename'], 'cards/bbs.p8pack')
+        self.assertEqual(offline['extensions'], ['p8pack'])
+        self.assertEqual(names[20], 'cards/bbs.p8pack')
+        self.assertFalse((self.tree / 'Assets/pico8/common/cards/bbs.p8pack').exists())
         self.assertEqual(names[8], 'pico8pocket.cfg')
         for index in range(10):
             self.assertEqual(names[10+index], f'pico8pocket_{index}.sav')

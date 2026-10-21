@@ -23,10 +23,6 @@ enum p8p_state_slot {
     P8P_STATE_NUMBER_1 = 1
 };
 
-typedef struct p8p_cart_hash {
-    uint8_t bytes[16];
-} p8p_cart_hash_t;
-
 typedef struct p8p_state_meta {
     int exists;
     uint64_t sequence;
@@ -35,7 +31,6 @@ typedef struct p8p_state_meta {
     uint8_t thumbnail[P8P_STATE_THUMB_SIZE];
 } p8p_state_meta_t;
 
-void p8p_cart_content_hash(const p8p_cart_t *cart, p8p_cart_hash_t *hash);
 int p8p_state_save(int slot, const p8p_cart_hash_t *cart_hash,
                    p8p_runtime_t *runtime);
 int p8p_state_load(int slot, const p8p_cart_hash_t *cart_hash,
