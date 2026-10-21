@@ -58,7 +58,7 @@ func respond(t *testing.T, s *Session, c choiceScreen, v string) choiceScreen {
 }
 func actionPath(action string) []string {
 	if action == "Installed / cache status" {
-		return []string{"Status"}
+		return []string{"Library", "Status"}
 	}
 	if action == "Browse recent carts" {
 		return []string{"Browse BBS", "Recent"}
@@ -123,7 +123,7 @@ func TestMenuProtocol(t *testing.T) {
 	p, h := roots(t)
 	s := New(p, h, nil, nil)
 	c := start(t, s)
-	want := "Browse BBS|Collections|Status|Exit"
+	want := "Browse BBS|Collections|Library|Exit"
 	if strings.Join(c.Choice.Choices, "|") != want {
 		t.Fatal(c)
 	}
@@ -137,6 +137,7 @@ func TestMenuProtocol(t *testing.T) {
 	if _, e := s.Handle(answer(c, "Exit")); e == nil {
 		t.Fatal("replay accepted")
 	}
+	next = respond(t, s, next, "Back")
 	b, e := s.Handle(answer(next, "Exit"))
 	if e != nil || string(b) != `"Exit"` {
 		t.Fatalf("%s %v", b, e)
@@ -192,7 +193,7 @@ func TestCacheOnlyInstallMergesAndReinstalls(t *testing.T) {
 	if !bytes.Equal(pack, read(t, filepath.Join(p, offline.PackPath))) {
 		t.Fatal("reinstall changed pack")
 	}
-	if !bytes.Equal(b, read(t, filepath.Join(p, offline.CartPath, "15133.p8.png"))) {
+	if !bytes.Equal(b, read(t, filepath.Join(p, offline.CartPath, "celeste [15133].p8.png"))) {
 		t.Fatal("standalone differs")
 	}
 }
@@ -357,7 +358,7 @@ func TestMissingCartPreventsPartialPublication(t *testing.T) {
 	if !bytes.Equal(old, read(t, filepath.Join(p, offline.PackPath))) {
 		t.Fatal("partial collection published")
 	}
-	if _, e = os.Stat(filepath.Join(p, offline.CartPath, catalog[0].ID+".p8.png")); !os.IsNotExist(e) {
+	if _, e = os.Stat(filepath.Join(p, offline.CartPath, catalog[0].Name+" ["+catalog[0].ID+"].p8.png")); !os.IsNotExist(e) {
 		t.Fatal("standalone written before preparation complete")
 	}
 	// Successful first downloads remain usable; a retry requests only the failed cart.
@@ -405,7 +406,7 @@ func TestCancelledBeforePublicationPreservesPack(t *testing.T) {
 	if !bytes.Equal(old, read(t, filepath.Join(p, offline.PackPath))) {
 		t.Fatal("cancelled final publication")
 	}
-	if bytes.Equal(fixture(t, 1), read(t, filepath.Join(p, offline.CartPath, "mot_sorcerergame.p8.png"))) {
+	if bytes.Equal(fixture(t, 1), read(t, filepath.Join(p, offline.CartPath, "Trail of the Sorcerer companion [mot_sorcerergame].p8.png"))) {
 		t.Fatal("test did not reach standalone publication")
 	}
 }

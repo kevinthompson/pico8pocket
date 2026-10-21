@@ -39,6 +39,13 @@ func fetchListing(order bbs.Order, page int, search string) (int, []byte, string
 	}
 	return fetchURL(url, bbs.MaxListing)
 }
+func fetchDetails(id string) (int, []byte, string, error) {
+	url, err := bbs.DetailURL(id)
+	if err != nil {
+		return 0, nil, "", err
+	}
+	return fetchURL(url, bbs.MaxListing)
+}
 func fetchURL(url string, limit int) (int, []byte, string, error) {
 	request := pdk.NewHTTPRequest(pdk.MethodGet, url)
 	response := request.Send()
@@ -72,6 +79,7 @@ func newSession() *pocketplugin.Session {
 	// Absolute preopen names avoid depending on WASI directory enumeration order.
 	session := pocketplugin.New("/pocket", "/host", logMessage, fetchCart)
 	session.List = fetchListing
+	session.Details = fetchDetails
 	session.OpenURL = func(url string) error {
 		const prefix = "https://www.lexaloffle.com/bbs/?pid="
 		if !strings.HasPrefix(url, prefix) || offline.ValidateID(strings.TrimPrefix(url, prefix)) != nil {

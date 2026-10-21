@@ -182,12 +182,15 @@ replace the former Cart Thumbnails plugin in the next complete release, using
 the same repository URL. Existing SD artwork is preserved. The native helper can install a verified local cache
 before publication; see the linked instructions. Once distributed, choose
 **Collections**, select **Pico Arcade**, **Sorcerer**, or **Both collections**,
-then **Install**. **Refresh downloads** retrieves fresh copies; **Status** reports
-installed and cached counts.
+then **Install**. **Refresh downloads** retrieves fresh copies; **Library → Status** reports installed and cached counts. **Library → Tidy
+filenames** updates existing verified downloads to `Title [BBS ID].p8.png`, using
+saved metadata or paced BBS title lookups. Unmatched files and conflicts are preserved.
 Downloads are cached and paced; a rate limit stops the batch so it can resume
 later from the cache. No PICO-8 installation is needed for these downloads.
 
-The plugin writes standalone carts into `Assets/pico8/common/cards/bbs/` and
+Standalone filenames use `Title [BBS ID].p8.png`; cache and bundle keys retain
+the original IDs so collection handoffs still match. The plugin writes standalone
+carts into `Assets/pico8/common/cards/bbs/` and
 the core's offline bundle into `Assets/pico8/common/cards/bbs.p8pack`. Keep your
 launcher carts in the normal card directory and select them as usual. Install
 the matching complete collection to clear its launch restriction. The core

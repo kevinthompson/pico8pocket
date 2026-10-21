@@ -102,3 +102,27 @@ func TestSearchURLPreservesTextWithoutChangingSource(t *testing.T) {
 		}
 	}
 }
+
+const detailSample = "<script id=cart_data_script>\npdat=[['fixture_cart-0',42,`Public Game Title`,\"thumb\",256,170,\"date\",7,\"Author\",\"date\",0,\"\",1,2,90001,7,2,'0',[],0,1,,``,``],];</script>"
+
+func TestDetailMetadataBindsRequestedPostAndFallsBackToPublicTitle(t *testing.T) {
+	cart, err := ParseDetail([]byte(detailSample), "90001")
+	if err != nil || cart.Title != "Public Game Title" || cart.ID != "90001" {
+		t.Fatal(cart, err)
+	}
+	for _, bad := range []string{
+		strings.Replace(detailSample, "90001,7,2", "90002,7,2", 1),
+		strings.Replace(detailSample, "90001,7,2", "90001.1,7,2", 1),
+		strings.Replace(detailSample, "90001,7,2", "90001,8,2", 1),
+		strings.Replace(detailSample, "90001,7,2", "90001,7,1", 1),
+		strings.Replace(detailSample, "'fixture_cart-0'", "'../bad'", 1),
+		strings.Replace(detailSample, "`Public Game Title`", "evil()", 1),
+	} {
+		if _, err := ParseDetail([]byte(bad), "90001"); err == nil {
+			t.Fatalf("accepted unbound detail: %s", bad)
+		}
+	}
+	if _, err := DetailURL("../escape"); err == nil {
+		t.Fatal("unsafe detail URL")
+	}
+}

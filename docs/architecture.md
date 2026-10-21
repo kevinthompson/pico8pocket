@@ -127,8 +127,14 @@ installs its original PNG as a standalone asset; it does not modify the dependen
 bundle. Browser state persists across Extism calls; the WASI adapter constructs
 fixed same-host URLs from validated listing modes/pages, bounded URL-encoded search terms and numeric cart IDs.
 Pocket Sync text prompts collect search terms; prompt kind, menu position and query
-persist across Extism calls. Home separates Browse BBS, Collections and Status,
-and collection selection precedes Install or Refresh downloads.
+persist across Extism calls. Home separates Browse BBS, Collections and Library,
+and collection selection precedes Install or Refresh downloads. Standalone SD
+assets use sanitized title-plus-ID filenames while cache and bundle keys stay ID
+based. Library holds status and an explicit tidy operation. Byte-bound title
+metadata is stored beside the host cache; missing numeric-ID titles use a bounded
+public BBS detail parser that checks the exact post ID and PICO-8 release category.
+Tidy verifies file bytes, preserves conflicts, and uses exclusive publication
+before removing an original filename. It never modifies the dependency bundle.
 
 
 `compatibility/offline-carts.json` is the shared curated catalog. A generated C

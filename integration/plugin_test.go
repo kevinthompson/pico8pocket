@@ -154,7 +154,7 @@ func answer(t *testing.T, m choice, action string) []byte {
 func (h *harness) answer(m choice, action string) []byte {
 	steps := []string{action}
 	if action == "Installed / cache status" {
-		steps = []string{"Status"}
+		steps = []string{"Library", "Status"}
 	}
 	if action == "Browse popular carts" {
 		steps = []string{"Browse BBS", "Popular"}
@@ -172,6 +172,17 @@ func (h *harness) answer(m choice, action string) []byte {
 			op = "Refresh downloads"
 		}
 		steps = []string{"Collections", collection, op}
+	}
+	if action == "Exit" {
+		found := false
+		for _, c := range m.Choice.Choices {
+			if c == "Exit" {
+				found = true
+			}
+		}
+		if !found {
+			steps = []string{"Back", "Exit"}
+		}
 	}
 	for _, step := range steps[:len(steps)-1] {
 		m = menu(h.t, h.call("handle_response", answer(h.t, m, step)))
@@ -267,7 +278,7 @@ func TestCompiledPlugin(t *testing.T) {
 				if err != nil || !bytes.Equal(got, want) {
 					t.Fatalf("cache changed for %s: %v", id, err)
 				}
-				got, err = os.ReadFile(filepath.Join(h.pocket, offline.CartPath, id+".p8.png"))
+				got, err = os.ReadFile(installedCart(t, h.pocket, id))
 				if err != nil || !bytes.Equal(got, want) {
 					t.Fatalf("standalone cartridge changed for %s: %v", id, err)
 				}
@@ -531,7 +542,7 @@ func TestCompiledPluginBrowseAndDownload(t *testing.T) {
 	}
 	// A separate host call must preserve completion when opening the cart's page.
 	done = menu(t, h.call("handle_response", h.answer(done, "Open BBS page")))
-	if !strings.Contains(done.Choice.Query, "Downloaded Fixture cart") || !strings.Contains(done.Choice.Query, "bbs/90001.p8.png") || strings.Contains(done.Choice.Query, "Download this cart") {
+	if !strings.Contains(done.Choice.Query, "Downloaded Fixture cart") || !strings.Contains(done.Choice.Query, "bbs/Fixture cart [90001].p8.png") || strings.Contains(done.Choice.Query, "Download this cart") {
 		t.Fatal(done)
 	}
 	for _, option := range done.Choice.Choices {
@@ -545,7 +556,7 @@ func TestCompiledPluginBrowseAndDownload(t *testing.T) {
 	if gap := times[1].Sub(times[0]); gap < 15*time.Second {
 		t.Fatalf("listing/cart request interval %v", gap)
 	}
-	standalone, err := os.ReadFile(filepath.Join(h.pocket, offline.CartPath, "90001.p8.png"))
+	standalone, err := os.ReadFile(filepath.Join(h.pocket, offline.CartPath, "Fixture cart [90001].p8.png"))
 	if err != nil || !bytes.Equal(standalone, png) {
 		t.Fatalf("download changed bytes: %v", err)
 	}
@@ -627,7 +638,7 @@ func TestCompiledPluginSearchTextPaginationAndDownload(t *testing.T) {
 			t.Fatalf("search request cooldown %v", gap)
 		}
 	}
-	got, err := os.ReadFile(filepath.Join(h.pocket, offline.CartPath, "90001.p8.png"))
+	got, err := os.ReadFile(filepath.Join(h.pocket, offline.CartPath, "Fixture Game [90001].p8.png"))
 	if err != nil || !bytes.Equal(got, png) || !bytes.Equal(h.pack(), oldPack) {
 		t.Fatalf("incorrect search download or changed pack: %v", err)
 	}
@@ -638,6 +649,103 @@ func TestCompiledPluginSearchTextPaginationAndDownload(t *testing.T) {
 	}
 	if out := h.call("handle_response", []byte(`"Kill"`)); string(out) != `"Exit"` {
 		t.Fatalf("Text cancellation: %s", out)
+	}
+	h.assertPreserved()
+}
+
+func installedCart(t *testing.T, pocket, id string) string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(pocket, offline.CartPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), " ["+id+"].p8.png") {
+			names = append(names, entry.Name())
+		}
+	}
+	if len(names) != 1 {
+		t.Fatalf("expected one titled cart for %s: %v", id, names)
+	}
+	return filepath.Join(pocket, offline.CartPath, names[0])
+}
+
+func TestCompiledPluginLibraryTidiesLegacyFilesWithBBSMetadata(t *testing.T) {
+	h := newHarness(t, "host", "www.lexaloffle.com")
+	png := testcart.PNG(82)
+	oldPack := []byte("unchanged dependency bundle")
+	h.seed(offline.Carts{"90001": png, "15133": png})
+	for _, id := range []string{"90001", "15133"} {
+		write(t, filepath.Join(h.pocket, offline.CartPath, id+".p8.png"), png)
+	}
+	write(t, filepath.Join(h.pocket, offline.PackPath), oldPack)
+	const detail = "<script id=cart_data_script>\npdat=[['fixture_cart-0',42,`Public Game Title`,\"thumb\",256,170,\"date\",7,\"Author\",\"date\",0,\"\",1,2,90001,7,2,'0',[],0,1,,``,``],];</script>"
+	previous := http.DefaultClient
+	var requests []time.Time
+	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != "GET" || r.URL.Scheme != "https" || r.URL.Host != "www.lexaloffle.com" {
+			t.Fatal(r.URL)
+		}
+		requests = append(requests, time.Now())
+		body := []byte("<script id=cart_data_script>pdat=[];</script>")
+		if len(requests) == 1 {
+			if r.URL.Path != "/bbs/lister.php" {
+				t.Fatal(r.URL)
+			}
+		} else if len(requests) == 2 {
+			if r.URL.Path != "/bbs/" || r.URL.Query().Get("pid") != "90001" {
+				t.Fatal(r.URL)
+			}
+			body = []byte(detail)
+		} else {
+			t.Fatalf("unexpected extra request: %s", r.URL)
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: r}, nil
+	})}
+	t.Cleanup(func() { http.DefaultClient = previous })
+	main := menu(t, h.call("start", nil))
+	browse := menu(t, h.call("handle_response", answer(t, main, "Browse BBS")))
+	list := menu(t, h.call("handle_response", answer(t, browse, "Recent")))
+	main = menu(t, h.call("handle_response", answer(t, list, "Back to main menu")))
+	library := menu(t, h.call("handle_response", answer(t, main, "Library")))
+	done := menu(t, h.call("handle_response", answer(t, library, "Tidy filenames")))
+	if !strings.Contains(done.Choice.Query, "Renamed 2") || len(requests) != 2 {
+		t.Fatal(done, requests)
+	}
+	if gap := requests[1].Sub(requests[0]); gap < 15*time.Second {
+		t.Fatalf("metadata request interval %v", gap)
+	}
+	for _, name := range []string{"Public Game Title [90001].p8.png", "celeste [15133].p8.png"} {
+		got, err := os.ReadFile(filepath.Join(h.pocket, offline.CartPath, name))
+		if err != nil || !bytes.Equal(got, png) {
+			t.Fatal(name, err)
+		}
+	}
+	for _, id := range []string{"90001", "15133"} {
+		if _, err := os.Stat(filepath.Join(h.pocket, offline.CartPath, id+".p8.png")); !os.IsNotExist(err) {
+			t.Fatal("legacy name not removed", id, err)
+		}
+	}
+	title, err := offline.CachedTitle(h.host, "90001", png)
+	if err != nil || title != "Public Game Title" {
+		t.Fatal(title, err)
+	}
+	done = menu(t, h.call("handle_response", answer(t, done, "Tidy filenames")))
+	if !strings.Contains(done.Choice.Query, "already tidy 2") || len(requests) != 2 {
+		t.Fatal(done, requests)
+	}
+	if err := offline.RememberTitle(h.host, "90004", "Case Game", png); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(h.pocket, offline.CartPath, "CASE GAME [90004].p8.png"), png)
+	done = menu(t, h.call("handle_response", answer(t, done, "Tidy filenames")))
+	caseData, err := os.ReadFile(filepath.Join(h.pocket, offline.CartPath, "Case Game [90004].p8.png"))
+	if err != nil || !bytes.Equal(caseData, png) {
+		t.Fatal("case-only tidy lost the cart", done, err)
+	}
+	if !bytes.Equal(h.pack(), oldPack) {
+		t.Fatal("tidy modified dependency bundle")
 	}
 	h.assertPreserved()
 }

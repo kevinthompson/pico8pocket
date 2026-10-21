@@ -89,7 +89,7 @@ func TestBrowsePersistsSelectionAndDownloadsOnlyStandalone(t *testing.T) {
 	if strings.Contains(done.Choice.Query, "Download this cart") {
 		t.Fatal("completed download still asks for confirmation")
 	}
-	if !bytes.Equal(read(t, filepath.Join(p, offline.CartPath, "90001.p8.png")), data) || !bytes.Equal(read(t, offline.CachePath(h, "90001")), data) {
+	if !bytes.Equal(read(t, filepath.Join(p, offline.CartPath, "Fixture Game [90001].p8.png")), data) || !bytes.Equal(read(t, offline.CachePath(h, "90001")), data) {
 		t.Fatal("download bytes changed")
 	}
 	if !bytes.Equal(read(t, filepath.Join(p, offline.PackPath)), old) {
@@ -106,7 +106,7 @@ func TestBrowsePersistsSelectionAndDownloadsOnlyStandalone(t *testing.T) {
 		t.Fatal(err)
 	}
 	done = respond(t, completed, done, "Open BBS page")
-	if !strings.Contains(done.Choice.Query, "Downloaded Fixture Game") || !strings.Contains(done.Choice.Query, "bbs/90001.p8.png") {
+	if !strings.Contains(done.Choice.Query, "Downloaded Fixture Game") || !strings.Contains(done.Choice.Query, "bbs/Fixture Game [90001].p8.png") {
 		t.Fatal(done)
 	}
 	for _, choice := range done.Choice.Choices {

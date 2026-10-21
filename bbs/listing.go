@@ -74,33 +74,11 @@ func Parse(data []byte, page int) (Page, error) {
 	if page < 1 || page > MaxPage || len(data) > MaxListing || !utf8.Valid(data) {
 		return result, fmt.Errorf("invalid or oversized BBS listing")
 	}
-	source := string(data)
-	start := scriptStart.FindStringIndex(source)
-	if start == nil {
-		return result, fmt.Errorf("BBS cart metadata missing")
-	}
-	script := source[start[1]:]
-	end := strings.Index(strings.ToLower(script), "</script>")
-	if end < 0 {
-		return result, fmt.Errorf("BBS cart metadata truncated")
-	}
-	script = script[:end]
-	at := dataStart.FindStringIndex(script)
-	if at == nil {
-		return result, fmt.Errorf("BBS cart array missing")
-	}
-	reader := literalReader{source: script[at[1]-1:]}
-	value, err := reader.value(0)
+	rows, err := parseRows(data)
 	if err != nil {
-		return result, fmt.Errorf("BBS metadata: %w", err)
+		return result, err
 	}
-	if tail := strings.TrimSpace(reader.source[reader.pos:]); !strings.HasPrefix(tail, ";") {
-		return result, fmt.Errorf("invalid BBS array terminator")
-	}
-	rows, ok := value.([]any)
-	if !ok || len(rows) > 60 {
-		return result, fmt.Errorf("invalid BBS cart array")
-	}
+	source := string(data)
 	seen := map[string]bool{}
 	for _, value := range rows {
 		row, ok := value.([]any)
@@ -311,4 +289,111 @@ func (r *literalReader) hexRune() (rune, error) {
 	n, err := strconv.ParseUint(r.source[r.pos:r.pos+4], 16, 16)
 	r.pos += 4
 	return rune(n), err
+}
+
+func parseRows(data []byte) ([]any, error) {
+	if len(data) > MaxListing || !utf8.Valid(data) {
+		return nil, fmt.Errorf("invalid or oversized BBS metadata")
+	}
+	source := string(data)
+	start := scriptStart.FindStringIndex(source)
+	if start == nil {
+		return nil, fmt.Errorf("BBS cart metadata missing")
+	}
+	script := source[start[1]:]
+	end := strings.Index(strings.ToLower(script), "</script>")
+	if end < 0 {
+		return nil, fmt.Errorf("BBS cart metadata truncated")
+	}
+	script = script[:end]
+	at := dataStart.FindStringIndex(script)
+	if at == nil {
+		return nil, fmt.Errorf("BBS cart array missing")
+	}
+	reader := literalReader{source: script[at[1]-1:]}
+	value, err := reader.value(0)
+	if err != nil {
+		return nil, fmt.Errorf("BBS metadata: %w", err)
+	}
+	if tail := strings.TrimSpace(reader.source[reader.pos:]); !strings.HasPrefix(tail, ";") {
+		return nil, fmt.Errorf("invalid BBS array terminator")
+	}
+	rows, ok := value.([]any)
+	if !ok || len(rows) > 60 {
+		return nil, fmt.Errorf("invalid BBS cart array")
+	}
+	return rows, nil
+}
+
+// DetailURL restricts legacy-file metadata lookups to numeric public BBS posts.
+func DetailURL(id string) (string, error) {
+	if !numericID(id) {
+		return "", fmt.Errorf("invalid BBS post ID")
+	}
+	n, err := strconv.ParseUint(id, 10, 64)
+	if err != nil || n > 9007199254740991 {
+		return "", fmt.Errorf("BBS post ID exceeds metadata numeric range")
+	}
+	return "https://www.lexaloffle.com/bbs/?pid=" + id, nil
+}
+
+// ParseDetail binds the detail-page schema to the exact requested PICO-8 release.
+// A missing cart-display title falls back to the public post title.
+func ParseDetail(data []byte, id string) (Cart, error) {
+	if _, err := DetailURL(id); err != nil {
+		return Cart{}, err
+	}
+	rows, err := parseRows(data)
+	if err != nil {
+		return Cart{}, err
+	}
+	if len(rows) != 1 {
+		return Cart{}, fmt.Errorf("unexpected BBS detail cart count")
+	}
+	row, ok := rows[0].([]any)
+	if !ok || len(row) != 24 || row[15] != float64(7) || row[16] != float64(2) {
+		return Cart{}, fmt.Errorf("unexpected BBS detail console or schema")
+	}
+	postID, ok := row[14].(float64)
+	if !ok || strconv.FormatFloat(postID, 'f', 0, 64) != id || postID != float64(uint64(postID)) {
+		return Cart{}, fmt.Errorf("BBS detail does not match requested post")
+	}
+	alias, ok := row[0].(string)
+	if !ok || !validAlias(alias) {
+		return Cart{}, fmt.Errorf("invalid BBS detail cart identity")
+	}
+	title, ok := row[22].(string)
+	if !ok {
+		return Cart{}, fmt.Errorf("invalid BBS detail title")
+	}
+	if title == "" {
+		title, ok = row[2].(string)
+		if !ok {
+			return Cart{}, fmt.Errorf("BBS post title missing")
+		}
+	}
+	author, ok := row[8].(string)
+	if !ok {
+		return Cart{}, fmt.Errorf("BBS author missing")
+	}
+	title, err = plainText(title, 200)
+	if err != nil {
+		return Cart{}, err
+	}
+	author, err = plainText(author, 80)
+	if err != nil {
+		return Cart{}, err
+	}
+	return Cart{ID: id, Title: title, Author: author}, nil
+}
+func validAlias(id string) bool {
+	if len(id) < 1 || len(id) > 47 {
+		return false
+	}
+	for _, c := range id {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
 }

@@ -30,12 +30,12 @@ retries a rate limited response.
 
 **Install** uses verified cached downloads when available, including offline.
 **Refresh downloads** explicitly downloads fresh copies. Failed refreshes preserve old valid
-cache entries. **Status** on the main menu reports complete and partial counts.
+cache entries. **Library → Status** reports complete and partial counts.
 
 The plugin can access only updater-provided `pocket/` and `host/` mounts. It uses
 `host/pico8-offline-cache/<id>.p8.png` for verified originals and writes:
 
-- `pocket/Assets/pico8/common/cards/bbs/<id>.p8.png` for standalone selection.
+- `pocket/Assets/pico8/common/cards/bbs/<title> [<id>].p8.png` for standalone selection.
 - `pocket/Assets/pico8/common/cards/bbs.p8pack` for launcher handoffs (core slot 20).
 
 Installing one collection merges the existing valid bundle, preserving other
@@ -66,12 +66,12 @@ return to the list and select the cart again; verified cache is reused. Failed
 downloads retain the download action for retry. No account or credentials are required.
 
 Downloads reuse verified originals in the existing host cache and atomically
-install `Assets/pico8/common/cards/bbs/<id>.p8.png`. Select that file in the Pocket
+install `Assets/pico8/common/cards/bbs/<title> [<id>].p8.png`. Select that file in the Pocket
 asset browser. Individual downloads leave `bbs.p8pack` unchanged; use the managed
 collection actions for Arcade/Sorcerer dependencies. Other multicart games may
 need additional carts, and downloaded games still depend on core compatibility.
 
-Listing requests and cart downloads share the 15-second network cooldown,
+Listing requests, metadata lookups and cart downloads share the 15-second network cooldown,
 including across menu actions. Only the explicitly requested page/cart is fetched;
 there is no background crawl or bulk-download action. Cached cart reinstalls do
 not make network requests. HTTP 429 stops the action without automatic retries.
@@ -82,6 +82,35 @@ The source is the BBS website's public `lister.php` metadata, with `cat=7`,
 `search` for a submitted query. The parser reads
 bounded data literals without executing JavaScript. It rejects unexpected schema
 or malformed data; a BBS format change may require updating the adapter.
+
+## Tidy existing filenames
+
+Choose **Library → Tidy filenames**. It scans the top level of the plugin's
+`Assets/pico8/common/cards/bbs/` folder and recognizes ID-only and titled BBS
+filenames. New installs use names such as `Still Life [198121].p8.png`; title
+characters unsuitable for SD filesystems are replaced, and long titles are shortened.
+The BBS ID suffix stays intact. Cache files and bundle entries keep their original
+IDs, preserving collection handoffs.
+
+Tidy uses byte-matched saved metadata or the verified cart cache to establish a
+file's identity. It uses saved titles or the curated catalog first; missing titles
+for known numeric IDs are retrieved from their public BBS posts. The public post
+title is used when a separate cart title is unavailable. The same 15-second
+request cooldown, cancellation and HTTP 429 stop behavior apply. Saved metadata
+lets subsequent tidy operations work offline.
+
+The result reports renamed, already tidy, unmatched, conflicting and invalid
+files. Symlinks and subdirectories are skipped. Existing conflicting files are
+preserved; identical copies can be consolidated. Cart bytes and the dependency
+bundle are preserved. Original files remain until the titled copy is complete;
+a hard host cancellation during copying can leave an incomplete destination,
+which a later run reports as a conflict. Reinstall the selected cart to replace
+that incomplete copy from verified cache.
+
+An install also migrates a legacy ID-only filename when its bytes match the
+published cart. Unmatched files stay in place. Import sources and the host PNG
+cache remain `<id>.p8.png`. Titles are saved separately in
+`host/pico8-offline-metadata/<id>.json` and bound to the cart bytes by SHA-256.
 
 ## Build
 

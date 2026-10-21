@@ -2,7 +2,6 @@ package pocketplugin
 
 import (
 	"fmt"
-	"path/filepath"
 	"strconv"
 
 	"github.com/zenibako/pico8pocket/bbs"
@@ -114,7 +113,8 @@ func (s *Session) showCart(message string) ([]byte, error) {
 	query := fmt.Sprintf("%s by %s\n%s\nDownload this cart to the Pocket? Verified cache is reused. Game compatibility depends on the core.", cart.Title, cart.Author, cart.URL())
 	choices := []string{"Open BBS page", "Back to list", "Back to main menu"}
 	if s.browser.Downloaded {
-		query = fmt.Sprintf("Downloaded %s to Pocket.\nSelect bbs/%s.p8.png in the Pocket asset browser.", cart.Title, cart.ID)
+		filename, _ := offline.CartFilename(cart.ID, cart.Title)
+		query = fmt.Sprintf("Downloaded %s to Pocket.\nSelect bbs/%s in the Pocket asset browser.", cart.Title, filename)
 	} else {
 		choices = append([]string{"Download to Pocket"}, choices...)
 	}
@@ -148,7 +148,7 @@ func (s *Session) handleBrowser(value string) ([]byte, error) {
 			}
 			return s.showCart("Opened BBS page.")
 		case "Download to Pocket":
-			if err := s.downloadStandalone(cart.ID); err != nil {
+			if err := s.downloadStandalone(cart); err != nil {
 				return s.showCart("Stopped: " + err.Error())
 			}
 			b.Downloaded = true
@@ -182,7 +182,8 @@ func httpStatus(status int, retry string) error {
 	}
 	return fmt.Errorf("HTTP %d", status)
 }
-func (s *Session) downloadStandalone(id string) error {
+func (s *Session) downloadStandalone(cart bbs.Cart) error {
+	id := cart.ID
 	if err := offline.ValidateID(id); err != nil {
 		return err
 	}
@@ -219,5 +220,6 @@ func (s *Session) downloadStandalone(id string) error {
 	if err = s.cancel(); err != nil {
 		return err
 	}
-	return offline.AtomicWrite(filepath.Join(s.pocketRoot, offline.CartPath, id+".p8.png"), data)
+	_, err = offline.PublishStandalone(s.pocketRoot, s.hostRoot, id, cart.Title, data)
+	return err
 }

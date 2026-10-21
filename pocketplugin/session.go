@@ -22,6 +22,7 @@ var ErrCancelled = errors.New("installation cancelled")
 
 // Session owns one conversation and roots supplied by the host, never by answers.
 type Session struct {
+	Details              FetchFunc
 	List                 ListingFetchFunc
 	OpenURL              func(string) error
 	browser              *browserState
@@ -76,12 +77,17 @@ func (s *Session) Start() ([]byte, error) {
 func (s *Session) menu(query string) ([]byte, error) {
 	s.browser = nil
 	s.screen, s.collection = "home", ""
-	return s.prompt(query, []string{"Browse BBS", "Collections", "Status", "Exit"})
+	return s.prompt(query, []string{"Browse BBS", "Collections", "Library", "Exit"})
 }
 func (s *Session) browseMenu(query string) ([]byte, error) {
 	s.browser = nil
 	s.screen, s.collection = "browse", ""
 	return s.prompt(query, []string{"Recent", "Popular", "Search", "Back"})
+}
+func (s *Session) libraryMenu(query string) ([]byte, error) {
+	s.browser = nil
+	s.screen, s.collection = "library", ""
+	return s.prompt(query, []string{"Status", "Tidy filenames", "Back"})
 }
 func (s *Session) collectionsMenu() ([]byte, error) {
 	s.screen, s.collection = "collections", ""
@@ -159,13 +165,27 @@ func (s *Session) Handle(input []byte) ([]byte, error) {
 			return s.browseMenu("Browse public BBS carts.")
 		case "Collections":
 			return s.collectionsMenu()
+		case "Library":
+			return s.libraryMenu("Manage installed carts. Tidy uses saved titles or BBS metadata; files without a verified match are skipped.")
+		}
+	case "library":
+		switch value {
+		case "Back":
+			return s.menu("Pico8Pocket")
+		case "Tidy filenames":
+			summary, err := s.TidyFilenames()
+			if err != nil {
+				summary += "\nStopped: " + err.Error()
+			}
+			s.log(summary)
+			return s.libraryMenu(summary)
 		case "Status":
 			summary, err := s.Status()
 			if err != nil {
 				summary = "Stopped: " + err.Error()
 			}
 			s.log(summary)
-			return s.menu(summary)
+			return s.libraryMenu(summary)
 		}
 	case "browse":
 		switch value {
@@ -353,7 +373,7 @@ func (s *Session) Install(collection string, refresh bool) (string, error) {
 		if e != nil {
 			return "", fmt.Errorf("%s: %w", cart.ID, e)
 		}
-		if err = offline.AtomicWrite(filepath.Join(s.pocketRoot, offline.CartPath, cart.ID+".p8.png"), data); err != nil {
+		if _, err = offline.PublishStandalone(s.pocketRoot, s.hostRoot, cart.ID, cart.Name, data); err != nil {
 			return "", err
 		}
 		carts[cart.ID] = data
@@ -402,7 +422,7 @@ func (s *Session) Restore(data []byte) error {
 	if !state.Started || state.Sequence == 0 || (!state.Exited && (state.Name == "" || (len(state.Choices) == 0 && !state.SearchInput))) {
 		return errors.New("invalid saved conversation")
 	}
-	if state.Screen != "home" && state.Screen != "browse" && state.Screen != "collections" && state.Screen != "collection" {
+	if state.Screen != "home" && state.Screen != "library" && state.Screen != "browse" && state.Screen != "collections" && state.Screen != "collection" {
 		return errors.New("invalid saved menu")
 	}
 	if state.Screen == "collection" && state.Collection != "both" && state.Collection != "arcade" && state.Collection != "sorcerer" {

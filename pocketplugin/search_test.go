@@ -102,7 +102,7 @@ func TestSearchPersistsQueryThroughPagesAndDownloadsSelectedCart(t *testing.T) {
 	if len(pages) != 3 || pages[0] != 1 || pages[1] != 2 || pages[2] != 1 {
 		t.Fatal(pages)
 	}
-	if !bytes.Equal(read(t, filepath.Join(p, offline.CartPath, "90001.p8.png")), data) || !bytes.Equal(read(t, filepath.Join(p, offline.PackPath)), old) {
+	if !bytes.Equal(read(t, filepath.Join(p, offline.CartPath, "Fixture Game [90001].p8.png")), data) || !bytes.Equal(read(t, filepath.Join(p, offline.PackPath)), old) {
 		t.Fatal("wrong download or modified bundle")
 	}
 	list = respond(t, restored, done, "Back to list")

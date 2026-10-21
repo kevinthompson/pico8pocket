@@ -49,6 +49,10 @@ func TestImportAndCacheOnlyInstall(t *testing.T) {
 	if err != nil || !bytes.Equal(carts["mot_sorcerergame"], png) {
 		t.Fatal(err)
 	}
+	standalone, err := os.ReadFile(filepath.Join(pocket, offline.CartPath, "Trail of the Sorcerer companion [mot_sorcerergame].p8.png"))
+	if err != nil || !bytes.Equal(standalone, png) {
+		t.Fatal("native helper did not publish titled cart", err)
+	}
 	if err := run([]string{"install", host, pocket, "arcade"}, &out); err == nil {
 		t.Fatal("missing cache install reported success")
 	}
