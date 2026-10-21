@@ -120,12 +120,15 @@ their 256-byte `dget`/`dset` payloads independent from save states and settings.
 
 ## Offline BBS collections
 
-The desktop plugin also browses public Recent and Popular release listings via
+The desktop plugin also browses public Recent, Popular and search release listings via
 `bbs/`, a bounded data-only reader for the BBS website's cart metadata. Listing
 and cart GETs share the session's request cooldown. Selecting an individual cart
 installs its original PNG as a standalone asset; it does not modify the dependency
 bundle. Browser state persists across Extism calls; the WASI adapter constructs
-fixed same-host URLs from validated listing modes/pages and numeric cart IDs.
+fixed same-host URLs from validated listing modes/pages, bounded URL-encoded search terms and numeric cart IDs.
+Pocket Sync text prompts collect search terms; prompt kind, menu position and query
+persist across Extism calls. Home separates Browse BBS, Collections and Status,
+and collection selection precedes Install or Refresh downloads.
 
 
 `compatibility/offline-carts.json` is the shared curated catalog. A generated C

@@ -25,6 +25,9 @@ type Session struct {
 	List                 ListingFetchFunc
 	OpenURL              func(string) error
 	browser              *browserState
+	screen               string
+	collection           string
+	searchInput          bool
 	pocketRoot, hostRoot string
 	logger               func(string)
 	fetch                FetchFunc
@@ -68,27 +71,46 @@ func (s *Session) Start() ([]byte, error) {
 		return nil, errors.New("session already started")
 	}
 	s.started = true
-	return s.menu("Pocket Sync: offline Pico Arcade and Sorcerer collections. Install uses verified cache; Update refreshes downloads.")
+	return s.menu("Pico8Pocket")
 }
 func (s *Session) menu(query string) ([]byte, error) {
 	s.browser = nil
-	return s.prompt(query, []string{"Install both collections", "Install Arcade", "Install Sorcerer", "Update both collections", "Update Arcade", "Update Sorcerer", "Installed / cache status", "Browse recent carts", "Browse popular carts", "Exit"})
+	s.screen, s.collection = "home", ""
+	return s.prompt(query, []string{"Browse BBS", "Collections", "Status", "Exit"})
+}
+func (s *Session) browseMenu(query string) ([]byte, error) {
+	s.browser = nil
+	s.screen, s.collection = "browse", ""
+	return s.prompt(query, []string{"Recent", "Popular", "Search", "Back"})
+}
+func (s *Session) collectionsMenu() ([]byte, error) {
+	s.screen, s.collection = "collections", ""
+	return s.prompt("Choose a collection.", []string{"Pico Arcade", "Sorcerer", "Both collections", "Back"})
+}
+func (s *Session) collectionMenu() ([]byte, error) {
+	s.screen = "collection"
+	label := map[string]string{"both": "Both collections", "arcade": "Pico Arcade", "sorcerer": "Sorcerer"}[s.collection]
+	return s.prompt(label+". Install reuses verified cache. Refresh downloads retrieves fresh copies.", []string{"Install", "Refresh downloads", "Back"})
 }
 func (s *Session) prompt(query string, choices []string) ([]byte, error) {
+	s.searchInput = false
 	s.sequence++
 	s.name = fmt.Sprintf("pico8-offline-%d", s.sequence)
 	s.choices = choices
-	return json.Marshal(struct {
-		Choice struct {
-			Name    string   `json:"name"`
-			Query   string   `json:"query"`
-			Choices []string `json:"choices"`
-		} `json:"Choice"`
-	}{struct {
-		Name    string   `json:"name"`
-		Query   string   `json:"query"`
-		Choices []string `json:"choices"`
-	}{s.name, query, s.choices}})
+	return json.Marshal(map[string]any{"Choice": map[string]any{"name": s.name, "query": query, "choices": choices}})
+}
+func (s *Session) searchPrompt(message string) ([]byte, error) {
+	s.browser = nil
+	s.screen, s.collection = "browse", ""
+	s.searchInput = true
+	s.sequence++
+	s.name = fmt.Sprintf("pico8-offline-%d", s.sequence)
+	s.choices = nil
+	query := fmt.Sprintf("Search public BBS carts (up to %d characters). Submit blank to go back.", bbs.MaxSearch)
+	if message != "" {
+		query = message + "\n" + query
+	}
+	return json.Marshal(map[string]any{"Text": map[string]string{"name": s.name, "query": query}})
 }
 func (s *Session) Handle(input []byte) ([]byte, error) {
 	if !s.started || s.exited {
@@ -102,7 +124,17 @@ func (s *Session) Handle(input []byte) ([]byte, error) {
 		return s.finish()
 	}
 	if name != s.name {
-		return nil, errors.New("answer does not match the current choice")
+		return nil, errors.New("answer does not match the current prompt")
+	}
+	if s.searchInput {
+		query, err := bbs.NormalizeSearch(value)
+		if err != nil {
+			return s.searchPrompt(err.Error())
+		}
+		if query == "" {
+			return s.browseMenu("Browse public BBS carts.")
+		}
+		return s.loadListing(bbs.Recent, 1, query)
 	}
 	offered := false
 	for _, v := range s.choices {
@@ -120,30 +152,56 @@ func (s *Session) Handle(input []byte) ([]byte, error) {
 	if s.browser != nil {
 		return s.handleBrowser(value)
 	}
-	if value == "Browse recent carts" {
-		return s.loadListing(bbs.Recent, 1)
-	}
-	if value == "Browse popular carts" {
-		return s.loadListing(bbs.Popular, 1)
-	}
-	var summary string
-	if value == "Installed / cache status" {
-		summary, err = s.Status()
-	} else {
-		collection := "both"
-		if strings.HasSuffix(value, "Arcade") {
-			collection = "arcade"
+	switch s.screen {
+	case "home":
+		switch value {
+		case "Browse BBS":
+			return s.browseMenu("Browse public BBS carts.")
+		case "Collections":
+			return s.collectionsMenu()
+		case "Status":
+			summary, err := s.Status()
+			if err != nil {
+				summary = "Stopped: " + err.Error()
+			}
+			s.log(summary)
+			return s.menu(summary)
 		}
-		if strings.HasSuffix(value, "Sorcerer") {
-			collection = "sorcerer"
+	case "browse":
+		switch value {
+		case "Recent":
+			return s.loadListing(bbs.Recent, 1, "")
+		case "Popular":
+			return s.loadListing(bbs.Popular, 1, "")
+		case "Search":
+			return s.searchPrompt("")
+		case "Back":
+			return s.menu("Pico8Pocket")
 		}
-		summary, err = s.Install(collection, strings.HasPrefix(value, "Update"))
+	case "collections":
+		switch value {
+		case "Back":
+			return s.menu("Pico8Pocket")
+		case "Pico Arcade":
+			s.collection = "arcade"
+		case "Sorcerer":
+			s.collection = "sorcerer"
+		case "Both collections":
+			s.collection = "both"
+		}
+		return s.collectionMenu()
+	case "collection":
+		if value == "Back" {
+			return s.collectionsMenu()
+		}
+		summary, err := s.Install(s.collection, value == "Refresh downloads")
+		if err != nil {
+			summary = "Stopped: " + err.Error() + ". The last published bundle is preserved. Retry Install to reuse verified downloads."
+		}
+		s.log(summary)
+		return s.menu(summary)
 	}
-	if err != nil {
-		summary = "Stopped: " + err.Error() + ". The last published bundle is preserved. Retry Install to reuse verified downloads."
-	}
-	s.log(summary)
-	return s.menu(summary)
+	return nil, errors.New("invalid menu action")
 }
 func (s *Session) finish() ([]byte, error) {
 	s.exited = true
@@ -203,7 +261,7 @@ func (s *Session) Status() (string, error) {
 		}
 		lines = append(lines, fmt.Sprintf("%s: installed %d/%d, verified cache %d/%d", group, present, total, cached, total))
 	}
-	summary := strings.Join(lines, "; ") + ". Install reuses verified cache; Update downloads fresh copies."
+	summary := strings.Join(lines, "; ") + ". Install reuses verified cache; Refresh downloads retrieves fresh copies."
 	if packErr != nil {
 		summary += " " + packErr.Error() + "."
 	}
@@ -324,6 +382,9 @@ type conversationState struct {
 	Choices     []string      `json:"choices"`
 	LastRequest int64         `json:"last_request,omitempty"`
 	Browser     *browserState `json:"browser,omitempty"`
+	Screen      string        `json:"screen"`
+	Collection  string        `json:"collection,omitempty"`
+	SearchInput bool          `json:"search_input,omitempty"`
 }
 
 func (s *Session) Snapshot() ([]byte, error) {
@@ -331,16 +392,29 @@ func (s *Session) Snapshot() ([]byte, error) {
 	if !s.LastRequest.IsZero() {
 		stamp = s.LastRequest.UnixNano()
 	}
-	return json.Marshal(conversationState{s.started, s.exited, s.sequence, s.name, s.choices, stamp, s.browser})
+	return json.Marshal(conversationState{s.started, s.exited, s.sequence, s.name, s.choices, stamp, s.browser, s.screen, s.collection, s.searchInput})
 }
 func (s *Session) Restore(data []byte) error {
 	var state conversationState
 	if err := json.Unmarshal(data, &state); err != nil {
 		return err
 	}
-	if !state.Started || state.Sequence == 0 || (!state.Exited && (state.Name == "" || len(state.Choices) == 0)) {
+	if !state.Started || state.Sequence == 0 || (!state.Exited && (state.Name == "" || (len(state.Choices) == 0 && !state.SearchInput))) {
 		return errors.New("invalid saved conversation")
 	}
+	if state.Screen != "home" && state.Screen != "browse" && state.Screen != "collections" && state.Screen != "collection" {
+		return errors.New("invalid saved menu")
+	}
+	if state.Screen == "collection" && state.Collection != "both" && state.Collection != "arcade" && state.Collection != "sorcerer" {
+		return errors.New("invalid saved collection")
+	}
+	if state.SearchInput && (state.Screen != "browse" || state.Browser != nil || len(state.Choices) != 0) {
+		return errors.New("invalid saved text input")
+	}
+	if state.Browser != nil && state.Screen != "browse" {
+		return errors.New("invalid saved browser menu")
+	}
+	s.screen, s.collection, s.searchInput = state.Screen, state.Collection, state.SearchInput
 	if err := validateBrowser(state.Browser); err != nil {
 		return err
 	}
@@ -372,7 +446,7 @@ func (s *Session) beforeRequest(id string) error {
 		}
 		remaining := 15*time.Second - elapsed
 		if remaining > 0 {
-			s.log("Waiting between downloads to respect Lexaloffle rate limits.")
+			s.log("Waiting between requests to respect Lexaloffle rate limits.")
 			sleep := s.Sleep
 			if sleep == nil {
 				sleep = pollSleep

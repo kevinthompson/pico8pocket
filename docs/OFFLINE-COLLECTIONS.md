@@ -17,8 +17,8 @@ before publication, or the real Extism host harness to test the plugin itself.
 After a release is available, add its repository URL using your updater's Pocket
 Plugin support and choose your Pocket SD root.
 
-Select **Install both collections**, **Install Arcade**, or
-**Install Sorcerer**. The selection runs automatically and prints per-cart
+Choose **Collections**, then **Pico Arcade**, **Sorcerer**, or **Both collections**,
+and select **Install** or **Refresh downloads**. The selection runs automatically and prints per-cart
 progress, waiting at least 15 seconds between network requests. Cached reinstalls
 skip network requests and their delay. Closing/cancelling the updater preserves
 the previous collection bundle; some standalone carts may already have updated.
@@ -29,8 +29,8 @@ Install retries only missing or invalid cache entries. The plugin never rapidly
 retries a rate limited response.
 
 **Install** uses verified cached downloads when available, including offline.
-**Update** explicitly downloads fresh copies. Failed refreshes preserve old valid
-cache entries. **Installed / cache status** reports complete and partial counts.
+**Refresh downloads** explicitly downloads fresh copies. Failed refreshes preserve old valid
+cache entries. **Status** on the main menu reports complete and partial counts.
 
 The plugin can access only updater-provided `pocket/` and `host/` mounts. It uses
 `host/pico8-offline-cache/<id>.p8.png` for verified originals and writes:
@@ -48,10 +48,17 @@ the bundle becomes visible only after the complete selected set is ready.
 
 ## Browse public BBS carts
 
-Choose **Browse recent carts** or **Browse popular carts**. Recent uses the BBS's
+Choose **Browse BBS**, then **Recent**, **Popular**, or **Search**. Recent uses the BBS's
 New Carts listing for PICO-8 releases; Popular uses its New & Popular filter.
+Search opens a text field: enter a BBS search term and press Enter or Submit.
+Blank input returns to Browse. Queries accept up to 120 characters, including
+Unicode; control characters are rejected. This uses the BBS search rules, which
+can match tags as well as titles. It searches the public PICO-8 releases catalog,
+not just the current page. No account or credentials are required.
+
 Each page shows cart titles, authors and numeric BBS IDs. Previous/Next moves
-through the listing; choosing a cart shows its BBS link and offers **Open BBS
+through the listing while preserving the search term. **New search** opens a
+fresh input; **Back to Browse** returns to Recent/Popular/Search. Choosing a cart shows its BBS link and offers **Open BBS
 page** and **Download to Pocket**. No account or credentials are required.
 
 Downloads reuse verified originals in the existing host cache and atomically
@@ -67,7 +74,8 @@ not make network requests. HTTP 429 stops the action without automatic retries.
 Errors preserve existing installed files and report a retryable menu.
 
 The source is the BBS website's public `lister.php` metadata, with `cat=7`,
-`sub=2`, `mode=carts`, `orderby=ts` and `popular=1` for Popular. The parser reads
+`sub=2`, `mode=carts`, `orderby=ts`, `popular=1` for Popular, and URL-encoded
+`search` for a submitted query. The parser reads
 bounded data literals without executing JavaScript. It rejects unexpected schema
 or malformed data; a BBS format change may require updating the adapter.
 
@@ -150,7 +158,7 @@ Sync UI testing remain separate checks.
 ## Migration from Cart Thumbnails
 
 Keep the same repository URL in Pocket Sync. The replacement declares access to
-`www.lexaloffle.com` for BBS downloads; choosing Install/Update starts those
+`www.lexaloffle.com` for BBS downloads; choosing Install/Refresh downloads starts those
 downloads. Updating the plugin itself does not download cartridges.
 The release replaces the old plugin
 menu and removes the thumbnail CLI/WASI downloads. Native Pocket asset browsing

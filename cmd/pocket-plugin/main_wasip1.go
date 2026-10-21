@@ -32,8 +32,8 @@ func fetchCart(id string) (int, []byte, string, error) {
 	}
 	return fetchURL("https://www.lexaloffle.com/bbs/get_cart.php?cat=7&play_src=2&lid="+id, offline.MaxCart)
 }
-func fetchListing(order bbs.Order, page int) (int, []byte, string, error) {
-	url, err := bbs.ListingURL(order, page)
+func fetchListing(order bbs.Order, page int, search string) (int, []byte, string, error) {
+	url, err := bbs.ListingURL(order, page, search)
 	if err != nil {
 		return 0, nil, "", err
 	}

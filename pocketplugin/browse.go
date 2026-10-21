@@ -10,8 +10,9 @@ import (
 )
 
 // ListingFetchFunc is the transport for one explicitly requested public BBS page.
-type ListingFetchFunc func(bbs.Order, int) (status int, body []byte, retryAfter string, err error)
+type ListingFetchFunc func(bbs.Order, int, string) (status int, body []byte, retryAfter string, err error)
 type browserState struct {
+	Query    string
 	Order    bbs.Order
 	Page     int
 	Listing  bbs.Page
@@ -22,7 +23,7 @@ func validateBrowser(b *browserState) error {
 	if b == nil {
 		return nil
 	}
-	if _, err := bbs.ListingURL(b.Order, b.Page); err != nil {
+	if _, err := bbs.ListingURL(b.Order, b.Page, b.Query); err != nil {
 		return err
 	}
 	if len(b.Listing.Carts) > 60 || b.Selected < -1 || b.Selected >= len(b.Listing.Carts) {
@@ -35,24 +36,24 @@ func validateBrowser(b *browserState) error {
 	}
 	return nil
 }
-func (s *Session) loadListing(order bbs.Order, page int) ([]byte, error) {
+func (s *Session) loadListing(order bbs.Order, page int, query string) ([]byte, error) {
 	fail := func(err error) ([]byte, error) {
 		message := "Stopped: " + err.Error()
 		if s.browser != nil {
 			return s.showListing(message)
 		}
-		return s.menu(message)
+		return s.browseMenu(message)
 	}
 	if s.List == nil {
 		return fail(fmt.Errorf("BBS listing unavailable in this host"))
 	}
-	if _, err := bbs.ListingURL(order, page); err != nil {
+	if _, err := bbs.ListingURL(order, page, query); err != nil {
 		return fail(err)
 	}
 	if err := s.beforeRequest("BBS " + string(order) + " listing"); err != nil {
 		return fail(err)
 	}
-	status, body, retry, err := s.List(order, page)
+	status, body, retry, err := s.List(order, page, query)
 	s.recordRequest()
 	if err == nil {
 		err = httpStatus(status, retry)
@@ -67,7 +68,7 @@ func (s *Session) loadListing(order bbs.Order, page int) ([]byte, error) {
 	if err = s.cancel(); err != nil {
 		return fail(err)
 	}
-	s.browser = &browserState{Order: order, Page: page, Listing: listing, Selected: -1}
+	s.browser = &browserState{Query: query, Order: order, Page: page, Listing: listing, Selected: -1}
 	return s.showListing("")
 }
 func (s *Session) showListing(message string) ([]byte, error) {
@@ -76,6 +77,9 @@ func (s *Session) showListing(message string) ([]byte, error) {
 	label := "Recent carts"
 	if b.Order == bbs.Popular {
 		label = "New & popular carts"
+	}
+	if b.Query != "" {
+		label = "Search: " + b.Query
 	}
 	query := fmt.Sprintf("%s — page %d. Choose a cart for details and download.", label, b.Page)
 	if len(b.Listing.Carts) == 0 {
@@ -94,7 +98,10 @@ func (s *Session) showListing(message string) ([]byte, error) {
 	if b.Listing.HasNext {
 		choices = append(choices, "Next page")
 	}
-	choices = append(choices, "Back to main menu")
+	if b.Query != "" {
+		choices = append(choices, "New search")
+	}
+	choices = append(choices, "Back to Browse", "Back to main menu")
 	return s.prompt(query, choices)
 }
 func cartChoice(cart bbs.Cart) string {
@@ -110,6 +117,12 @@ func (s *Session) showCart(message string) ([]byte, error) {
 }
 func (s *Session) handleBrowser(value string) ([]byte, error) {
 	b := s.browser
+	if value == "New search" {
+		return s.searchPrompt("")
+	}
+	if value == "Back to Browse" {
+		return s.browseMenu("Browse public BBS carts.")
+	}
 	if value == "Back to main menu" {
 		return s.menu("Choose an offline collection or browse public BBS carts.")
 	}
@@ -134,10 +147,10 @@ func (s *Session) handleBrowser(value string) ([]byte, error) {
 		}
 	} else {
 		if value == "Next page" && b.Listing.HasNext {
-			return s.loadListing(b.Order, b.Page+1)
+			return s.loadListing(b.Order, b.Page+1, b.Query)
 		}
 		if value == "Previous page" && b.Page > 1 {
-			return s.loadListing(b.Order, b.Page-1)
+			return s.loadListing(b.Order, b.Page-1, b.Query)
 		}
 		for i, cart := range b.Listing.Carts {
 			if value == cartChoice(cart) {

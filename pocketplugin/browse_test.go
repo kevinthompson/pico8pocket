@@ -2,18 +2,20 @@ package pocketplugin
 
 import (
 	"bytes"
-	"github.com/zenibako/pico8pocket/bbs"
-	"github.com/zenibako/pico8pocket/offline"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zenibako/pico8pocket/bbs"
+	"github.com/zenibako/pico8pocket/offline"
 )
 
 func TestBrowserOfferedFromMainMenu(t *testing.T) {
 	p, h := roots(t)
-	c := start(t, New(p, h, nil, nil))
-	for _, want := range []string{"Browse recent carts", "Browse popular carts"} {
+	s := New(p, h, nil, nil)
+	c := respond(t, s, start(t, s), "Browse BBS")
+	for _, want := range []string{"Recent", "Popular", "Search"} {
 		found := false
 		for _, option := range c.Choice.Choices {
 			if option == want {
@@ -50,7 +52,7 @@ func TestBrowsePersistsSelectionAndDownloadsOnlyStandalone(t *testing.T) {
 		now = now.Add(d)
 		return nil
 	}
-	s.List = func(order bbs.Order, page int) (int, []byte, string, error) {
+	s.List = func(order bbs.Order, page int, query string) (int, []byte, string, error) {
 		if order != bbs.Recent || page != 1 {
 			t.Fatal(order, page)
 		}
@@ -96,7 +98,7 @@ func TestListingPaginationAndOpenPage(t *testing.T) {
 	p, h := roots(t)
 	s := New(p, h, nil, nil)
 	s.Sleep = func(time.Duration) error { return nil }
-	s.List = func(order bbs.Order, page int) (int, []byte, string, error) {
+	s.List = func(order bbs.Order, page int, query string) (int, []byte, string, error) {
 		if order != bbs.Popular {
 			t.Fatal(order)
 		}
@@ -129,7 +131,7 @@ func TestFailedListingAndCartDownloadPreserveInstalledFiles(t *testing.T) {
 		put(t, filepath.Join(p, offline.CartPath, "90001.p8.png"), data)
 		s := New(p, h, nil, func(string) (int, []byte, string, error) { return status, []byte("invalid"), "120", nil })
 		s.Sleep = func(time.Duration) error { return nil }
-		s.List = func(bbs.Order, int) (int, []byte, string, error) { return 200, []byte(listingFixture), "", nil }
+		s.List = func(bbs.Order, int, string) (int, []byte, string, error) { return 200, []byte(listingFixture), "", nil }
 		c := respond(t, s, start(t, s), "Browse recent carts")
 		d := respond(t, s, c, c.Choice.Choices[0])
 		failure := respond(t, s, d, "Download to Pocket")
@@ -142,7 +144,9 @@ func TestFailedListingAndCartDownloadPreserveInstalledFiles(t *testing.T) {
 		if !bytes.Equal(read(t, filepath.Join(p, offline.CartPath, "90001.p8.png")), data) {
 			t.Fatal("failed download destroyed cart")
 		}
-		s.List = func(bbs.Order, int) (int, []byte, string, error) { return status, []byte("bad listing"), "120", nil }
+		s.List = func(bbs.Order, int, string) (int, []byte, string, error) {
+			return status, []byte("bad listing"), "120", nil
+		}
 		main := respond(t, s, failure, "Back to main menu")
 		failure = respond(t, s, main, "Browse recent carts")
 		if !strings.Contains(failure.Choice.Query, "Stopped:") {

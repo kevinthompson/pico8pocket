@@ -1,6 +1,7 @@
 package bbs
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -59,7 +60,7 @@ func TestListingURLConstrainsSourceAndSort(t *testing.T) {
 		{Recent, "https://www.lexaloffle.com/bbs/lister.php?cat=7&mode=carts&orderby=ts&page=2&sub=2&use_hurl=1"},
 		{Popular, "https://www.lexaloffle.com/bbs/lister.php?cat=7&mode=carts&orderby=ts&page=2&popular=1&sub=2&use_hurl=1"},
 	} {
-		got, err := ListingURL(tc.order, 2)
+		got, err := ListingURL(tc.order, 2, "")
 		if err != nil || got != tc.want {
 			t.Fatalf("%s %v", got, err)
 		}
@@ -68,7 +69,7 @@ func TestListingURLConstrainsSourceAndSort(t *testing.T) {
 		order Order
 		page  int
 	}{{Order("https://evil.invalid"), 1}, {Recent, 0}, {Recent, MaxPage + 1}} {
-		if _, err := ListingURL(tc.order, tc.page); err == nil {
+		if _, err := ListingURL(tc.order, tc.page, ""); err == nil {
 			t.Fatal("invalid source accepted")
 		}
 	}
@@ -78,5 +79,26 @@ func TestSparseArrayEntriesCountTowardLimit(t *testing.T) {
 	bad := strings.Replace(sample, `["puzzle",]`, "["+strings.Repeat(",", 9000)+"]", 1)
 	if _, err := Parse([]byte(bad), 1); err == nil {
 		t.Fatal("accepted 9000 sparse values past metadata node budget")
+	}
+}
+
+func TestSearchURLPreservesTextWithoutChangingSource(t *testing.T) {
+	query := "雪 &cat=8+#?"
+	got, err := ListingURL(Recent, 2, query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := u.Query()
+	if u.Scheme != "https" || u.Host != "www.lexaloffle.com" || u.Path != "/bbs/lister.php" || u.Fragment != "" || q.Get("search") != query || q.Get("cat") != "7" || q.Get("page") != "2" {
+		t.Fatal(got)
+	}
+	for _, invalid := range []string{strings.Repeat("a", 121), "bad\nquery", "\x00", string([]byte{255})} {
+		if _, err := ListingURL(Recent, 1, invalid); err == nil {
+			t.Fatalf("accepted search %q", invalid)
+		}
 	}
 }

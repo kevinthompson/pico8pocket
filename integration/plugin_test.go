@@ -149,6 +149,36 @@ func answer(t *testing.T, m choice, action string) []byte {
 	return nil
 }
 
+// Navigate the supported host screens before supplying the final action. Keeping
+// the last call separate lets cancellation tests use their own context.
+func (h *harness) answer(m choice, action string) []byte {
+	steps := []string{action}
+	if action == "Installed / cache status" {
+		steps = []string{"Status"}
+	}
+	if action == "Browse popular carts" {
+		steps = []string{"Browse BBS", "Popular"}
+	}
+	if strings.HasPrefix(action, "Install ") || strings.HasPrefix(action, "Update ") {
+		collection := "Both collections"
+		if strings.HasSuffix(action, "Sorcerer") {
+			collection = "Sorcerer"
+		}
+		if strings.HasSuffix(action, "Arcade") {
+			collection = "Pico Arcade"
+		}
+		op := "Install"
+		if strings.HasPrefix(action, "Update ") {
+			op = "Refresh downloads"
+		}
+		steps = []string{"Collections", collection, op}
+	}
+	for _, step := range steps[:len(steps)-1] {
+		m = menu(h.t, h.call("handle_response", answer(h.t, m, step)))
+	}
+	return answer(h.t, m, steps[len(steps)-1])
+}
+
 func fixtures(t *testing.T) offline.Carts {
 	t.Helper()
 	// Read the canonical JSON independently so a plugin catalog omission cannot
@@ -226,7 +256,7 @@ func TestCompiledPlugin(t *testing.T) {
 			carts := fixtures(t)
 			h.seed(carts)
 			m := menu(t, h.call("start", nil))
-			out := h.call("handle_response", answer(t, m, "Install both collections"))
+			out := h.call("handle_response", h.answer(m, "Install both collections"))
 			m = menu(t, out)
 			if !strings.HasPrefix(m.Choice.Query, "Installed 36") {
 				t.Fatalf("install did not finish automatically: %s", out)
@@ -243,8 +273,8 @@ func TestCompiledPlugin(t *testing.T) {
 				}
 			}
 			h.assertPreserved()
-			m = menu(t, h.call("handle_response", answer(t, m, "Installed / cache status")))
-			if out := h.call("handle_response", answer(t, m, "Exit")); string(out) != `"Exit"` {
+			m = menu(t, h.call("handle_response", h.answer(m, "Installed / cache status")))
+			if out := h.call("handle_response", h.answer(m, "Exit")); string(out) != `"Exit"` {
 				t.Fatalf("Exit ABI: %s", out)
 			}
 			for _, kill := range []string{`"Kill"`, `{"Kill":{}}`} {
@@ -269,13 +299,13 @@ func TestCompiledPluginMergeAndDeniedHTTPPreserveFiles(t *testing.T) {
 	write(t, filepath.Join(h.pocket, offline.PackPath), encoded)
 	h.seed(offline.Carts{"mot_sorcerergame": carts["mot_sorcerergame"]})
 	m := menu(t, h.call("start", nil))
-	m = menu(t, h.call("handle_response", answer(t, m, "Install Sorcerer")))
+	m = menu(t, h.call("handle_response", h.answer(m, "Install Sorcerer")))
 	old["mot_sorcerergame"] = carts["mot_sorcerergame"]
 	merged := h.pack()
 	assertPack(t, merged, old)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	code, out, err := h.plugin.CallWithContext(ctx, "handle_response", answer(t, m, "Update Sorcerer"))
+	code, out, err := h.plugin.CallWithContext(ctx, "handle_response", h.answer(m, "Update Sorcerer"))
 	if err == nil && code == 0 {
 		failure := menu(t, out)
 		if strings.HasPrefix(failure.Choice.Query, "Installed ") || !strings.Contains(strings.ToLower(failure.Choice.Query), "http") {
@@ -311,7 +341,7 @@ func TestCompiledPluginMalformedPublishedPackPreservesFiles(t *testing.T) {
 			m := menu(t, h.call("start", nil))
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			code, out, callErr := h.plugin.CallWithContext(ctx, "handle_response", answer(t, m, "Install Sorcerer"))
+			code, out, callErr := h.plugin.CallWithContext(ctx, "handle_response", h.answer(m, "Install Sorcerer"))
 			if callErr != nil || code != 0 {
 				t.Errorf("malformed count %#x trapped instead of reporting rejection: code=%d err=%v", count, code, callErr)
 			} else if !strings.HasPrefix(menu(t, out).Choice.Query, "Stopped:") {
@@ -353,7 +383,7 @@ func TestCompiledPluginCancellationPreservesPack(t *testing.T) {
 	}
 	timer := time.AfterFunc(5*time.Second, cancel)
 	defer timer.Stop()
-	_, _, err = h.plugin.CallWithContext(ctx, "handle_response", answer(t, m, "Install Arcade"))
+	_, _, err = h.plugin.CallWithContext(ctx, "handle_response", h.answer(m, "Install Arcade"))
 	if err == nil || ctx.Err() == nil {
 		t.Fatalf("expected actual context cancellation during automatic install, got %v", err)
 	}
@@ -397,7 +427,7 @@ func TestCompiledPluginDownloadCourtesyTimer(t *testing.T) {
 	})}
 	t.Cleanup(func() { http.DefaultClient = previous })
 	m := menu(t, h.call("start", nil))
-	out := h.call("handle_response", answer(t, m, "Install Arcade"))
+	out := h.call("handle_response", h.answer(m, "Install Arcade"))
 	if !strings.HasPrefix(menu(t, out).Choice.Query, "Installed 35") {
 		t.Fatalf("mocked automatic install failed: %s", out)
 	}
@@ -430,7 +460,7 @@ func TestCompiledPluginCrossCallCourtesyTimer(t *testing.T) {
 	t.Cleanup(func() { http.DefaultClient = previous })
 	for i := 0; i < 2; i++ {
 		m := menu(t, h.call("start", nil))
-		out := h.call("handle_response", answer(t, m, "Update Sorcerer"))
+		out := h.call("handle_response", h.answer(m, "Update Sorcerer"))
 		if !strings.HasPrefix(menu(t, out).Choice.Query, "Installed 1") {
 			t.Fatalf("mocked update failed: %s", out)
 		}
@@ -479,18 +509,18 @@ func TestCompiledPluginBrowseAndDownload(t *testing.T) {
 	})}
 	t.Cleanup(func() { http.DefaultClient = previous })
 	c := menu(t, h.call("start", nil))
-	list := menu(t, h.call("handle_response", answer(t, c, "Browse popular carts")))
+	list := menu(t, h.call("handle_response", h.answer(c, "Browse popular carts")))
 	if !strings.Contains(list.Choice.Choices[0], "Fixture cart") {
 		t.Fatal(list)
 	}
-	detail := menu(t, h.call("handle_response", answer(t, list, list.Choice.Choices[0])))
+	detail := menu(t, h.call("handle_response", h.answer(list, list.Choice.Choices[0])))
 	opened := ""
 	h.onOpen = func(url string) { opened = url }
-	detail = menu(t, h.call("handle_response", answer(t, detail, "Open BBS page")))
+	detail = menu(t, h.call("handle_response", h.answer(detail, "Open BBS page")))
 	if opened != "https://www.lexaloffle.com/bbs/?pid=90001" {
 		t.Fatal(opened)
 	}
-	done := menu(t, h.call("handle_response", answer(t, detail, "Download to Pocket")))
+	done := menu(t, h.call("handle_response", h.answer(detail, "Download to Pocket")))
 	if !strings.Contains(done.Choice.Query, "Downloaded") {
 		t.Fatal(done)
 	}
@@ -508,9 +538,89 @@ func TestCompiledPluginBrowseAndDownload(t *testing.T) {
 		t.Fatal("browsing altered dependency bundle")
 	}
 	// A repeated install uses the original cache with zero extra HTTP calls.
-	h.call("handle_response", answer(t, done, "Download to Pocket"))
+	h.call("handle_response", h.answer(done, "Download to Pocket"))
 	if len(paths) != 2 {
 		t.Fatal("cached standalone redownloaded")
+	}
+	h.assertPreserved()
+}
+
+func TestCompiledPluginSearchTextPaginationAndDownload(t *testing.T) {
+	h := newHarness(t, "pocket", "www.lexaloffle.com")
+	const listing = "<a href=#page=2&mode=carts&search=fixture>Next</a><script id=cart_data_script>\npdat=[['90001',42,`Post`,\"thumb\",256,170,\"date\",7,\"Author\",\"date\",0,\"\",1,2,0,7,2,'0',[],2,21,7,`Fixture Game`,``],];</script>"
+	png := testcart.PNG(71)
+	oldPack := []byte("unchanged dependency pack")
+	write(t, filepath.Join(h.pocket, offline.PackPath), oldPack)
+	previous := http.DefaultClient
+	var requests []time.Time
+	var pages []string
+	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != "GET" || r.URL.Scheme != "https" || r.URL.Host != "www.lexaloffle.com" {
+			t.Fatalf("unexpected request: %s", r.URL)
+		}
+		requests = append(requests, time.Now())
+		body := []byte(listing)
+		switch r.URL.Path {
+		case "/bbs/lister.php":
+			q := r.URL.Query()
+			if q.Get("search") != "雪 &cat=8+#?" || q.Get("cat") != "7" || q.Get("mode") != "carts" || q.Get("popular") != "" {
+				t.Fatalf("incorrect search URL: %s", r.URL)
+			}
+			pages = append(pages, q.Get("page"))
+		case "/bbs/get_cart.php":
+			if r.URL.Query().Get("lid") != "90001" {
+				t.Fatal(r.URL)
+			}
+			body = png
+		default:
+			t.Fatal(r.URL)
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: r}, nil
+	})}
+	t.Cleanup(func() { http.DefaultClient = previous })
+	main := menu(t, h.call("start", nil))
+	browse := menu(t, h.call("handle_response", answer(t, main, "Browse BBS")))
+	out := h.call("handle_response", answer(t, browse, "Search"))
+	var prompt struct{ Text struct{ Name, Query string } }
+	if err := json.Unmarshal(out, &prompt); err != nil || prompt.Text.Name == "" {
+		t.Fatalf("missing Text: %s", out)
+	}
+	text := func(name, value string) []byte {
+		b, err := json.Marshal(map[string]any{"Answer": map[string]string{"name": name, "value": value}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	// Text prompts must restore without Choice entries; whitespace returns to Browse.
+	browse = menu(t, h.call("handle_response", text(prompt.Text.Name, "  ")))
+	out = h.call("handle_response", answer(t, browse, "Search"))
+	if err := json.Unmarshal(out, &prompt); err != nil || prompt.Text.Name == "" {
+		t.Fatal(string(out))
+	}
+	list := menu(t, h.call("handle_response", text(prompt.Text.Name, "雪 &cat=8+#?")))
+	list = menu(t, h.call("handle_response", answer(t, list, "Next page")))
+	detail := menu(t, h.call("handle_response", answer(t, list, list.Choice.Choices[0])))
+	done := menu(t, h.call("handle_response", answer(t, detail, "Download to Pocket")))
+	if !strings.Contains(done.Choice.Query, "Downloaded") || len(requests) != 3 || strings.Join(pages, ",") != "1,2" {
+		t.Fatal(done, pages, requests)
+	}
+	for i := 1; i < len(requests); i++ {
+		if gap := requests[i].Sub(requests[i-1]); gap < 15*time.Second {
+			t.Fatalf("search request cooldown %v", gap)
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(h.pocket, offline.CartPath, "90001.p8.png"))
+	if err != nil || !bytes.Equal(got, png) || !bytes.Equal(h.pack(), oldPack) {
+		t.Fatalf("incorrect search download or changed pack: %v", err)
+	}
+	list = menu(t, h.call("handle_response", answer(t, done, "Back to list")))
+	out = h.call("handle_response", answer(t, list, "New search"))
+	if !bytes.Contains(out, []byte(`"Text"`)) {
+		t.Fatalf("missing New search input: %s", out)
+	}
+	if out := h.call("handle_response", []byte(`"Kill"`)); string(out) != `"Exit"` {
+		t.Fatalf("Text cancellation: %s", out)
 	}
 	h.assertPreserved()
 }

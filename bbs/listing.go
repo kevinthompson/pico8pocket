@@ -20,6 +20,7 @@ const (
 	Popular    Order = "popular"
 	MaxPage          = 1000
 	MaxListing       = 1024 * 1024
+	MaxSearch        = 120
 )
 
 type Cart struct{ ID, Title, Author string }
@@ -31,11 +32,31 @@ type Page struct {
 	HasNext bool
 }
 
-func ListingURL(order Order, page int) (string, error) {
+// NormalizeSearch bounds text supplied by the host before constructing a BBS URL.
+func NormalizeSearch(query string) (string, error) {
+	if !utf8.ValidString(query) || utf8.RuneCountInString(query) > MaxSearch {
+		return "", fmt.Errorf("search must be at most %d characters", MaxSearch)
+	}
+	for _, c := range query {
+		if unicode.IsControl(c) {
+			return "", fmt.Errorf("search contains a control character")
+		}
+	}
+	return strings.TrimSpace(query), nil
+}
+
+func ListingURL(order Order, page int, search string) (string, error) {
 	if (order != Recent && order != Popular) || page < 1 || page > MaxPage {
 		return "", fmt.Errorf("invalid BBS listing order or page")
 	}
+	normalized, err := NormalizeSearch(search)
+	if err != nil || normalized != search || (search != "" && order != Recent) {
+		return "", fmt.Errorf("invalid BBS search")
+	}
 	q := url.Values{"cat": {"7"}, "sub": {"2"}, "mode": {"carts"}, "orderby": {"ts"}, "page": {strconv.Itoa(page)}, "use_hurl": {"1"}}
+	if search != "" {
+		q.Set("search", search)
+	}
 	if order == Popular {
 		q.Set("popular", "1")
 	}

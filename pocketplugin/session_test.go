@@ -46,8 +46,41 @@ func answer(c choiceScreen, v string) []byte {
 }
 func respond(t *testing.T, s *Session, c choiceScreen, v string) choiceScreen {
 	t.Helper()
-	b, e := s.Handle(answer(c, v))
-	return screen(t, b, e)
+	steps := actionPath(v)
+	if len(steps) > 1 && steps[0] == "Browse BBS" && strings.Contains(strings.Join(c.Choice.Choices, "|"), "Recent") {
+		steps = steps[1:]
+	}
+	for _, step := range steps {
+		b, e := s.Handle(answer(c, step))
+		c = screen(t, b, e)
+	}
+	return c
+}
+func actionPath(action string) []string {
+	if action == "Installed / cache status" {
+		return []string{"Status"}
+	}
+	if action == "Browse recent carts" {
+		return []string{"Browse BBS", "Recent"}
+	}
+	if action == "Browse popular carts" {
+		return []string{"Browse BBS", "Popular"}
+	}
+	if strings.HasPrefix(action, "Install ") || strings.HasPrefix(action, "Update ") {
+		collection := "Both collections"
+		if strings.HasSuffix(action, "Arcade") {
+			collection = "Pico Arcade"
+		}
+		if strings.HasSuffix(action, "Sorcerer") {
+			collection = "Sorcerer"
+		}
+		op := "Install"
+		if strings.HasPrefix(action, "Update ") {
+			op = "Refresh downloads"
+		}
+		return []string{"Collections", collection, op}
+	}
+	return []string{action}
 }
 func fixture(t *testing.T, n byte) []byte {
 	t.Helper()
@@ -90,7 +123,7 @@ func TestMenuProtocol(t *testing.T) {
 	p, h := roots(t)
 	s := New(p, h, nil, nil)
 	c := start(t, s)
-	want := "Install both collections|Install Arcade|Install Sorcerer|Update both collections|Update Arcade|Update Sorcerer|Installed / cache status|Browse recent carts|Browse popular carts|Exit"
+	want := "Browse BBS|Collections|Status|Exit"
 	if strings.Join(c.Choice.Choices, "|") != want {
 		t.Fatal(c)
 	}
