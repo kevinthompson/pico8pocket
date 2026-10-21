@@ -3,7 +3,7 @@
 This repository owns the Pico8Pocket app, offline collections plugin and release process.
 The existing [architecture](architecture.md#hardware-and-runtime) defines the
 matched os20 SDK/API/runtime combination. The approved
-[offline BBS design](superpowers/specs/2026-10-20-offline-bbs-design.md)
+[offline BBS design](https://github.com/zenibako/pico8pocket/issues/26)
 defines the offline installer and optional bundle loader; its Go port note
 records the retained Go/TinyGo implementation. The
 [collections guide](OFFLINE-COLLECTIONS.md) documents the thumbnail-plugin migration.
