@@ -1,0 +1,18 @@
+Mode: built-in image_gen tool; reference-based generation.
+Reference: assets/branding/pico8-platform.png (existing project PICO-8 wordmark).
+Export: RGB PNG, 240x240, Lanczos downsample from the generated square artwork.
+
+Prompt:
+Create one square pixel-art thumbnail for the Pico8Pocket Offline Collections
+plugin. Use the supplied PICO-8 logo image as the reference: preserve the
+recognizable cream-white PICO-8 pixel wordmark letterforms and the little rainbow
+pixel sparkle. Compose a compact square icon on a flat near-black #141419
+background with generous 10% safe margins. The PICO-8 wordmark occupies the
+upper-middle, large enough to be recognizable when the entire square is
+displayed at 120 by 120 pixels. Beneath it add one simple small stack of three
+8-bit game cartridge silhouettes in PICO-8 coral red, golden yellow and cyan,
+suggesting an offline game collection; keep their shapes extremely simple. No
+additional text, no FANTASY CONSOLE subtitle, no border, no gradients, no shadows,
+no 3D, no photographic texture, no fine detail. Strict crisp low-resolution pixel
+art, aligned to a coarse square pixel grid. Flat solid colors only. This is a
+final production plugin thumbnail, not a mockup; output only the square artwork.
