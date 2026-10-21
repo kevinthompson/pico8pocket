@@ -39,8 +39,9 @@ static inline __attribute__((always_inline)) const TValue *delegate_raw(Table *t
  * pattern below contains none. Nested accepted delegates also contain none.
  * See z8lua-servicepoints.patch and z8lua-pc-register.patch for hook dispatch.
  * Does not allocate, collect or invoke cart code.
- * Returns a borrowed non-nil slot (including false), or NULL to require the
- * ordinary metamethod call. Copy the slot into a rooted value before allocation,
+ * Returns a borrowed slot (including false), luaO_nilobject when the chain
+ * ends at a table without __index, or NULL to require the ordinary
+ * metamethod call. Copy the slot into a rooted value before allocation,
  * cart calls or table mutation. A miss may cache the absence of __index in
  * metatable flags; it does not alter the Lua stack or callback state.
  */
@@ -84,13 +85,16 @@ const TValue *luaV_delegateget (lua_State *L, const TValue *t,
     value = delegate_raw(hvalue(base), rawtsvalue(key));
     if (!ttisnil(value)) return value;  /* false is a successful hit */
     t = base;
+    /* With no __index on 'base', the delegate's own base[key] read ends in
+       nil exactly as the ordinary call would; inherited defaults that were
+       never set (flip_x, destroyed, ...) are common in Celeste 2. */
     Table *metatable = hvalue(t)->metatable;
     if (metatable == NULL || (metatable->flags & (1u << TM_INDEX)))
-      return NULL;
+      return luaO_nilobject;
     tm = delegate_raw(metatable, G(L)->tmname[TM_INDEX]);
     if (ttisnil(tm)) {
-      metatable->flags |= cast_byte(1u << TM_INDEX);
-      return NULL;
+      metatable->flags |= cast_byte(1u << TM_INDEX);  /* as luaT_gettm */
+      return luaO_nilobject;
     }
   }
   return NULL;
@@ -150,7 +154,7 @@ const TValue *luaV_delegatebits(lua_State *L, Value function_value,
 
 /** @brief Enter the delegate guard after callTM proves a Lua closure tag.
  * The typed pointer avoids aggregate ABI coupling and inactive union reads.
- * Borrows the closure and operands; returns a borrowed non-nil slot on success
+ * Borrows the closure and operands; returns a borrowed slot (possibly nil) on success
  * or NULL when callTM must execute its ordinary callback path.
  */
 P8P_VM_COLD
