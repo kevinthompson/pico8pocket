@@ -6,12 +6,12 @@ Sorcerer's companion from `compatibility/offline-carts.json`. No game assets or
 PICO-8 executable are included. PICO-8 is not required for plugin downloads.
 It also browses public BBS releases and downloads individually selected carts.
 
-The plugin list shows a PICO-8-inspired thumbnail with a stack of cartridges.
+The plugin list shows only the PICO-8 diamond from the existing project logo.
 Its PNG is embedded in `plugin.json` as `logo_url`, so installed artwork works
-offline and stays with the released manifest. The source image and generation
-prompt are in `assets/branding/plugin-thumbnail.png` and
-`assets/branding/plugin-thumbnail-prompt.txt`. Pocket Sync displays it at 120×120;
-the PNG is exported at 240×240 for sharper rendering on Retina displays.
+offline and stays with the released manifest. `assets/branding/plugin-thumbnail.png`
+preserves the diamond's original pixels and colors from `pico8-platform.png`,
+with a transparent background and no text. Pocket Sync displays it at 120×120;
+the PNG uses nearest-neighbor scaling to 240×240 for Retina displays.
 
 ## Use
 
