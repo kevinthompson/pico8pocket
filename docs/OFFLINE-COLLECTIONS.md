@@ -79,8 +79,9 @@ collection actions for Arcade/Sorcerer dependencies. Other multicart games may
 need additional carts, and downloaded games still depend on core compatibility.
 
 Listing requests, metadata lookups and cart downloads share the 15-second network cooldown,
-including across menu actions. Only the explicitly requested page/cart is fetched;
-there is no background crawl or bulk-download action. Cached cart reinstalls do
+including across menu actions. Browsing fetches only the requested page/cart;
+there is no background crawl or bulk-install action. Tidy may fetch existing cart
+IDs for verification as described below. Cached cart reinstalls do
 not make network requests. HTTP 429 stops the action without automatic retries.
 Errors preserve existing installed files and report a retryable menu.
 
@@ -101,14 +102,23 @@ The BBS ID suffix stays intact. Cache files and bundle entries keep their origin
 IDs, preserving collection handoffs.
 
 Tidy uses byte-matched saved metadata or the verified cart cache to establish a
-file's identity. It uses saved titles or the curated catalog first; missing titles
+file's identity. If neither matches, numeric BBS IDs and curated catalog aliases
+can be verified by downloading the current BBS cart and comparing every byte.
+Only an exact match is cached and eligible for renaming; different revisions or
+modified carts stay untouched. It uses saved titles or the curated catalog first; missing titles
 for known numeric IDs are retrieved from their public BBS posts. The public post
 title is used when a separate cart title is unavailable. The same 15-second
 request cooldown, cancellation and HTTP 429 stop behavior apply. Saved metadata
 lets subsequent tidy operations work offline.
 
 The result reports renamed, already tidy, unmatched, conflicting and invalid
-files. Symlinked files and directories are skipped. The complete scan is bounded
+files, with counts of unmatched reasons and up to five example paths in the log.
+Manually named carts without a saved identity, such as `celeste_classic_2.p8.png`,
+are left in place: a filename alone does not identify a public BBS release.
+An ID-only cart such as `11437.p8.png` can be verified online even if it was copied
+from another computer or its original host cache is missing. Verification downloads
+and title lookups share the same 15-second cooldown, so a large uncached library
+can take several minutes. Symlinked files and directories are skipped. The complete scan is bounded
 to 4096 entries and 32 directory levels and can be cancelled before renaming starts.
 Existing conflicting files are
 preserved; identical copies can be consolidated. Cart bytes and the dependency

@@ -184,7 +184,7 @@ before publication; see the linked instructions. Once distributed, choose
 **Collections**, select **Pico Arcade**, **Sorcerer**, or **Both collections**,
 then **Install**. **Refresh downloads** retrieves fresh copies; **Library → Status** reports installed and cached counts. **Library → Tidy
 filenames** scans `Assets/pico8/common/` and its subfolders, renaming verified PNG
-carts in place to `Title [BBS ID].p8.png` using saved metadata or paced BBS title
+carts in place to `Title [BBS ID].p8.png` using saved metadata or paced BBS verification and title
 lookups. Unmatched files and conflicts are preserved.
 Downloads are cached and paced; a rate limit stops the batch so it can resume
 later from the cache. No PICO-8 installation is needed for these downloads.

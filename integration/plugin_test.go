@@ -36,6 +36,52 @@ type harness struct {
 	onOpen       func(string)
 }
 
+func TestTidyVerifiesUncachedCatalogCartThroughWASI(t *testing.T) {
+	h := newHarness(t, "host", "www.lexaloffle.com")
+	data := testcart.PNG(83)
+	common := filepath.Join(h.pocket, offline.CommonPath)
+	write(t, filepath.Join(common, "11437.p8.png"), data)
+	manual := filepath.Join(common, "celeste_classic_2.p8.png")
+	write(t, manual, data)
+	oldPack := []byte("unchanged dependency bundle")
+	write(t, filepath.Join(h.pocket, offline.PackPath), oldPack)
+	previous := http.DefaultClient
+	requests := 0
+	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests++
+		if r.Method != "GET" || r.URL.Scheme != "https" || r.URL.Host != "www.lexaloffle.com" || r.URL.Path != "/bbs/get_cart.php" || r.URL.RawQuery != "cat=7&play_src=2&lid=11437" || requests != 1 {
+			t.Fatalf("unexpected verification request: %s", r.URL)
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(data)), Request: r}, nil
+	})}
+	t.Cleanup(func() { http.DefaultClient = previous })
+	main := menu(t, h.call("start", nil))
+	library := menu(t, h.call("handle_response", answer(t, main, "Library")))
+	done := menu(t, h.call("handle_response", answer(t, library, "Tidy filenames")))
+	if !strings.Contains(done.Choice.Query, "Renamed 1") || !strings.Contains(done.Choice.Query, "no saved identity: 1") || requests != 1 {
+		t.Fatal(done, requests)
+	}
+	got, err := os.ReadFile(filepath.Join(common, "picoman [11437].p8.png"))
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatal("verified cart changed", err)
+	}
+	if _, err := os.Stat(filepath.Join(common, "11437.p8.png")); !os.IsNotExist(err) {
+		t.Fatal("legacy filename remains", err)
+	}
+	if title, err := offline.CachedTitle(h.host, "11437", data); err != nil || title != "picoman" {
+		t.Fatal(title, err)
+	}
+	done = menu(t, h.call("handle_response", answer(t, done, "Tidy filenames")))
+	if !strings.Contains(done.Choice.Query, "already tidy 1") || requests != 1 {
+		t.Fatal("repeat tidy used network", done, requests)
+	}
+	got, err = os.ReadFile(manual)
+	if err != nil || !bytes.Equal(got, data) || !bytes.Equal(h.pack(), oldPack) {
+		t.Fatal("manual cart or bundle changed", err)
+	}
+	h.assertPreserved()
+}
+
 func artifact(t *testing.T) string {
 	t.Helper()
 	path := os.Getenv("POCKET_PLUGIN_WASM")

@@ -133,6 +133,10 @@ assets use sanitized title-plus-ID filenames while cache and bundle keys stay ID
 based. Library holds status and an explicit tidy operation. Byte-bound title
 metadata is stored beside the host cache; missing numeric-ID titles use a bounded
 public BBS detail parser that checks the exact post ID and PICO-8 release category.
+When local identity records do not match, numeric IDs and curated aliases can be
+verified against an exact-byte BBS download through the shared request cooldown.
+Different revisions and unassociated manual filenames remain untouched; the result
+groups unmatched reasons and logs at most five example paths.
 Tidy scans `Assets/pico8/common/` recursively, verifies file bytes, preserves
 conflicts, and uses exclusive publication before removing an original filename.
 Carts keep their containing directory. Symlinks are excluded and the entire scan
