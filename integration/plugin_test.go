@@ -186,7 +186,7 @@ func newHarness(t *testing.T, first string, allowedHosts ...string) *harness {
 		}
 		stack[0] = 0
 	}, []extism.ValueType{extism.ValueTypeI64}, []extism.ValueType{extism.ValueTypeI64})
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	t.Cleanup(cancel)
 	p, err := extism.NewPlugin(ctx,
 		extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: wasm}}, AllowedHosts: allowedHosts},
@@ -212,7 +212,12 @@ func write(t *testing.T, path string, data []byte) {
 
 func (h *harness) call(fn string, in []byte) []byte {
 	h.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	return h.callWithin(fn, in, 30*time.Second)
+}
+
+func (h *harness) callWithin(fn string, in []byte, timeout time.Duration) []byte {
+	h.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	code, out, err := h.plugin.CallWithContext(ctx, fn, in)
 	if err != nil || code != 0 {

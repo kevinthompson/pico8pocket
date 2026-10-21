@@ -133,13 +133,19 @@ assets use sanitized title-plus-ID filenames while cache and bundle keys stay ID
 based. Library holds status and an explicit tidy operation. Byte-bound title
 metadata is stored beside the host cache; missing titles use a bounded public
 BBS detail parser that checks the exact numeric post or cart alias and PICO-8
-release category. Multi-cart posts require a unique byte match against their
-versioned candidates. Noncatalog aliases require matching metadata before a
-download; general-list fallback pages are rejected.
-When local identity records do not match, BBS IDs and resolved aliases can be
-verified against an exact-byte BBS download through the shared request cooldown.
-Different revisions and unassociated manual filenames remain untouched; the result
-groups unmatched reasons and logs one example per reason, at most five paths.
+release category. Multi-cart posts provide versioned candidates. Failed or
+nonmatching aliases fall back to a public BBS title search; search metadata never
+establishes identity without an exact PNG byte match. Up to ten candidates are
+checked per batch through the shared request cooldown. An exhausted candidate
+set with one match publishes automatically; partial sets, multiple matches and
+unresolved files return Choice/Text prompts for selection, refinement, a manual
+ID, more results, skip or stop. Conflicting destinations offer an alternate title.
+A bounded tidy job persists relative source paths, SHA-256 fingerprints, counts,
+candidate cursors and prompt state across Extism calls. Restore validates these
+fields before assigning state; callbacks and roots always come from the host.
+Source bytes are rechecked after prompts and before exclusive publication.
+Cross-ID resolution changes only the standalone filename and the verified ID's
+cache/metadata; it never associates matching bytes with the failed source alias.
 Tidy scans `Assets/pico8/common/` recursively, verifies file bytes, preserves
 conflicts, and uses exclusive publication before removing an original filename.
 Carts keep their containing directory. Symlinks are excluded and the entire scan

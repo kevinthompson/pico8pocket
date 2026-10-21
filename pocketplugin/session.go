@@ -26,6 +26,7 @@ type Session struct {
 	List                 ListingFetchFunc
 	OpenURL              func(string) error
 	browser              *browserState
+	tidy                 *tidyJob
 	screen               string
 	collection           string
 	searchInput          bool
@@ -132,6 +133,9 @@ func (s *Session) Handle(input []byte) ([]byte, error) {
 	if name != s.name {
 		return nil, errors.New("answer does not match the current prompt")
 	}
+	if s.searchInput && s.screen == "tidy" {
+		return s.handleTidyText(value)
+	}
 	if s.searchInput {
 		query, err := bbs.NormalizeSearch(value)
 		if err != nil {
@@ -155,6 +159,9 @@ func (s *Session) Handle(input []byte) ([]byte, error) {
 	if value == "Exit" {
 		return s.finish()
 	}
+	if s.tidy != nil {
+		return s.handleTidyChoice(value)
+	}
 	if s.browser != nil {
 		return s.handleBrowser(value)
 	}
@@ -173,12 +180,7 @@ func (s *Session) Handle(input []byte) ([]byte, error) {
 		case "Back":
 			return s.menu("Pico8Pocket")
 		case "Tidy filenames":
-			summary, err := s.TidyFilenames()
-			if err != nil {
-				summary += "\nStopped: " + err.Error()
-			}
-			s.log(summary)
-			return s.libraryMenu(summary)
+			return s.startTidy()
 		case "Status":
 			summary, err := s.Status()
 			if err != nil {
@@ -225,6 +227,10 @@ func (s *Session) Handle(input []byte) ([]byte, error) {
 }
 func (s *Session) finish() ([]byte, error) {
 	s.exited = true
+	s.tidy = nil
+	if s.screen == "tidy" {
+		s.screen = "home"
+	}
 	s.name = ""
 	s.choices = nil
 	return []byte(`"Exit"`), nil
@@ -405,6 +411,7 @@ type conversationState struct {
 	Screen      string        `json:"screen"`
 	Collection  string        `json:"collection,omitempty"`
 	SearchInput bool          `json:"search_input,omitempty"`
+	Tidy        *tidyJob      `json:"tidy,omitempty"`
 }
 
 func (s *Session) Snapshot() ([]byte, error) {
@@ -412,9 +419,16 @@ func (s *Session) Snapshot() ([]byte, error) {
 	if !s.LastRequest.IsZero() {
 		stamp = s.LastRequest.UnixNano()
 	}
-	return json.Marshal(conversationState{s.started, s.exited, s.sequence, s.name, s.choices, stamp, s.browser, s.screen, s.collection, s.searchInput})
+	data, err := json.Marshal(conversationState{s.started, s.exited, s.sequence, s.name, s.choices, stamp, s.browser, s.screen, s.collection, s.searchInput, s.tidy})
+	if len(data) > maxTidyState {
+		return nil, errors.New("conversation exceeds size limit")
+	}
+	return data, err
 }
 func (s *Session) Restore(data []byte) error {
+	if len(data) > maxTidyState {
+		return errors.New("saved conversation exceeds size limit")
+	}
 	var state conversationState
 	if err := json.Unmarshal(data, &state); err != nil {
 		return err
@@ -422,22 +436,32 @@ func (s *Session) Restore(data []byte) error {
 	if !state.Started || state.Sequence == 0 || (!state.Exited && (state.Name == "" || (len(state.Choices) == 0 && !state.SearchInput))) {
 		return errors.New("invalid saved conversation")
 	}
-	if state.Screen != "home" && state.Screen != "library" && state.Screen != "browse" && state.Screen != "collections" && state.Screen != "collection" {
+	if state.Screen != "home" && state.Screen != "library" && state.Screen != "browse" && state.Screen != "collections" && state.Screen != "collection" && state.Screen != "tidy" {
 		return errors.New("invalid saved menu")
 	}
 	if state.Screen == "collection" && state.Collection != "both" && state.Collection != "arcade" && state.Collection != "sorcerer" {
 		return errors.New("invalid saved collection")
 	}
-	if state.SearchInput && (state.Screen != "browse" || state.Browser != nil || len(state.Choices) != 0) {
+	if state.SearchInput && ((state.Screen != "browse" && state.Screen != "tidy") || state.Browser != nil || len(state.Choices) != 0) {
 		return errors.New("invalid saved text input")
 	}
 	if state.Browser != nil && state.Screen != "browse" {
 		return errors.New("invalid saved browser menu")
 	}
-	s.screen, s.collection, s.searchInput = state.Screen, state.Collection, state.SearchInput
+	if (state.Screen == "tidy") != (state.Tidy != nil) {
+		return errors.New("invalid saved tidy screen")
+	}
+	if err := validateTidy(state.Tidy); err != nil {
+		return err
+	}
+	if state.Tidy != nil && (state.Browser != nil || state.SearchInput != (state.Tidy.Pending.Input != "")) {
+		return errors.New("invalid saved tidy input")
+	}
 	if err := validateBrowser(state.Browser); err != nil {
 		return err
 	}
+	s.screen, s.collection, s.searchInput = state.Screen, state.Collection, state.SearchInput
+	s.tidy = state.Tidy
 	s.browser = state.Browser
 	s.started = state.Started
 	s.exited = state.Exited

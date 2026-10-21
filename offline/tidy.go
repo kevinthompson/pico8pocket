@@ -17,6 +17,29 @@ type StandaloneFile struct {
 
 // Path checks the relative location and refuses symlinked directories or files.
 func (file StandaloneFile) Path(pocket string) (string, error) {
+	dir, err := file.relativeDirectory()
+	if err != nil {
+		return "", err
+	}
+	parent, err := commonDirectory(pocket, dir)
+	if err != nil {
+		return "", err
+	}
+	source := filepath.Join(parent, file.Name)
+	info, err := os.Lstat(source)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("cart source is not a regular file: %s", source)
+	}
+	return source, nil
+}
+
+// Validate checks a saved scan entry without accessing host-controlled roots.
+func (file StandaloneFile) Validate() error { _, err := file.relativeDirectory(); return err }
+
+func (file StandaloneFile) relativeDirectory() (string, error) {
 	id, err := StandaloneID(file.Name)
 	if err != nil || id != file.ID {
 		return "", fmt.Errorf("invalid source identity")
@@ -32,19 +55,7 @@ func (file StandaloneFile) Path(pocket string) (string, error) {
 	if dir == ".." || strings.HasPrefix(dir, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("cart directory escapes common root")
 	}
-	parent, err := commonDirectory(pocket, dir)
-	if err != nil {
-		return "", err
-	}
-	source := filepath.Join(parent, file.Name)
-	info, err := os.Lstat(source)
-	if err != nil {
-		return "", err
-	}
-	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("cart source is not a regular file: %s", source)
-	}
-	return source, nil
+	return dir, nil
 }
 
 func commonDirectory(pocket, relative string) (string, error) {
@@ -164,6 +175,12 @@ func StandaloneFiles(pocket string, checkCancel func() error) ([]StandaloneFile,
 // overwrites an existing destination and keeps the source on publication failure.
 // Results are renamed, unchanged, or conflict.
 func TidyStandalone(pocket string, file StandaloneFile, title string, data []byte) (string, error) {
+	return TidyStandaloneAs(pocket, file, file.ID, title, data)
+}
+
+// TidyStandaloneAs publishes a verified destination identity while preserving
+// source-path validation, exclusive creation and byte rechecks.
+func TidyStandaloneAs(pocket string, file StandaloneFile, targetID, title string, data []byte) (string, error) {
 	if err := ValidatePNG(data); err != nil {
 		return "", err
 	}
@@ -171,7 +188,7 @@ func TidyStandalone(pocket string, file StandaloneFile, title string, data []byt
 	if err != nil {
 		return "", err
 	}
-	name, err := CartFilename(file.ID, title)
+	name, err := CartFilename(targetID, title)
 	if err != nil {
 		return "", err
 	}

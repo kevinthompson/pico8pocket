@@ -139,6 +139,12 @@ func (s *Session) TidyFilenames() (string, error) {
 // Metadata resolves noncatalog aliases before they reach this verification step.
 // A newer or otherwise different cart is left untouched, including its cache.
 func (s *Session) verifyTidyCart(id string, data []byte) (string, error) {
+	return s.verifyTidyCandidate(id, data, false)
+}
+
+// Interactive jobs must pause on unavailable candidates: a failed request is
+// not evidence that the candidate differs, and cannot establish uniqueness.
+func (s *Session) verifyTidyCandidate(id string, data []byte, strict bool) (string, error) {
 	if _, err := bbs.DetailURL(id); err != nil {
 		return "no saved identity", nil
 	}
@@ -146,6 +152,9 @@ func (s *Session) verifyTidyCart(id string, data []byte) (string, error) {
 		return "", nil
 	}
 	if s.fetch == nil {
+		if strict {
+			return "", errors.New("cart verification network unavailable")
+		}
 		return "no saved identity (network unavailable)", nil
 	}
 	if err := s.beforeRequest("verify cart #" + id); err != nil {
@@ -163,6 +172,18 @@ func (s *Session) verifyTidyCart(id string, data []byte) (string, error) {
 		return "", err
 	}
 	if fetchErr != nil || httpStatus(status, retry) != nil || offline.ValidatePNG(body) != nil {
+		if strict {
+			if fetchErr != nil {
+				return "", fetchErr
+			}
+			if status == 404 {
+				return "BBS cart unavailable", nil
+			}
+			if err := httpStatus(status, retry); err != nil {
+				return "", err
+			}
+			return "", errors.New("BBS verification returned an invalid cartridge")
+		}
 		return "BBS verification unavailable", nil
 	}
 	if !bytes.Equal(body, data) {

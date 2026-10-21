@@ -185,7 +185,10 @@ before publication; see the linked instructions. Once distributed, choose
 then **Install**. **Refresh downloads** retrieves fresh copies; **Library → Status** reports installed and cached counts. **Library → Tidy
 filenames** scans `Assets/pico8/common/` and its subfolders, renaming verified PNG
 carts in place to `Title [BBS ID].p8.png` using saved metadata or paced BBS verification and title
-lookups. Unmatched files and conflicts are preserved.
+lookups. Failed aliases fall back to title search with exact cart-byte verification;
+unresolved cases offer search, ID, more-results, skip and stop choices. A unique
+verified identity is used automatically after all candidates are checked.
+Unmatched files and conflicts are preserved.
 Downloads are cached and paced; a rate limit stops the batch so it can resume
 later from the cache. No PICO-8 installation is needed for these downloads.
 
