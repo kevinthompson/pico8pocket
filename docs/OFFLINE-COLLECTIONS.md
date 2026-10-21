@@ -59,7 +59,11 @@ not just the current page. No account or credentials are required.
 Each page shows cart titles, authors and numeric BBS IDs. Previous/Next moves
 through the listing while preserving the search term. **New search** opens a
 fresh input; **Back to Browse** returns to Recent/Popular/Search. Choosing a cart shows its BBS link and offers **Open BBS
-page** and **Download to Pocket**. No account or credentials are required.
+page** and **Download to Pocket**. A successful download shows a short completion
+message and the Pocket filename, with no repeated download prompt or button.
+Opening the BBS page preserves that completion state. To reinstall explicitly,
+return to the list and select the cart again; verified cache is reused. Failed
+downloads retain the download action for retry. No account or credentials are required.
 
 Downloads reuse verified originals in the existing host cache and atomically
 install `Assets/pico8/common/cards/bbs/<id>.p8.png`. Select that file in the Pocket

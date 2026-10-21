@@ -12,11 +12,12 @@ import (
 // ListingFetchFunc is the transport for one explicitly requested public BBS page.
 type ListingFetchFunc func(bbs.Order, int, string) (status int, body []byte, retryAfter string, err error)
 type browserState struct {
-	Query    string
-	Order    bbs.Order
-	Page     int
-	Listing  bbs.Page
-	Selected int
+	Query      string
+	Order      bbs.Order
+	Page       int
+	Listing    bbs.Page
+	Selected   int
+	Downloaded bool
 }
 
 func validateBrowser(b *browserState) error {
@@ -26,7 +27,7 @@ func validateBrowser(b *browserState) error {
 	if _, err := bbs.ListingURL(b.Order, b.Page, b.Query); err != nil {
 		return err
 	}
-	if len(b.Listing.Carts) > 60 || b.Selected < -1 || b.Selected >= len(b.Listing.Carts) {
+	if len(b.Listing.Carts) > 60 || b.Selected < -1 || b.Selected >= len(b.Listing.Carts) || (b.Downloaded && b.Selected < 0) {
 		return fmt.Errorf("invalid saved BBS listing")
 	}
 	for _, cart := range b.Listing.Carts {
@@ -74,6 +75,7 @@ func (s *Session) loadListing(order bbs.Order, page int, query string) ([]byte, 
 func (s *Session) showListing(message string) ([]byte, error) {
 	b := s.browser
 	b.Selected = -1
+	b.Downloaded = false
 	label := "Recent carts"
 	if b.Order == bbs.Popular {
 		label = "New & popular carts"
@@ -110,10 +112,16 @@ func cartChoice(cart bbs.Cart) string {
 func (s *Session) showCart(message string) ([]byte, error) {
 	cart := s.browser.Listing.Carts[s.browser.Selected]
 	query := fmt.Sprintf("%s by %s\n%s\nDownload this cart to the Pocket? Verified cache is reused. Game compatibility depends on the core.", cart.Title, cart.Author, cart.URL())
+	choices := []string{"Open BBS page", "Back to list", "Back to main menu"}
+	if s.browser.Downloaded {
+		query = fmt.Sprintf("Downloaded %s to Pocket.\nSelect bbs/%s.p8.png in the Pocket asset browser.", cart.Title, cart.ID)
+	} else {
+		choices = append([]string{"Download to Pocket"}, choices...)
+	}
 	if message != "" {
 		query = message + "\n" + query
 	}
-	return s.prompt(query, []string{"Download to Pocket", "Open BBS page", "Back to list", "Back to main menu"})
+	return s.prompt(query, choices)
 }
 func (s *Session) handleBrowser(value string) ([]byte, error) {
 	b := s.browser
@@ -143,7 +151,8 @@ func (s *Session) handleBrowser(value string) ([]byte, error) {
 			if err := s.downloadStandalone(cart.ID); err != nil {
 				return s.showCart("Stopped: " + err.Error())
 			}
-			return s.showCart("Downloaded to " + filepath.ToSlash(filepath.Join(offline.CartPath, cart.ID+".p8.png")) + ". Choose this cart in the Pocket asset browser.")
+			b.Downloaded = true
+			return s.showCart("")
 		}
 	} else {
 		if value == "Next page" && b.Listing.HasNext {

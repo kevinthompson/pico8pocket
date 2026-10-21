@@ -81,18 +81,49 @@ func TestBrowsePersistsSelectionAndDownloadsOnlyStandalone(t *testing.T) {
 	if !strings.Contains(done.Choice.Query, "Downloaded") || waits != 1 {
 		t.Fatal(done, waits)
 	}
+	for _, choice := range done.Choice.Choices {
+		if choice == "Download to Pocket" {
+			t.Fatal("completed download still offers the same download action")
+		}
+	}
+	if strings.Contains(done.Choice.Query, "Download this cart") {
+		t.Fatal("completed download still asks for confirmation")
+	}
 	if !bytes.Equal(read(t, filepath.Join(p, offline.CartPath, "90001.p8.png")), data) || !bytes.Equal(read(t, offline.CachePath(h, "90001")), data) {
 		t.Fatal("download bytes changed")
 	}
 	if !bytes.Equal(read(t, filepath.Join(p, offline.PackPath)), old) {
 		t.Fatal("standalone download rewrote dependency pack")
 	}
+	saved, err = restored.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := New(p, h, nil, restored.fetch)
+	completed.Sleep, completed.Now, completed.List = restored.Sleep, restored.Now, restored.List
+	completed.OpenURL = func(string) error { return nil }
+	if err := completed.Restore(saved); err != nil {
+		t.Fatal(err)
+	}
+	done = respond(t, completed, done, "Open BBS page")
+	if !strings.Contains(done.Choice.Query, "Downloaded Fixture Game") || !strings.Contains(done.Choice.Query, "bbs/90001.p8.png") {
+		t.Fatal(done)
+	}
+	for _, choice := range done.Choice.Choices {
+		if choice == "Download to Pocket" {
+			t.Fatal("opening BBS page forgot completed download")
+		}
+	}
+	restored = completed
 	restored.Sleep = func(time.Duration) error { t.Fatal("cached reinstallation waited"); return nil }
 	restored.fetch = func(string) (int, []byte, string, error) {
 		t.Fatal("cached reinstallation fetched")
 		return 0, nil, "", nil
 	}
-	respond(t, restored, done, "Download to Pocket")
+	// Reinstalling is explicit: return to the list and select the cart again.
+	list := respond(t, restored, done, "Back to list")
+	detail = respond(t, restored, list, list.Choice.Choices[0])
+	respond(t, restored, detail, "Download to Pocket")
 }
 func TestListingPaginationAndOpenPage(t *testing.T) {
 	p, h := roots(t)

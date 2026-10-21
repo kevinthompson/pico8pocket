@@ -524,6 +524,21 @@ func TestCompiledPluginBrowseAndDownload(t *testing.T) {
 	if !strings.Contains(done.Choice.Query, "Downloaded") {
 		t.Fatal(done)
 	}
+	for _, option := range done.Choice.Choices {
+		if option == "Download to Pocket" {
+			t.Fatal("completed download still offers download")
+		}
+	}
+	// A separate host call must preserve completion when opening the cart's page.
+	done = menu(t, h.call("handle_response", h.answer(done, "Open BBS page")))
+	if !strings.Contains(done.Choice.Query, "Downloaded Fixture cart") || !strings.Contains(done.Choice.Query, "bbs/90001.p8.png") || strings.Contains(done.Choice.Query, "Download this cart") {
+		t.Fatal(done)
+	}
+	for _, option := range done.Choice.Choices {
+		if option == "Download to Pocket" {
+			t.Fatal("restored completion still offers download")
+		}
+	}
 	if len(paths) != 2 || paths[0] != "/bbs/lister.php" || paths[1] != "/bbs/get_cart.php" {
 		t.Fatal(paths)
 	}
@@ -537,8 +552,10 @@ func TestCompiledPluginBrowseAndDownload(t *testing.T) {
 	if !bytes.Equal(h.pack(), oldPack) {
 		t.Fatal("browsing altered dependency bundle")
 	}
-	// A repeated install uses the original cache with zero extra HTTP calls.
-	h.call("handle_response", h.answer(done, "Download to Pocket"))
+	// Explicitly reselecting the cart permits a cached reinstall without HTTP.
+	list = menu(t, h.call("handle_response", h.answer(done, "Back to list")))
+	detail = menu(t, h.call("handle_response", h.answer(list, list.Choice.Choices[0])))
+	h.call("handle_response", h.answer(detail, "Download to Pocket"))
 	if len(paths) != 2 {
 		t.Fatal("cached standalone redownloaded")
 	}
