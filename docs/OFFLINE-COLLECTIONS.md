@@ -118,17 +118,21 @@ search result can supply its correct BBS identity instead. Modified carts and
 revisions with no exact match stay untouched. A matching cart is cached under its
 verified identity, without overwriting the unrelated alias cache.
 
-Each batch verifies at most **10 candidates**. One verified match renames
-automatically once the candidate set is exhausted and there are no more search
-pages. If other candidates remain unchecked, you can choose the verified match
-or continue checking. Multiple verified identities require a choice. Resolution
+Tidy checks candidates in batches of at most **10**, automatically continuing
+through later batches and search pages without asking you to proceed. One
+verified match renames automatically once the candidate set is exhausted and
+there are no more search pages. Multiple verified identities require a choice;
+files with no verified match keep their resolution prompt. Resolution
 options include **Edit search**, **Enter BBS ID** (numeric post or cart alias),
 **Check more results**, **Skip file**, and **Stop**. Stop keeps completed changes;
 a new Tidy run rescans the library. A destination containing different bytes also
 offers **Choose another filename**, retaining the verified ID. Blank text returns
 to the resolution menu. Search is bounded to 512 checked identities and 20
 verified matches per file; refining a query or entering an ID starts a fresh
-candidate set. Each queued run must fit the saved-state size limit.
+candidate set. If a search limit prevents checking the entire candidate set,
+Tidy pauses rather than assuming a single match is unique. Each queued run must
+fit the saved-state size limit. Source bytes and cancellation are checked between
+batches and pages. A broad uncached search may take much longer than one batch.
 
 The queue, counts, candidate position and prompt survive Pocket Sync calls.
 The source file is read again after an answer; changed, missing or symlinked files

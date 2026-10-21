@@ -202,7 +202,7 @@ func tidyTextAnswer(t *testing.T, s *Session, prompt choiceScreen, option, value
 	return screen(t, b, err)
 }
 
-func TestTidyBatchesCandidatesAndResumesWithoutRepeating(t *testing.T) {
+func TestTidyChecksLaterBatchesAutomatically(t *testing.T) {
 	p, h := roots(t)
 	data, wrong := fixture(t, 56), fixture(t, 57)
 	put(t, filepath.Join(p, offline.CommonPath, "unknown.p8.png"), data)
@@ -223,12 +223,7 @@ func TestTidyBatchesCandidatesAndResumesWithoutRepeating(t *testing.T) {
 		}
 		return 200, tidyListing(carts...), "", nil
 	}
-	prompt := respond(t, s, respond(t, s, start(t, s), "Library"), "Tidy filenames")
-	if len(checked) != 10 {
-		t.Fatal("unbounded batch", checked)
-	}
-	s = restoreTidy(t, s, p, h)
-	done := respond(t, s, prompt, "Check more results")
+	done := respond(t, s, respond(t, s, start(t, s), "Library"), "Tidy filenames")
 	if len(checked) != 11 || !strings.Contains(done.Choice.Query, "Renamed 1") {
 		t.Fatal(checked, done)
 	}
@@ -330,7 +325,7 @@ func TestTidyStopKeepsCompletedChangesAndChangedTextDoesNotFetch(t *testing.T) {
 	}
 }
 
-func TestTidyDoesNotCallAPartialBatchUnique(t *testing.T) {
+func TestTidyChecksLaterBatchesBeforeCallingAMatchUnique(t *testing.T) {
 	p, h := roots(t)
 	data, wrong := fixture(t, 63), fixture(t, 64)
 	put(t, filepath.Join(p, offline.CommonPath, "mystery.p8.png"), data)
@@ -352,11 +347,6 @@ func TestTidyDoesNotCallAPartialBatchUnique(t *testing.T) {
 		return 200, tidyListing(carts...), "", nil
 	}
 	prompt := respond(t, s, respond(t, s, start(t, s), "Library"), "Tidy filenames")
-	if requests != 10 || s.tidy == nil || s.tidy.Index != 0 || len(s.tidy.Pending.Matches) != 1 {
-		t.Fatal(requests, prompt)
-	}
-	s = restoreTidy(t, s, p, h)
-	prompt = respond(t, s, prompt, "Check more results")
 	if requests != 11 || !strings.Contains(prompt.Choice.Query, "Multiple verified identities") || len(s.tidy.Pending.Matches) != 2 {
 		t.Fatal(requests, prompt)
 	}
@@ -406,11 +396,9 @@ func TestTidyPaginationKeepsEarlierMatchesAndDeduplicatesIDs(t *testing.T) {
 		return 200, tidyListing(bbs.Cart{ID: "90001", Title: "First"}, bbs.Cart{ID: "90002", Title: "Second"}), "", nil
 	}
 	prompt := respond(t, s, respond(t, s, start(t, s), "Library"), "Tidy filenames")
-	if s.tidy == nil || fetched != 1 {
-		t.Fatal("partial page auto-published", prompt)
+	if s.tidy == nil {
+		t.Fatal("ambiguity auto-published", prompt)
 	}
-	s = restoreTidy(t, s, p, h)
-	prompt = respond(t, s, prompt, "Check more results")
 	if fetched != 2 || len(s.tidy.Pending.Matches) != 2 {
 		t.Fatal("duplicate verification or lost matches", fetched, prompt)
 	}
@@ -526,4 +514,116 @@ func TestTidyRestoreRejectsMalformedProgressBeforeMutation(t *testing.T) {
 			t.Fatal("malformed state accepted or partially applied", err)
 		}
 	}
+}
+
+func TestTidyUniqueMatchAutomaticallyChecksFollowingPage(t *testing.T) {
+	p, h := roots(t)
+	data, wrong := fixture(t, 72), fixture(t, 73)
+	source := filepath.Join(p, offline.CommonPath, "mystery.p8.png")
+	put(t, source, data)
+	var pages []int
+	s := New(p, h, nil, func(id string) (int, []byte, string, error) {
+		if id == "90001" {
+			return 200, data, "", nil
+		}
+		return 200, wrong, "", nil
+	})
+	fastTidy(s)
+	s.Details = func(string) (int, []byte, string, error) { return 404, nil, "", nil }
+	s.List = func(_ bbs.Order, page int, _ string) (int, []byte, string, error) {
+		pages = append(pages, page)
+		if page == 1 {
+			return 200, append(tidyListing(bbs.Cart{ID: "90001", Title: "Only Match"}), []byte("<a href='#mode=carts&page=2'>Next</a>")...), "", nil
+		}
+		if page != 2 {
+			t.Fatal(page)
+		}
+		// No rename is allowed until the later page has been verified.
+		if !bytes.Equal(read(t, source), data) {
+			t.Fatal("paired before search finished")
+		}
+		return 200, tidyListing(bbs.Cart{ID: "90002", Title: "Different Cart"}), "", nil
+	}
+	done := respond(t, s, respond(t, s, start(t, s), "Library"), "Tidy filenames")
+	if !strings.Contains(done.Choice.Query, "Renamed 1") || fmt.Sprint(pages) != "[1 2]" || !bytes.Equal(read(t, filepath.Join(p, offline.CommonPath, "Only Match [90001].p8.png")), data) {
+		t.Fatal(pages, done)
+	}
+}
+
+func TestTidyAutomaticScanStopsAtVerificationLimit(t *testing.T) {
+	p, h := roots(t)
+	data := fixture(t, 74)
+	source := filepath.Join(p, offline.CommonPath, "mystery.p8.png")
+	put(t, source, data)
+	requests := 0
+	s := New(p, h, nil, func(string) (int, []byte, string, error) { requests++; return 404, nil, "", nil })
+	fastTidy(s)
+	s.List = func(_ bbs.Order, page int, _ string) (int, []byte, string, error) {
+		if page > 9 {
+			t.Fatal("search exceeded candidate limit", page)
+		}
+		var carts []bbs.Cart
+		for i := 0; i < 60; i++ {
+			carts = append(carts, bbs.Cart{ID: fmt.Sprint(90000 + page*60 + i), Title: "Candidate"})
+		}
+		return 200, append(tidyListing(carts...), []byte(fmt.Sprintf("<a href='#mode=carts&page=%d'>Next</a>", page+1))...), "", nil
+	}
+	prompt := respond(t, s, respond(t, s, start(t, s), "Library"), "Tidy filenames")
+	if requests != 512 || !strings.Contains(prompt.Choice.Query, "limit reached") || !bytes.Equal(read(t, source), data) {
+		t.Fatal(requests, prompt)
+	}
+	s = restoreTidy(t, s, p, h)
+	done := respond(t, s, prompt, "Stop")
+	if !strings.Contains(done.Choice.Query, "1 files remain unprocessed") {
+		t.Fatal(done)
+	}
+}
+
+func TestTidyAutomaticContinuationRechecksSourceAndCanResumeChangedPrompt(t *testing.T) {
+	p, h := roots(t)
+	data, changed := fixture(t, 75), fixture(t, 76)
+	source := filepath.Join(p, offline.CommonPath, "mystery.p8.png")
+	put(t, source, data)
+	s := New(p, h, nil, func(string) (int, []byte, string, error) { return 404, nil, "", nil })
+	fastTidy(s)
+	s.List = func(_ bbs.Order, page int, _ string) (int, []byte, string, error) {
+		if page != 1 {
+			t.Fatal("requested next page after source change", page)
+		}
+		put(t, source, changed)
+		return 200, append(tidyListing(), []byte("<a href='#mode=carts&page=2'>Next</a>")...), "", nil
+	}
+	prompt := respond(t, s, respond(t, s, start(t, s), "Library"), "Tidy filenames")
+	if !strings.Contains(prompt.Choice.Query, "changed") {
+		t.Fatal(prompt)
+	}
+	s = restoreTidy(t, s, p, h)
+	done := respond(t, s, prompt, "Skip file")
+	if !strings.Contains(done.Choice.Query, "source changed: 1") || !bytes.Equal(read(t, source), changed) {
+		t.Fatal(done)
+	}
+}
+
+func TestTidyPageLimitCannotEstablishUniqueness(t *testing.T) {
+	p, h := roots(t)
+	data := fixture(t, 77)
+	source := filepath.Join(p, offline.CommonPath, "mystery.p8.png")
+	put(t, source, data)
+	s := New(p, h, nil, func(string) (int, []byte, string, error) { return 200, data, "", nil })
+	fastTidy(s)
+	respond(t, s, respond(t, s, start(t, s), "Library"), "Tidy filenames")
+	s.tidy.Pending.Page = bbs.MaxPage
+	s.tidy.Pending.Loaded = false
+	s.List = func(_ bbs.Order, page int, _ string) (int, []byte, string, error) {
+		if page != bbs.MaxPage {
+			t.Fatal(page)
+		}
+		return 200, append(tidyListing(bbs.Cart{ID: "90001", Title: "Match"}), []byte(fmt.Sprintf("<a href='#mode=carts&page=%d'>Next</a>", bbs.MaxPage+1))...), "", nil
+	}
+	b, err := s.stepTidy()
+	prompt := screen(t, b, err)
+	if !strings.Contains(prompt.Choice.Query, "Search limit reached") || len(s.tidy.Pending.Matches) != 1 || !bytes.Equal(read(t, source), data) {
+		t.Fatal(prompt)
+	}
+	restoreTidy(t, s, p, h)
 }

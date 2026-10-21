@@ -136,9 +136,11 @@ BBS detail parser that checks the exact numeric post or cart alias and PICO-8
 release category. Multi-cart posts provide versioned candidates. Failed or
 nonmatching aliases fall back to a public BBS title search; search metadata never
 establishes identity without an exact PNG byte match. Up to ten candidates are
-checked per batch through the shared request cooldown. An exhausted candidate
-set with one match publishes automatically; partial sets, multiple matches and
-unresolved files return Choice/Text prompts for selection, refinement, a manual
+checked per batch through the shared request cooldown. Batches and pages continue
+automatically, rechecking source bytes and cancellation between iterations. An
+exhausted candidate set with one match publishes automatically; multiple matches,
+unresolved files and incomplete sets at a search limit return Choice/Text prompts
+for selection, refinement, a manual
 ID, more results, skip or stop. Conflicting destinations offer an alternate title.
 A bounded tidy job persists relative source paths, SHA-256 fingerprints, counts,
 candidate cursors and prompt state across Extism calls. Restore validates these

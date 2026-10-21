@@ -242,6 +242,20 @@ func (s *Session) stepTidy() ([]byte, error) {
 		}
 		budget := tidyBatch
 		for {
+			if err := s.cancel(); err != nil {
+				return s.finishTidy("Stopped: " + err.Error())
+			}
+			// Continue batches automatically, but recheck the source between
+			// batches/pages rather than carrying stale bytes through a long scan.
+			data, e = s.currentTidyData()
+			if e != nil {
+				p.Changed = true
+				p.Note = "Source file changed or is unavailable; it has been left untouched."
+				return s.showTidy()
+			}
+			if budget == 0 {
+				budget = tidyBatch
+			}
 			if !p.Loaded {
 				if p.Mode == "search" {
 					e = s.loadTidySearch()
@@ -283,9 +297,12 @@ func (s *Session) stepTidy() ([]byte, error) {
 				p.Note = "Multiple verified identities match this file. Choose which BBS identity to use."
 				return s.showTidy()
 			}
-			if p.Cursor < len(p.Candidates) || len(p.Matches) == 1 {
-				p.Note = "This candidate set is only partly checked. Choose a verified identity or check more results."
-				return s.showTidy()
+			if p.Cursor < len(p.Candidates) {
+				if len(p.Checked) >= 512 {
+					p.Note = "Verification limit reached before all candidates were checked. Refine the search or choose a verified identity."
+					return s.showTidy()
+				}
+				continue
 			}
 			if p.Mode == "alias" {
 				p.Mode = "search"
@@ -293,11 +310,15 @@ func (s *Session) stepTidy() ([]byte, error) {
 				p.Candidates = nil
 				p.Cursor = 0
 				p.HasNext = false
-				if budget > 0 {
-					continue
+				continue
+			}
+			if p.Mode == "search" && p.HasNext {
+				if len(p.Checked) >= 512 || p.Page >= bbs.MaxPage {
+					p.Note = "Search limit reached before all pages were checked. Refine the search or choose a verified identity."
+					return s.showTidy()
 				}
-				p.Note = "Alias did not match. Continue with title search."
-				return s.showTidy()
+				advanceTidyPage(p)
+				continue
 			}
 			p.Note = "No verified byte match was found. Refine the search, enter a BBS ID, check more results, or skip."
 			return s.showTidy()
@@ -357,6 +378,14 @@ func (s *Session) loadTidyIdentity(id string) error {
 	}
 	return nil
 }
+func advanceTidyPage(p *tidyPending) {
+	p.Page++
+	p.Loaded = false
+	p.Candidates = nil
+	p.Cursor = 0
+	p.HasNext = false
+}
+
 func (s *Session) loadTidySearch() error {
 	p := s.tidy.Pending
 	p.Candidates = nil
@@ -385,7 +414,9 @@ func (s *Session) loadTidySearch() error {
 		return err
 	}
 	p.Candidates = page.Carts
-	p.HasNext = page.HasNext
+	// The browser parser suppresses Next at MaxPage. At that ceiling, keep
+	// coverage unresolved rather than treating the policy limit as exhaustion.
+	p.HasNext = page.HasNext || p.Page == bbs.MaxPage
 	p.Loaded = true
 	return nil
 }
@@ -543,8 +574,7 @@ func (s *Session) handleTidyChoice(value string) ([]byte, error) {
 		return s.stepTidy()
 	case "Check more results":
 		if p.Cursor >= len(p.Candidates) && p.Loaded && p.Mode == "search" && p.HasNext {
-			p.Page++
-			p.Loaded = false
+			advanceTidyPage(p)
 		}
 		return s.stepTidy()
 	}

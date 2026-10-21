@@ -17,7 +17,7 @@ import (
 
 const cakeListing = "<script id=cart_data_script>\npdat=[['90001',42,`Post`,\"thumb\",256,170,\"date\",7,\"Author\",\"date\",0,\"\",1,2,0,7,2,'0',[],2,21,7,`Cake Factory`,``]];</script>"
 
-func TestTidyTitleCollisionThroughWASI(t *testing.T) {
+func TestTidyTitleCollisionAndAutomaticPaginationThroughWASI(t *testing.T) {
 	h := newHarness(t, "host", "www.lexaloffle.com")
 	data, wrong := testcart.PNG(85), testcart.PNG(86)
 	common := filepath.Join(h.pocket, offline.CommonPath)
@@ -49,12 +49,20 @@ func TestTidyTitleCollisionThroughWASI(t *testing.T) {
 			if r.URL.Path != "/bbs/lister.php" || r.URL.Query().Get("search") != "cake factory" || r.URL.Query().Get("page") != "1" {
 				t.Fatal(r.URL)
 			}
-			body = []byte(cakeListing)
+			body = []byte(cakeListing + "<a href='#mode=carts&page=2'>Next</a>")
 		case 4:
 			if r.URL.Path != "/bbs/get_cart.php" || r.URL.Query().Get("lid") != "90001" {
 				t.Fatal(r.URL)
 			}
 			body = data
+		case 5:
+			if r.URL.Path != "/bbs/lister.php" || r.URL.Query().Get("search") != "cake factory" || r.URL.Query().Get("page") != "2" {
+				t.Fatal(r.URL)
+			}
+			if got, err := os.ReadFile(source); err != nil || !bytes.Equal(got, data) {
+				t.Fatal("paired before later page was checked", err)
+			}
+			body = []byte("<script id=cart_data_script>\npdat=[];</script>")
 		default:
 			t.Fatal("unexpected request", r.URL)
 		}
@@ -63,9 +71,9 @@ func TestTidyTitleCollisionThroughWASI(t *testing.T) {
 	t.Cleanup(func() { http.DefaultClient = previous })
 	main := menu(t, h.call("start", nil))
 	library := menu(t, h.call("handle_response", answer(t, main, "Library")))
-	// Four real WASI HTTP boundary calls retain production's 15-second cooldown.
+	// Five real WASI HTTP boundary calls retain production's 15-second cooldown.
 	done := menu(t, h.callWithin("handle_response", answer(t, library, "Tidy filenames"), 75*time.Second))
-	if !strings.Contains(done.Choice.Query, "Renamed 1") || len(requests) != 4 {
+	if !strings.Contains(done.Choice.Query, "Renamed 1") || len(requests) != 5 {
 		t.Fatal(done, requests)
 	}
 	for i := 1; i < len(requests); i++ {
@@ -82,7 +90,7 @@ func TestTidyTitleCollisionThroughWASI(t *testing.T) {
 		t.Fatal("alias cache replaced", err)
 	}
 	done = menu(t, h.call("handle_response", answer(t, done, "Tidy filenames")))
-	if !strings.Contains(done.Choice.Query, "already tidy 1") || len(requests) != 4 {
+	if !strings.Contains(done.Choice.Query, "already tidy 1") || len(requests) != 5 {
 		t.Fatal(done, requests)
 	}
 	h.assertPreserved()
