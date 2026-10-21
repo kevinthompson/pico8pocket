@@ -744,6 +744,22 @@ func TestCompiledPluginLibraryTidiesLegacyFilesWithBBSMetadata(t *testing.T) {
 	if err != nil || !bytes.Equal(caseData, png) {
 		t.Fatal("case-only tidy lost the cart", done, err)
 	}
+	entries, err := os.ReadDir(filepath.Join(h.pocket, offline.CartPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caseTitleFound := false
+	for _, entry := range entries {
+		if entry.Name() == "CASE GAME [90004].p8.png" {
+			t.Fatal("case-only tidy kept the old stored spelling")
+		}
+		if entry.Name() == "Case Game [90004].p8.png" {
+			caseTitleFound = true
+		}
+	}
+	if !caseTitleFound {
+		t.Fatal("case-only tidy did not publish the metadata title")
+	}
 	if !bytes.Equal(h.pack(), oldPack) {
 		t.Fatal("tidy modified dependency bundle")
 	}

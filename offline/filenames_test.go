@@ -143,6 +143,45 @@ func TestTidyCaseOnlyTitleChangePreservesCart(t *testing.T) {
 	if err != nil || !bytes.Equal(got, data) {
 		t.Fatal("case-only alias lost the cart", result, err)
 	}
+	entries, err := os.ReadDir(filepath.Dir(source))
+	if err != nil || result != "renamed" || len(entries) != 1 || entries[0].Name() != "celeste [15133].p8.png" {
+		t.Fatal("case-only tidy did not update the stored filename", result, entries, err)
+	}
+}
+
+func TestTidyCaseOnlyTitlePreservesDistinctConflictingTarget(t *testing.T) {
+	pocket := t.TempDir()
+	data := cartPNG()
+	source := filepath.Join(pocket, CartPath, "Celeste [15133].p8.png")
+	if err := AtomicWrite(source, data); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(pocket, CartPath, "celeste [15133].p8.png")
+	f, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	if os.IsExist(err) {
+		t.Skip("requires a case-sensitive filesystem")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := []byte("preserved distinct target")
+	if _, err = f.Write(other); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err = f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	result, err := TidyStandalone(pocket, StandaloneFile{"Celeste [15133].p8.png", "15133"}, "celeste", data)
+	if err != nil || result != "conflict" {
+		t.Fatal(result, err)
+	}
+	for path, want := range map[string][]byte{source: data, target: other} {
+		got, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(got, want) {
+			t.Fatal("case-only tidy changed a conflicting cart", path, err)
+		}
+	}
 }
 
 func TestStandaloneScanStaysAtTopLevelAndSkipsSymlinks(t *testing.T) {

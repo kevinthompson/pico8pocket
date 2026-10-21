@@ -107,6 +107,14 @@ a hard host cancellation during copying can leave an incomplete destination,
 which a later run reports as a conflict. Reinstall the selected cart to replace
 that incomplete copy from verified cache.
 
+Capitalization-only corrections use a temporary filename in the same folder
+when the filesystem treats both spellings as one file. Failed publication
+restores the original name when possible. If restoration fails, the error gives
+the `.pico8-tidy-*` recovery path containing the intact cart. Publication and
+restoration both use exclusive creation to preserve concurrent additions.
+A hard host cancellation before publication can also leave the cart at that path;
+restore its filename or reinstall it from verified cache.
+
 An install also migrates a legacy ID-only filename when its bytes match the
 published cart. Unmatched files stay in place. Import sources and the host PNG
 cache remain `<id>.p8.png`. Titles are saved separately in

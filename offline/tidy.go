@@ -116,6 +116,9 @@ func TidyStandalone(pocket string, file StandaloneFile, title string, data []byt
 			return "conflict", nil
 		}
 		if os.SameFile(info, targetInfo) {
+			if strings.EqualFold(file.Name, name) {
+				return renameCaseAlias(source, target, os.Rename, copyCaseCart)
+			}
 			return "unchanged", nil
 		}
 		existing, e := ReadBounded(target, MaxCart)
@@ -125,23 +128,9 @@ func TidyStandalone(pocket string, file StandaloneFile, title string, data []byt
 	} else if err != nil {
 		return "", err
 	} else {
-		success := false
-		defer func() {
-			f.Close()
-			if !success {
-				os.Remove(target)
-			}
-		}()
-		if _, err = f.Write(data); err != nil {
+		if err = writeTidyFile(f, data); err != nil {
 			return "", err
 		}
-		if err = f.Sync(); err != nil {
-			return "", err
-		}
-		if err = f.Close(); err != nil {
-			return "", err
-		}
-		success = true
 	}
 	// Preserve an original changed by another process while the copy was written.
 	current, err = ReadBounded(source, MaxCart)
@@ -155,4 +144,26 @@ func TidyStandalone(pocket string, file StandaloneFile, title string, data []byt
 		return "", err
 	}
 	return "renamed", nil
+}
+
+// writeTidyFile receives only a newly and exclusively created destination.
+func writeTidyFile(f *os.File, data []byte) error {
+	success := false
+	defer func() {
+		f.Close()
+		if !success {
+			os.Remove(f.Name())
+		}
+	}()
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	success = true
+	return nil
 }
