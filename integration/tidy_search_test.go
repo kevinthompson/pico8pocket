@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,57 @@ import (
 )
 
 const cakeListing = "<script id=cart_data_script>\npdat=[['90001',42,`Post`,\"thumb\",256,170,\"date\",7,\"Author\",\"date\",0,\"\",1,2,0,7,2,'0',[],2,21,7,`Cake Factory`,``]];</script>"
+const emptyTidyListing = `<div id="listing_page_nav"></div><br> &nbsp [no posts found] <br><br></div>`
+
+func TestTidyLookupRetryAndEmptySearchThroughWASI(t *testing.T) {
+	h := newHarness(t, "host", "www.lexaloffle.com")
+	data := testcart.PNG(92)
+	source := filepath.Join(h.pocket, offline.CommonPath, "cards/mots_8_ball_pool.p8.png")
+	write(t, source, data)
+	previous := http.DefaultClient
+	requests := 0
+	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests++
+		status, body := 200, "<html>Temporarily unavailable</html>"
+		if r.Method != "GET" || r.URL.Host != "www.lexaloffle.com" || r.URL.Scheme != "https" {
+			t.Fatal(r.URL)
+		}
+		switch requests {
+		case 1:
+			if r.URL.Path != "/bbs/" || r.URL.Query().Get("pid") != "mots_8_ball_pool" {
+				t.Fatal(r.URL)
+			}
+			status, body = 404, ""
+		case 2, 3:
+			if r.URL.Path != "/bbs/lister.php" || r.URL.Query().Get("search") != "mots 8 ball pool" || r.URL.Query().Get("page") != "1" {
+				t.Fatal(r.URL)
+			}
+			if requests == 3 {
+				body = emptyTidyListing
+			}
+		default:
+			t.Fatal("unexpected request", r.URL)
+		}
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})}
+	t.Cleanup(func() { http.DefaultClient = previous })
+	main := menu(t, h.call("start", nil))
+	library := menu(t, h.call("handle_response", answer(t, main, "Library")))
+	prompt := menu(t, h.call("handle_response", answer(t, library, "Tidy filenames")))
+	if !strings.Contains(prompt.Choice.Query, "BBS cart metadata missing") || !slices.Contains(prompt.Choice.Choices, "Retry") || slices.Contains(prompt.Choice.Choices, "Check more results") {
+		t.Fatal("misleading failure choices", prompt)
+	}
+	prompt = menu(t, h.call("handle_response", answer(t, prompt, "Retry")))
+	if !strings.Contains(prompt.Choice.Query, "No verified byte match") || !strings.Contains(prompt.Choice.Query, "Checked 0 identities; 0 verified matches") || slices.Contains(prompt.Choice.Choices, "Retry") || slices.Contains(prompt.Choice.Choices, "Check more results") {
+		t.Fatal("empty search treated as failure or more results", prompt)
+	}
+	done := menu(t, h.call("handle_response", answer(t, prompt, "Skip file")))
+	got, err := os.ReadFile(source)
+	if requests != 3 || !strings.Contains(done.Choice.Query, "unmatched 1") || err != nil || !bytes.Equal(got, data) {
+		t.Fatal("skip changed source or queue", done, requests, err)
+	}
+	h.assertPreserved()
+}
 
 func TestTidyTitleCollisionAndAutomaticPaginationThroughWASI(t *testing.T) {
 	h := newHarness(t, "host", "www.lexaloffle.com")
@@ -62,7 +114,7 @@ func TestTidyTitleCollisionAndAutomaticPaginationThroughWASI(t *testing.T) {
 			if got, err := os.ReadFile(source); err != nil || !bytes.Equal(got, data) {
 				t.Fatal("paired before later page was checked", err)
 			}
-			body = []byte("<script id=cart_data_script>\npdat=[];</script>")
+			body = []byte(emptyTidyListing)
 		default:
 			t.Fatal("unexpected request", r.URL)
 		}

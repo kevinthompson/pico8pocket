@@ -66,6 +66,8 @@ func ListingURL(order Order, page int, search string) (string, error) {
 var scriptStart = regexp.MustCompile(`(?i)<script\s+id\s*=\s*(?:"cart_data_script"|'cart_data_script'|cart_data_script)\s*>`)
 var dataStart = regexp.MustCompile(`(?m)^\s*(?:var\s+)?pdat\s*=\s*\[`)
 var href = regexp.MustCompile(`(?i)\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+var listingNav = regexp.MustCompile(`(?i)<div\s+id\s*=\s*(?:"listing_page_nav"|'listing_page_nav'|listing_page_nav)(?:\s|>)`)
+var noPosts = regexp.MustCompile(`(?i)\[no posts found\]\s*(?:<br\s*/?>\s*)+</div>\s*$`)
 
 // Parse accepts the literal pdat array emitted by lister.php. It never evaluates
 // JavaScript or follows page-supplied URLs. Expressions and schema changes fail closed.
@@ -74,11 +76,15 @@ func Parse(data []byte, page int) (Page, error) {
 	if page < 1 || page > MaxPage || len(data) > MaxListing || !utf8.Valid(data) {
 		return result, fmt.Errorf("invalid or oversized BBS listing")
 	}
+	source := string(data)
 	rows, err := parseRows(data)
 	if err != nil {
-		return result, err
+		// A normal empty lister response omits pdat. Only accept its explicit
+		// empty-page shape; unknown HTML and malformed scripts still fail closed.
+		if strings.Contains(strings.ToLower(source), "<script") || !listingNav.MatchString(source) || !noPosts.MatchString(source) {
+			return result, err
+		}
 	}
-	source := string(data)
 	seen := map[string]bool{}
 	for _, value := range rows {
 		row, ok := value.([]any)

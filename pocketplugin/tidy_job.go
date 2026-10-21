@@ -320,7 +320,7 @@ func (s *Session) stepTidy() ([]byte, error) {
 				advanceTidyPage(p)
 				continue
 			}
-			p.Note = "No verified byte match was found. Refine the search, enter a BBS ID, check more results, or skip."
+			p.Note = "No verified byte match was found. Refine the search, enter a BBS ID, or skip."
 			return s.showTidy()
 		}
 	}
@@ -454,7 +454,7 @@ func (s *Session) showTidy() ([]byte, error) {
 			choices = append(choices, "Retry")
 		}
 		choices = append(choices, "Edit search", "Enter BBS ID")
-		if tidyMore(p) {
+		if !p.Retry && !p.Conflict && tidyMore(p) {
 			choices = append(choices, "Check more results")
 		}
 	}

@@ -28,6 +28,47 @@ func fastTidy(s *Session) {
 	s.Sleep = func(d time.Duration) error { now = now.Add(d); return nil }
 }
 
+func TestTidyEmptySearchAndLookupFailureOfferDifferentActions(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, want string
+		retry            bool
+	}{
+		{"empty", `<div id="listing_page_nav"></div><br> &nbsp [no posts found] <br><br></div>`, "No verified byte match", false},
+		{"malformed", "<html>Temporarily unavailable</html>", "BBS cart metadata missing", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, h := roots(t)
+			data := fixture(t, 92)
+			source := filepath.Join(p, offline.CommonPath, "cards/mots_8_ball_pool.p8.png")
+			put(t, source, data)
+			s := New(p, h, nil, nil)
+			fastTidy(s)
+			s.Details = func(string) (int, []byte, string, error) { return 404, nil, "", nil }
+			s.List = func(bbs.Order, int, string) (int, []byte, string, error) {
+				return 200, []byte(tc.body), "", nil
+			}
+			prompt := respond(t, s, respond(t, s, start(t, s), "Library"), "Tidy filenames")
+			if !strings.Contains(prompt.Choice.Query, tc.want) || !strings.Contains(prompt.Choice.Query, "Checked 0 identities; 0 verified matches") {
+				t.Fatal(prompt)
+			}
+			choices := prompt.Choice.Choices
+			if containsTidyID(choices, "Retry") != tc.retry || containsTidyID(choices, "Check more results") || strings.Contains(prompt.Choice.Query, "check more results") {
+				t.Fatal("misleading resolution actions", prompt)
+			}
+			for _, action := range []string{"Edit search", "Enter BBS ID", "Skip file", "Stop"} {
+				if !containsTidyID(choices, action) {
+					t.Fatal("missing resolution action", action, prompt)
+				}
+			}
+			s = restoreTidy(t, s, p, h)
+			done := respond(t, s, prompt, "Skip file")
+			if !strings.Contains(done.Choice.Query, "unmatched 1") || !bytes.Equal(read(t, source), data) {
+				t.Fatal("skip changed source or queue", done)
+			}
+		})
+	}
+}
+
 func restoreTidy(t *testing.T, s *Session, p, h string) *Session {
 	t.Helper()
 	state, err := s.Snapshot()

@@ -133,6 +133,9 @@ candidate set. If a search limit prevents checking the entire candidate set,
 Tidy pauses rather than assuming a single match is unique. Each queued run must
 fit the saved-state size limit. Source bytes and cancellation are checked between
 batches and pages. A broad uncached search may take much longer than one batch.
+**Check more results** appears only when more candidates remain available;
+an interrupted lookup offers **Retry** instead. An empty BBS search is a normal
+no-match result: edit the search, enter a BBS ID, or skip the file.
 
 The queue, counts, candidate position and prompt survive Pocket Sync calls.
 The source file is read again after an answer; changed, missing or symlinked files
