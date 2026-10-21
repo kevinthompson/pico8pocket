@@ -92,9 +92,10 @@ or malformed data; a BBS format change may require updating the adapter.
 
 ## Tidy existing filenames
 
-Choose **Library → Tidy filenames**. It scans the top level of the plugin's
-`Assets/pico8/common/cards/bbs/` folder and recognizes ID-only and titled BBS
-filenames. New installs use names such as `Still Life [198121].p8.png`; title
+Choose **Library → Tidy filenames**. It scans `Assets/pico8/common/` recursively,
+including carts in the root and all subfolders, and recognizes ID-only and titled
+BBS PNG filenames. Verified carts are renamed in their existing folders. New
+downloads still go to `cards/bbs/` with names such as `Still Life [198121].p8.png`; title
 characters unsuitable for SD filesystems are replaced, and long titles are shortened.
 The BBS ID suffix stays intact. Cache files and bundle entries keep their original
 IDs, preserving collection handoffs.
@@ -107,7 +108,9 @@ request cooldown, cancellation and HTTP 429 stop behavior apply. Saved metadata
 lets subsequent tidy operations work offline.
 
 The result reports renamed, already tidy, unmatched, conflicting and invalid
-files. Symlinks and subdirectories are skipped. Existing conflicting files are
+files. Symlinked files and directories are skipped. The complete scan is bounded
+to 4096 entries and 32 directory levels and can be cancelled before renaming starts.
+Existing conflicting files are
 preserved; identical copies can be consolidated. Cart bytes and the dependency
 bundle are preserved. Original files remain until the titled copy is complete;
 a hard host cancellation during copying can leave an incomplete destination,

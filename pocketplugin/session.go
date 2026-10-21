@@ -166,7 +166,7 @@ func (s *Session) Handle(input []byte) ([]byte, error) {
 		case "Collections":
 			return s.collectionsMenu()
 		case "Library":
-			return s.libraryMenu("Manage installed carts. Tidy uses saved titles or BBS metadata; files without a verified match are skipped.")
+			return s.libraryMenu("Manage carts under Assets/pico8/common/, including subfolders. Tidy renames verified PNG carts in place; unmatched files are skipped.")
 		}
 	case "library":
 		switch value {

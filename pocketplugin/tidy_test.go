@@ -4,11 +4,53 @@ import (
 	"bytes"
 	"errors"
 	"github.com/zenibako/pico8pocket/offline"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestTidyScansCommonRootAndNestedFoldersWithoutMovingCarts(t *testing.T) {
+	p, h := roots(t)
+	data := fixture(t, 28)
+	common := filepath.Join(p, "Assets/pico8/common")
+	for _, cart := range []struct{ dir, id, title string }{
+		{".", "90011", "Root Game"},
+		{"favorites/nested", "90012", "Nested Game"},
+		{"cards/bbs", "90013", "BBS Game"},
+	} {
+		source := filepath.Join(common, cart.dir, cart.id+".p8.png")
+		put(t, source, data)
+		if err := offline.RememberTitle(h, cart.id, cart.title, data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldPack := []byte("unchanged dependency bundle")
+	put(t, filepath.Join(p, offline.PackPath), oldPack)
+	put(t, filepath.Join(common, "os.bin"), []byte("runtime must remain unchanged"))
+	s := New(p, h, nil, nil)
+	summary, err := s.TidyFilenames()
+	if err != nil || !strings.Contains(summary, "Renamed 3") {
+		t.Fatal("tidy did not cover the common root and its subfolders", summary, err)
+	}
+	for _, cart := range []struct{ dir, id, title string }{
+		{".", "90011", "Root Game"},
+		{"favorites/nested", "90012", "Nested Game"},
+		{"cards/bbs", "90013", "BBS Game"},
+	} {
+		target := filepath.Join(common, cart.dir, cart.title+" ["+cart.id+"].p8.png")
+		if !bytes.Equal(read(t, target), data) {
+			t.Fatal("tidy changed the cart or moved it to a different directory", target)
+		}
+		if _, err := os.Stat(filepath.Join(common, cart.dir, cart.id+".p8.png")); !os.IsNotExist(err) {
+			t.Fatal("legacy filename remains", cart.id, err)
+		}
+	}
+	if !bytes.Equal(read(t, filepath.Join(p, offline.PackPath)), oldPack) || string(read(t, filepath.Join(common, "os.bin"))) != "runtime must remain unchanged" {
+		t.Fatal("tidy modified the bundle or runtime")
+	}
+}
 
 func TestLibraryTidiesLegacyCartWithoutChangingBundle(t *testing.T) {
 	p, h := roots(t)

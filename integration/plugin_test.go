@@ -679,6 +679,23 @@ func TestCompiledPluginLibraryTidiesLegacyFilesWithBBSMetadata(t *testing.T) {
 	for _, id := range []string{"90001", "15133"} {
 		write(t, filepath.Join(h.pocket, offline.CartPath, id+".p8.png"), png)
 	}
+	for _, cart := range []struct{ dir, id, title string }{
+		{".", "90011", "Root Library Game"},
+		{"favorites/nested", "90012", "Nested Library Game"},
+	} {
+		write(t, filepath.Join(h.pocket, offline.CommonPath, cart.dir, cart.id+".p8.png"), png)
+		if err := offline.RememberTitle(h.host, cart.id, cart.title, png); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outside := filepath.Join(h.pocket, "Assets/other-platform/90013.p8.png")
+	write(t, outside, png)
+	if err := offline.RememberTitle(h.host, "90013", "Outside Game", png); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../../other-platform", filepath.Join(h.pocket, offline.CommonPath, "linked-directory")); err != nil {
+		t.Log("directory symlink fixture unavailable:", err)
+	}
 	write(t, filepath.Join(h.pocket, offline.PackPath), oldPack)
 	const detail = "<script id=cart_data_script>\npdat=[['fixture_cart-0',42,`Public Game Title`,\"thumb\",256,170,\"date\",7,\"Author\",\"date\",0,\"\",1,2,90001,7,2,'0',[],0,1,,``,``],];</script>"
 	previous := http.DefaultClient
@@ -710,7 +727,7 @@ func TestCompiledPluginLibraryTidiesLegacyFilesWithBBSMetadata(t *testing.T) {
 	main = menu(t, h.call("handle_response", answer(t, list, "Back to main menu")))
 	library := menu(t, h.call("handle_response", answer(t, main, "Library")))
 	done := menu(t, h.call("handle_response", answer(t, library, "Tidy filenames")))
-	if !strings.Contains(done.Choice.Query, "Renamed 2") || len(requests) != 2 {
+	if !strings.Contains(done.Choice.Query, "Renamed 4") || len(requests) != 2 {
 		t.Fatal(done, requests)
 	}
 	if gap := requests[1].Sub(requests[0]); gap < 15*time.Second {
@@ -727,12 +744,28 @@ func TestCompiledPluginLibraryTidiesLegacyFilesWithBBSMetadata(t *testing.T) {
 			t.Fatal("legacy name not removed", id, err)
 		}
 	}
+	for _, cart := range []struct{ dir, id, title string }{
+		{".", "90011", "Root Library Game"},
+		{"favorites/nested", "90012", "Nested Library Game"},
+	} {
+		target := filepath.Join(h.pocket, offline.CommonPath, cart.dir, cart.title+" ["+cart.id+"].p8.png")
+		got, err := os.ReadFile(target)
+		if err != nil || !bytes.Equal(got, png) {
+			t.Fatal("common-root tidy changed a cart or moved its folder", target, err)
+		}
+		if _, err := os.Stat(filepath.Join(h.pocket, offline.CommonPath, cart.dir, cart.id+".p8.png")); !os.IsNotExist(err) {
+			t.Fatal("root or nested legacy filename remains", cart.id, err)
+		}
+	}
+	if got, err := os.ReadFile(outside); err != nil || !bytes.Equal(got, png) {
+		t.Fatal("tidy followed a directory symlink outside common", err)
+	}
 	title, err := offline.CachedTitle(h.host, "90001", png)
 	if err != nil || title != "Public Game Title" {
 		t.Fatal(title, err)
 	}
 	done = menu(t, h.call("handle_response", answer(t, done, "Tidy filenames")))
-	if !strings.Contains(done.Choice.Query, "already tidy 2") || len(requests) != 2 {
+	if !strings.Contains(done.Choice.Query, "already tidy 4") || len(requests) != 2 {
 		t.Fatal(done, requests)
 	}
 	if err := offline.RememberTitle(h.host, "90004", "Case Game", png); err != nil {

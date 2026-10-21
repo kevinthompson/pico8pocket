@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"path/filepath"
 
 	"github.com/zenibako/pico8pocket/bbs"
 	"github.com/zenibako/pico8pocket/offline"
@@ -20,7 +19,7 @@ func (c tidyCounts) summary() string {
 // BBS metadata fills missing titles; dependency bundles and cache IDs stay intact.
 func (s *Session) TidyFilenames() (string, error) {
 	var counts tidyCounts
-	files, skipped, err := offline.StandaloneFiles(s.pocketRoot)
+	files, skipped, err := offline.StandaloneFiles(s.pocketRoot, s.cancel)
 	if err != nil {
 		return counts.summary(), err
 	}
@@ -37,7 +36,11 @@ func (s *Session) TidyFilenames() (string, error) {
 		if err = s.cancel(); err != nil {
 			return counts.summary(), err
 		}
-		data, e := offline.ReadBounded(filepath.Join(s.pocketRoot, offline.CartPath, file.Name), offline.MaxCart)
+		source, e := file.Path(s.pocketRoot)
+		if e != nil {
+			return counts.summary(), e
+		}
+		data, e := offline.ReadBounded(source, offline.MaxCart)
 		if e != nil || offline.ValidatePNG(data) != nil {
 			counts.invalid++
 			continue

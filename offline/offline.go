@@ -6,8 +6,9 @@ import "fmt"
 
 const MaxCart = 2 * 1024 * 1024
 const MaxPack = 64 * 1024 * 1024
-const PackPath = "Assets/pico8/common/cards/bbs.p8pack"
-const CartPath = "Assets/pico8/common/cards/bbs"
+const CommonPath = "Assets/pico8/common"
+const PackPath = CommonPath + "/cards/bbs.p8pack"
+const CartPath = CommonPath + "/cards/bbs"
 
 type Cart struct {
 	ID         string

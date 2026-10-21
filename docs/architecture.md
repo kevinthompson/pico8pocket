@@ -133,8 +133,11 @@ assets use sanitized title-plus-ID filenames while cache and bundle keys stay ID
 based. Library holds status and an explicit tidy operation. Byte-bound title
 metadata is stored beside the host cache; missing numeric-ID titles use a bounded
 public BBS detail parser that checks the exact post ID and PICO-8 release category.
-Tidy verifies file bytes, preserves conflicts, and uses exclusive publication
-before removing an original filename. It never modifies the dependency bundle.
+Tidy scans `Assets/pico8/common/` recursively, verifies file bytes, preserves
+conflicts, and uses exclusive publication before removing an original filename.
+Carts keep their containing directory. Symlinks are excluded and the entire scan
+has shared entry/depth limits and cancellation checks. It never modifies the
+dependency bundle.
 
 
 `compatibility/offline-carts.json` is the shared curated catalog. A generated C
@@ -173,8 +176,9 @@ a core at 32 slots.
 
 Therefore the complete browser uses a two-part design:
 
-1. Cards live under `/Assets/pico8/common/cards/` and can initially be
-   selected with Pocket's native asset picker.
+1. Carts can live anywhere under `/Assets/pico8/common/` and can initially be
+   selected with Pocket's native asset picker. Packaging uses `cards/` as a
+   convenience; the cartridge data slot does not require that subdirectory.
 2. A compact `cards.idx` catalog supplies paths, metadata, favorites, recent
    entries and ZIP members to the in-core browser. A host-side indexer updates
    it when cards are copied. Known paths can then be opened through APF target
