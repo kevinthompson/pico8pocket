@@ -33,8 +33,8 @@ with a Claude symlink to the same file.
 
 ## Complete distribution and draft releases
 
-Require **Build and verify distribution** on the exact candidate commit:
-three native Go platforms, compiled plugin/WASI integration, C/C++ host
+Require **Build and verify distribution** (`distribution.yml`) on the exact candidate commit:
+three native Go platforms, actual Extism/WASI fixture integration, C/C++ host
 regressions, the pinned GCC 13.2 core build/public APF package, and final
 distribution/provenance/checksums. An older green commit does not qualify.
 Inspect annotations for runner-acquisition failures; retry only with
@@ -42,15 +42,15 @@ authorization and at most twice. Required abandoned/cancelled jobs remain
 incomplete; do not suppress failures or retry code failures blindly.
 
 Before release, record physical-Pocket cart launch, controls/audio,
-cartdata/progress persistence, Memories and sleep/wake checks. Native picker
-thumbnail display still needs its own device evidence. Use the user's own
+cartdata/progress persistence, Memories and sleep/wake checks. Offline slot-20 loading, handoffs and return navigation need device evidence;
+interactive Pocket Sync UI behavior also needs an application run. Use the user's own
 carts privately and state unperformed checks. CI does not establish hardware
 compatibility.
 
 Obtain the version and explicit release authorization before dispatching with
 `create_draft=true`; `version` must be `v` plus the version already committed
 in `dist/core/core.json`. The workflow gates a complete draft on all checks:
-core ZIP, plugin/manifest, six native thumbnail bundles, WASI, docs/licenses,
+core ZIP, offline plugin/manifest, collections docs/licenses,
 source archive, core provenance and global checksums. Do not publish a tools-only
 latest release or include local carts/saves. Inspect the draft assets and
 report the link; stable publication requires separate explicit authorization.
@@ -171,3 +171,16 @@ renames. `Cores/zenibako.pico8b` only shows that some B core is installed.
   3. Reply on the thread with the commit and resolve it.
   4. For findings not worth their code, explain why and leave the call to
      the user.
+
+## Offline plugin replacement
+
+The root `plugin.json` is canonical and retains the same repository install URL.
+`make offline-plugin-tools` builds Go 1.25.0/TinyGo 0.43.0 WASI artifacts with
+Binaryen 133 and retained complete notices in `build/offline-plugin/`. Run
+`make offline-plugin-test`, then require the actual Extism fixture harness with
+`REQUIRE_PLUGIN_TESTS=1 POCKET_PLUGIN_WASM="$PWD/build/offline-plugin/plugin.wasm" go test ./integration -count=1`.
+The harness uses generated carts and local HTTP mocks, including 15-second
+courtesy pacing; it has no live-network mode. CI must not download real carts.
+The native importer is `go run ./cmd/pocket-sync-cache`. Do not restore retired
+thumbnail assets or tools to satisfy old release inventories.
+Preserve existing SD artwork, installed bundles, cartridges and saves.

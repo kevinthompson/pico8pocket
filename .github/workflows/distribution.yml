@@ -23,6 +23,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -32,6 +34,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -45,19 +49,20 @@ jobs:
           tar -xzf "$RUNNER_TEMP/binaryen.tar.gz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/tinygo/bin" >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/binaryen-version_133/bin" >> "$GITHUB_PATH"
-      - name: Check packaged AI disclosure
-        run: python3 -m unittest discover -s tests -p 'test_*.py'
-      - run: make thumbnail-tools
-      - name: Test compiled Pocket Sync plugin
+      - name: Check release contracts
+        run: |
+          python3 -m unittest discover -s tests -p 'test_release.py'
+          python3 -m unittest discover -s tests -p 'test_package_metadata.py'
+      - run: make offline-plugin-tools
+      - name: Test compiled plugin with project-owned fixtures and no network
         env:
           REQUIRE_PLUGIN_TESTS: '1'
-          POCKET_PLUGIN_WASM: ${{ github.workspace }}/build/thumbnail-tools/plugin.wasm
-          CART_THUMBNAILS_WASM: ${{ github.workspace }}/build/thumbnail-tools/cart-thumbnails.wasm
+          POCKET_PLUGIN_WASM: ${{ github.workspace }}/build/offline-plugin/plugin.wasm
         run: go test ./integration -count=1
       - uses: actions/upload-artifact@v7
         with:
-          name: thumbnail-tools
-          path: build/thumbnail-tools/*
+          name: offline-plugin
+          path: build/offline-plugin/*
           if-no-files-found: error
   core:
     runs-on: ubuntu-24.04
@@ -65,6 +70,8 @@ jobs:
       BUNDLE_LOCAL_CARTS: '0'
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Install pinned core compiler and packaging tools
         run: |
           sudo apt-get update
@@ -94,17 +101,19 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
           name: release-core
           path: build/core-artifacts
       - uses: actions/download-artifact@v8
         with:
-          name: thumbnail-tools
-          path: build/thumbnail-tools
+          name: offline-plugin
+          path: build/offline-plugin
       - name: Verify complete core and tool assets with provenance and checksums
         run: |
-          python3 scripts/release.py assemble --core-dir build/core-artifacts --tools build/thumbnail-tools
+          python3 scripts/release.py assemble --core-dir build/core-artifacts --tools build/offline-plugin
           cd build/distribution
           sha256sum -c SHA256SUMS
       - uses: actions/upload-artifact@v7
@@ -120,6 +129,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Require explicit version matching the tested core
         env:
           VERSION: ${{ inputs.version }}

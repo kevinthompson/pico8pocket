@@ -1,3 +1,6 @@
+> Historical: thumbnail tooling was retired on 2026-10-20 in favor of
+> [Offline Collections](../../OFFLINE-COLLECTIONS.md).
+
 # Pocket Sync cart thumbnails
 
 Approved in chat on 2026-10-19: use the Butterscotch architecture (Go shared logic,

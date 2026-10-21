@@ -106,7 +106,7 @@ done
 # entry 8 is the config/pre-save and entries 9..18 are Save 0..9.  Missing
 # filler entries make fclose() commit a different slot; the state then appears
 # valid until the core is restarted but never reaches the SD card.
-EXPECTED_SLOT_ORDER="0,1,2,3,4,5,6,7,8,10,11,12,13,14,15,16,17,18,19"
+EXPECTED_SLOT_ORDER="0,1,2,3,4,5,6,7,8,10,11,12,13,14,15,16,17,18,19,20"
 ACTUAL_SLOT_ORDER="$(jq -er '[.data.data_slots[].id] | join(",")' \
     "$CORE_DIR/data.json")"
 [[ "$ACTUAL_SLOT_ORDER" == "$EXPECTED_SLOT_ORDER" ]] || {
@@ -123,6 +123,17 @@ done
 
 jq -e '.data.data_slots[] | select(.id == 4 and .required == true and .parameters == 129)' \
     "$CORE_DIR/data.json" >/dev/null
+
+# The offline bundle is an optional read-only tail slot. Never insert it before
+# save lanes: os20 still commits those lanes by their compact table position.
+jq -e '.data.data_slots[] | select(.id == 20 and .required == false and .parameters == 8 and .deferload == true and .filename == "cards/bbs.p8pack" and .extensions == ["p8pack"])' \
+    "$CORE_DIR/data.json" >/dev/null
+jq -e '.instance.data_slots[] | select(.id == 20 and .filename == "cards/bbs.p8pack")' \
+    "$INSTANCE_PATH" >/dev/null
+[[ ! -e "$TREE/Assets/$PLATFORM_ID/common/cards/bbs.p8pack" ]] || {
+    echo "Core packages must not overwrite the user-installed offline BBS bundle" >&2
+    exit 1
+}
 
 for index in $(seq 0 9); do
     id=$((10 + index))

@@ -1,3 +1,6 @@
+> Historical: thumbnail tooling was retired on 2026-10-20 in favor of
+> [Offline Collections](../../OFFLINE-COLLECTIONS.md).
+
 # Cart thumbnail implementation plan
 
 > For agentic workers: use subagent-driven-development with scoped file ownership.

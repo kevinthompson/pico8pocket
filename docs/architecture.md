@@ -118,11 +118,56 @@ and up to 192 per-cartridge controller profiles.
 PICO-8 `cartdata` records share slot 0, are keyed by their string IDs and keep
 their 256-byte `dget`/`dset` payloads independent from save states and settings.
 
+## Offline BBS collections
+
+The desktop plugin also browses public Recent, Popular and search release listings via
+`bbs/`, a bounded data-only reader for the BBS website's cart metadata. Listing
+and cart GETs share the session's request cooldown. Selecting an individual cart
+installs its original PNG as a standalone asset; it does not modify the dependency
+bundle. Browser state persists across Extism calls; the WASI adapter constructs
+fixed same-host URLs from validated listing modes/pages, bounded URL-encoded search terms and numeric cart IDs.
+Pocket Sync text prompts collect search terms; prompt kind, menu position and query
+persist across Extism calls. Home separates Browse BBS, Collections and Library,
+and collection selection precedes Install or Refresh downloads. Standalone SD
+assets use sanitized title-plus-ID filenames while cache and bundle keys stay ID
+based. Library holds status and an explicit tidy operation. Byte-bound title
+metadata is stored beside the host cache; missing numeric-ID titles use a bounded
+public BBS detail parser that checks the exact post ID and PICO-8 release category.
+Tidy verifies file bytes, preserves conflicts, and uses exclusive publication
+before removing an original filename. It never modifies the dependency bundle.
+
+
+`compatibility/offline-carts.json` is the shared curated catalog. A generated C
+index and the Pocket Sync plugin consume its IDs and collection membership.
+The plugin caches validated PNG carts on the computer, installs standalone
+copies, and atomically publishes `cards/bbs.p8pack`. The bundle has a bounded
+index and contiguous payloads, each checked by CRC32 before cartridge decode.
+The reader retains the index and one open file, buffering only the requested
+payload. It grants a collection capability only when every required ID is present.
+
+The pinned SDK cannot resolve arbitrary SD paths. Optional read-only slot 20
+binds the bundle after the existing save slots; no existing slot is moved.
+The core opens `slot:20`. Desktop tests use `P8P_BBS_PACK` instead. Core packages
+omit the bundle to preserve user-installed content during updates.
+
+The Lua runtime queues `load("#id", breadcrumb, parameters)` and immediately
+retires that execution. `src/app/multicart.c` services requests outside Lua,
+decodes the target, retains up to eight parent carts and restarts parents on
+return. The app refreshes the active hash, native Memory ID, menu, controls,
+input, scheduler and audio after a successful switch. Failure reaches the
+recoverable error screen. `stat(6)` returns parameters, `stat(100)` returns
+the breadcrumb, and `extcmd("go_back")` queues a return. Native Lua source
+compilation remains available for non-BBS `load()` arguments.
+
+State version 2 includes parameters and reads version 1 with an empty parameter
+string. Existing Eris permanent object numbering is retained. Parent history is
+session-only; restoring a state never invents a parent in a new session.
+
 ## Filesystem constraint
 
 On Pocket, APF does not expose the SD card as a general block filesystem to a
 core. The application can enumerate the virtual root of files already bound to
-data slots and can ask APF to open a *known full path*, but APF has no command
+data slots. The pinned SDK has no working arbitrary-path resolver; APF has no command
 for enumerating arbitrary SD directories. The official data-slot API also caps
 a core at 32 slots.
 
@@ -135,7 +180,8 @@ Therefore the complete browser uses a two-part design:
    it when cards are copied. Known paths can then be opened through APF target
    command `0x0192` without assigning every cart its own permanent slot.
 
-This provides a real graphical browser for the card collection. Traversing
+This remains the proposed browser design and needs an SDK path-open adapter.
+The current offline BBS loader uses one bound bundle slot instead. Traversing
 every unrelated directory on the whole SD card without an index is not
 implementable through the published Pocket APF interface; supporting that
 would require a new Pocket firmware API from Analogue.
@@ -157,6 +203,8 @@ would require a new Pocket firmware API from Analogue.
    draw-state aliases, remappable big maps and persistent `cartdata`.
 7. **Implemented:** custom SFX instruments and filters; cartridge
    `menuitem()` entries in the system menu.
-   **Next:** multicart `load` and physical-Pocket timing/scaler validation.
+   **Implemented with host verification:** offline BBS `load`, Pocket Sync
+   installer and return navigation. **Next:** physical-Pocket loader validation
+   and timing/scaler validation.
 8. Browser/indexer, ZIP, cart previews, favorites and recent entries.
 9. PICO-8 v0.2.7 conformance matrix.

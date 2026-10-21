@@ -12,10 +12,8 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_FILES = ('os20.rbf_r', 'os.bin', 'loader.bin')
-TOOL_ASSETS = {'plugin.wasm', 'plugin.json', 'cart-thumbnails.wasm', 'THUMBNAILS.md',
-               'LICENSE.txt', 'TOOL-NOTICES.txt'} | {
-    f'cart-thumbnails-{system}-{arch}.tar.gz'
-    for system in ('darwin', 'linux', 'windows') for arch in ('amd64', 'arm64')}
+TOOL_ASSETS = {'plugin.wasm', 'plugin.json', 'OFFLINE-COLLECTIONS.md',
+               'LICENSE.txt', 'TOOL-NOTICES.txt'}
 
 
 def digest(data):
@@ -127,7 +125,18 @@ def prepare(source, runtime, tag, output, apply=False):
 def validate_tools(tools):
     present = {p.name for p in tools.iterdir()}
     if present - {'SHA256SUMS'} != TOOL_ASSETS or any(p.is_symlink() or not p.is_file() for p in tools.iterdir()):
-        raise ValueError('thumbnail tool assets must be complete, flat and contain no extras')
+        raise ValueError('offline plugin assets must be complete, flat and contain no extras')
+    if (tools / 'plugin.wasm').read_bytes()[:4] != b'\x00asm':
+        raise ValueError('plugin.wasm is not WASM')
+    try:
+        manifest = json.loads((tools / 'plugin.json').read_text())
+        canonical = json.loads((ROOT / 'plugin.json').read_text())
+    except (ValueError, UnicodeError) as error:
+        raise ValueError('invalid offline plugin manifest') from error
+    if (not isinstance(manifest, dict) or manifest != canonical
+            or manifest.get('name') != 'Pico8Pocket Offline Collections'
+            or manifest.get('allowed_hosts') != ['www.lexaloffle.com']):
+        raise ValueError('offline plugin manifest differs from canonical metadata or permissions')
 
 
 def core_files(core, pins):
@@ -192,9 +201,6 @@ def assemble(core_dir, tools, output):
     if (record['source_commit'] != git(ROOT, 'rev-parse', 'HEAD') or record['pins'] != pins
             or record['compiler'] != '13.2.0' or record['files'] != core_files(core_dir / core_name, pins)):
         raise ValueError('core artifact provenance differs from this release commit')
-    for name in ('plugin.wasm', 'cart-thumbnails.wasm'):
-        if (tools / name).read_bytes()[:4] != b'\x00asm':
-            raise ValueError(f'{name} is not WASM')
     output.mkdir(parents=True, exist_ok=False)
     for name in TOOL_ASSETS:
         shutil.copyfile(tools / name, output / name)

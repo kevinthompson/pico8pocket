@@ -1,21 +1,20 @@
 package pocketplugin
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-)
+	"time"
 
-func tempRoot(t *testing.T) string {
-	t.Helper()
-	root, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return root
-}
+	"github.com/zenibako/pico8pocket/offline"
+)
 
 type choiceScreen struct {
 	Choice struct {
@@ -25,150 +24,521 @@ type choiceScreen struct {
 	} `json:"Choice"`
 }
 
-func screen(t *testing.T, b []byte, err error) choiceScreen {
+func screen(t *testing.T, b []byte, e error) choiceScreen {
 	t.Helper()
-	if err != nil {
-		t.Fatal(err)
+	if e != nil {
+		t.Fatal(e)
 	}
-	var s choiceScreen
-	if err = json.Unmarshal(b, &s); err != nil || s.Choice.Name == "" {
-		t.Fatalf("invalid screen %s: %v", b, err)
+	var c choiceScreen
+	if json.Unmarshal(b, &c) != nil || c.Choice.Name == "" {
+		t.Fatalf("invalid choice: %s", b)
 	}
-	return s
+	return c
 }
 func start(t *testing.T, s *Session) choiceScreen {
 	t.Helper()
 	b, e := s.Start()
 	return screen(t, b, e)
 }
-func answer(s choiceScreen, value string) []byte {
-	b, _ := json.Marshal(map[string]any{"Answer": map[string]string{"name": s.Choice.Name, "value": value}})
+func answer(c choiceScreen, v string) []byte {
+	b, _ := json.Marshal(map[string]any{"Answer": map[string]string{"name": c.Choice.Name, "value": v}})
 	return b
 }
 func respond(t *testing.T, s *Session, c choiceScreen, v string) choiceScreen {
 	t.Helper()
-	b, e := s.Handle(answer(c, v))
-	return screen(t, b, e)
+	steps := actionPath(v)
+	if len(steps) > 1 && steps[0] == "Browse BBS" && strings.Contains(strings.Join(c.Choice.Choices, "|"), "Recent") {
+		steps = steps[1:]
+	}
+	for _, step := range steps {
+		b, e := s.Handle(answer(c, step))
+		c = screen(t, b, e)
+	}
+	return c
 }
-func TestMenuHelpAndReplay(t *testing.T) {
-	s := New(tempRoot(t), nil)
+func actionPath(action string) []string {
+	if action == "Installed / cache status" {
+		return []string{"Library", "Status"}
+	}
+	if action == "Browse recent carts" {
+		return []string{"Browse BBS", "Recent"}
+	}
+	if action == "Browse popular carts" {
+		return []string{"Browse BBS", "Popular"}
+	}
+	if strings.HasPrefix(action, "Install ") || strings.HasPrefix(action, "Update ") {
+		collection := "Both collections"
+		if strings.HasSuffix(action, "Arcade") {
+			collection = "Pico Arcade"
+		}
+		if strings.HasSuffix(action, "Sorcerer") {
+			collection = "Sorcerer"
+		}
+		op := "Install"
+		if strings.HasPrefix(action, "Update ") {
+			op = "Refresh downloads"
+		}
+		return []string{"Collections", collection, op}
+	}
+	return []string{action}
+}
+func fixture(t *testing.T, n byte) []byte {
+	t.Helper()
+	im := image.NewNRGBA(image.Rect(0, 0, 160, 205))
+	im.SetNRGBA(0, 0, color.NRGBA{R: n, A: 255})
+	var b bytes.Buffer
+	if e := png.Encode(&b, im); e != nil {
+		t.Fatal(e)
+	}
+	return b.Bytes()
+}
+func roots(t *testing.T) (string, string) { t.Helper(); return t.TempDir(), t.TempDir() }
+func put(t *testing.T, p string, b []byte) {
+	t.Helper()
+	if e := offline.AtomicWrite(p, b); e != nil {
+		t.Fatal(e)
+	}
+}
+func cached(t *testing.T, host, group string, b []byte) {
+	t.Helper()
+	c, e := offline.Catalog()
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, c := range c {
+		if group == "both" || group == c.Collection {
+			put(t, offline.CachePath(host, c.ID), b)
+		}
+	}
+}
+func read(t *testing.T, p string) []byte {
+	t.Helper()
+	b, e := os.ReadFile(p)
+	if e != nil {
+		t.Fatal(e)
+	}
+	return b
+}
+func TestMenuProtocol(t *testing.T) {
+	p, h := roots(t)
+	s := New(p, h, nil, nil)
 	c := start(t, s)
-	if strings.Join(c.Choice.Choices, "|") != "Generate one test thumbnail|Generate all thumbnails|Help|Exit" {
+	want := "Browse BBS|Collections|Library|Exit"
+	if strings.Join(c.Choice.Choices, "|") != want {
 		t.Fatal(c)
 	}
 	if _, e := s.Start(); e == nil {
-		t.Fatal("duplicate Start accepted")
+		t.Fatal("duplicate start")
 	}
-	h := respond(t, s, c, "Help")
-	if h.Choice.Name == c.Choice.Name || !strings.Contains(h.Choice.Query, "Assets/pico8/common/cards") || !strings.Contains(h.Choice.Query, "unverified") {
-		t.Fatal(h)
+	next := respond(t, s, c, "Installed / cache status")
+	if !strings.Contains(next.Choice.Query, "arcade: installed 0/35, verified cache 0/35") {
+		t.Fatal(next)
 	}
-	if _, e := s.Handle(answer(c, "Help")); e == nil {
+	if _, e := s.Handle(answer(c, "Exit")); e == nil {
 		t.Fatal("replay accepted")
 	}
-	m := respond(t, s, h, "Back")
-	if m.Choice.Name == h.Choice.Name {
-		t.Fatal("name reused")
-	}
-	b, e := s.Handle(answer(m, "Exit"))
+	next = respond(t, s, next, "Back")
+	b, e := s.Handle(answer(next, "Exit"))
 	if e != nil || string(b) != `"Exit"` {
 		t.Fatalf("%s %v", b, e)
 	}
-	if _, e = s.Handle([]byte(`"Kill"`)); e == nil {
-		t.Fatal("after exit accepted")
+}
+func TestKillAndStrictAnswers(t *testing.T) {
+	for _, in := range []string{`"Kill"`, `{"Kill":{}}`} {
+		p, h := roots(t)
+		s := New(p, h, nil, nil)
+		if _, e := s.Handle([]byte(in)); e == nil {
+			t.Fatal("before start")
+		}
+		start(t, s)
+		b, e := s.Handle([]byte(in))
+		if e != nil || string(b) != `"Exit"` {
+			t.Fatalf("%s %v", b, e)
+		}
+		if _, e := s.Handle([]byte(in)); e == nil {
+			t.Fatal("after exit")
+		}
+	}
+	for _, in := range []string{`null`, `"Exit"`, `{"Kill":null}`, `{"Kill":{},"extra":0}`, `{"Answer":{"name":"NAME","value":"Exit","value":"Exit"}}`, `{"Answer":{"Name":"NAME","value":"Exit"}}`, `{"Answer":{"name":"NAME","value":"bad"}}`, `{"Answer":{"name":"NAME","value":"Exit"}} null`, `{"Answer":{"name":"wrong","value":"Exit"}}`} {
+		p, h := roots(t)
+		s := New(p, h, nil, nil)
+		c := start(t, s)
+		if _, e := s.Handle([]byte(strings.ReplaceAll(in, "NAME", c.Choice.Name))); e == nil {
+			t.Fatalf("accepted %s", in)
+		}
+		respond(t, s, c, "Installed / cache status")
+	}
+}
+func TestCacheOnlyInstallMergesAndReinstalls(t *testing.T) {
+	p, h := roots(t)
+	b := fixture(t, 1)
+	cached(t, h, "both", b)
+	calls := 0
+	s := New(p, h, nil, func(string) (int, []byte, string, error) { calls++; return 0, nil, "", errors.New("offline") })
+	s.Sleep = func(time.Duration) error { t.Fatal("cache slept"); return nil }
+	if _, e := s.Install("sorcerer", false); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.Install("arcade", false); e != nil {
+		t.Fatal(e)
+	}
+	pack := read(t, filepath.Join(p, offline.PackPath))
+	c, e := offline.DecodePack(pack)
+	if e != nil || len(c) != 36 || calls != 0 {
+		t.Fatalf("%d %v calls %d", len(c), e, calls)
+	}
+	if _, e = s.Install("both", false); e != nil {
+		t.Fatal(e)
+	}
+	if !bytes.Equal(pack, read(t, filepath.Join(p, offline.PackPath))) {
+		t.Fatal("reinstall changed pack")
+	}
+	if !bytes.Equal(b, read(t, filepath.Join(p, offline.CartPath, "celeste [15133].p8.png"))) {
+		t.Fatal("standalone differs")
+	}
+}
+func TestFailedRefreshPreservesCacheAndBundle(t *testing.T) {
+	for _, status := range []int{500, 200} {
+		p, h := roots(t)
+		b := fixture(t, 1)
+		cached(t, h, "sorcerer", b)
+		s := New(p, h, nil, nil)
+		if _, e := s.Install("sorcerer", false); e != nil {
+			t.Fatal(e)
+		}
+		old := read(t, filepath.Join(p, offline.PackPath))
+		s.fetch = func(string) (int, []byte, string, error) { return status, []byte("bad PNG"), "", nil }
+		if _, e := s.Install("sorcerer", true); e == nil {
+			t.Fatal("refresh passed")
+		}
+		if !bytes.Equal(old, read(t, filepath.Join(p, offline.PackPath))) || !bytes.Equal(b, read(t, offline.CachePath(h, "mot_sorcerergame"))) {
+			t.Fatal("refresh damaged previous data")
+		}
+	}
+}
+func TestRateLimitStopsEntireBatch(t *testing.T) {
+	p, h := roots(t)
+	b := fixture(t, 1)
+	cached(t, h, "both", b)
+	s := New(p, h, nil, nil)
+	if _, e := s.Install("both", false); e != nil {
+		t.Fatal(e)
+	}
+	old := read(t, filepath.Join(p, offline.PackPath))
+	calls := 0
+	s.fetch = func(id string) (int, []byte, string, error) { calls++; return 429, nil, "120", nil }
+	_, e := s.Install("both", true)
+	if e == nil || !strings.Contains(e.Error(), firstCatalogID(t)) || !strings.Contains(e.Error(), "120") || calls != 1 {
+		t.Fatalf("%v calls %d", e, calls)
+	}
+	if !bytes.Equal(old, read(t, filepath.Join(p, offline.PackPath))) {
+		t.Fatal("429 damaged bundle")
+	}
+}
+func TestCancellationDuringCourtesyWaitPreservesBundle(t *testing.T) {
+	p, h := roots(t)
+	b := fixture(t, 1)
+	cached(t, h, "both", b)
+	s := New(p, h, nil, nil)
+	if _, e := s.Install("both", false); e != nil {
+		t.Fatal(e)
+	}
+	old := read(t, filepath.Join(p, offline.PackPath))
+	calls := 0
+	s.fetch = func(string) (int, []byte, string, error) { calls++; return 200, fixture(t, 2), "", nil }
+	s.Now = func() time.Time { return time.Unix(1700000000, 0) }
+	s.Sleep = func(d time.Duration) error {
+		if d != 15*time.Second {
+			t.Fatal(d)
+		}
+		return ErrCancelled
+	}
+	if _, e := s.Install("both", true); !errors.Is(e, ErrCancelled) || calls != 1 {
+		t.Fatalf("%v calls %d", e, calls)
+	}
+	if !bytes.Equal(old, read(t, filepath.Join(p, offline.PackPath))) {
+		t.Fatal("cancel damaged bundle")
+	}
+}
+func TestMalformedExistingPackNeverOverwritten(t *testing.T) {
+	p, h := roots(t)
+	b := fixture(t, 1)
+	cached(t, h, "sorcerer", b)
+	path := filepath.Join(p, offline.PackPath)
+	put(t, path, []byte("malformed"))
+	s := New(p, h, nil, nil)
+	if _, e := s.Install("sorcerer", false); e == nil {
+		t.Fatal("malformed accepted")
+	}
+	if string(read(t, path)) != "malformed" {
+		t.Fatal("malformed overwritten")
 	}
 }
 
-// TestKillAndBeforeStart accepts both documented and deployed cancellation forms.
-func TestKillAndBeforeStart(t *testing.T) {
-	for _, input := range []string{`"Kill"`, `{"Kill":{}}`} {
-		t.Run(input, func(t *testing.T) {
-			s := New(tempRoot(t), nil)
-			if _, e := s.Handle([]byte(input)); e == nil {
-				t.Fatal("before Start accepted")
-			}
-			start(t, s)
-			b, e := s.Handle([]byte(input))
-			if e != nil || string(b) != `"Exit"` {
-				t.Fatalf("%s %v", b, e)
-			}
-			if _, e := s.Handle([]byte(input)); e == nil {
-				t.Fatal("after Exit accepted")
-			}
-		})
+func TestConversationStateSurvivesNewWASIInstance(t *testing.T) {
+	p, h := roots(t)
+	s := New(p, h, nil, nil)
+	first := start(t, s)
+	saved, e := s.Snapshot()
+	if e != nil {
+		t.Fatal(e)
+	}
+	restored := New(p, h, nil, nil)
+	if e = restored.Restore(saved); e != nil {
+		t.Fatal(e)
+	}
+	next := respond(t, restored, first, "Installed / cache status")
+	if next.Choice.Name == first.Choice.Name {
+		t.Fatal("sequence reset")
+	}
+	if _, e = restored.Handle(answer(first, "Exit")); e == nil {
+		t.Fatal("restored replay accepted")
 	}
 }
-func TestStrictAnswers(t *testing.T) {
-	invalid := []string{
-		`null`, `{}`, `[]`, `"Exit"`, `{"Kill":null}`, `{"Kill":[]}`, `{"Kill":{"extra":true}}`, `{"Kill":{},"extra":0}`, `{"Kill":{},"Kill":{}}`, `{"Kill":{}} null`, `{"Answer":null}`,
-		`{"Answer":{"name":"NAME","value":"Help","root":"/tmp"}}`,
-		`{"Answer":{"name":"NAME","value":"Help"},"extra":0}`,
-		`{"Answer":{"name":"NAME","name":"NAME","value":"Help"}}`,
-		`{"Answer":{"name":"NAME","value":"Help","value":"Exit"}}`,
-		`{"Answer":{"name":"NAME","value":"Help"},"Answer":{"name":"NAME","value":"Help"}}`,
-		`{"Answer":{"name":"NAME","value":"Help"}} null`,
-		`{"Answer":{"name":"wrong","value":"Help"}}`,
-		`{"Answer":{"name":"NAME","value":"help"}}`,
-		`{"Answer":{"name":"NAME","value":"Help","Value":"Exit"}}`,
-		`{"answer":{"name":"NAME","value":"Help"}}`,
+func TestAutomaticMenuActionHasNoContinuePrompt(t *testing.T) {
+	p, h := roots(t)
+	cached(t, h, "sorcerer", fixture(t, 3))
+	s := New(p, h, nil, nil)
+	done := respond(t, s, start(t, s), "Install Sorcerer")
+	if !strings.Contains(done.Choice.Query, "Installed 1 selected") {
+		t.Fatal(done)
 	}
-	for _, input := range invalid {
-		t.Run(input, func(t *testing.T) {
-			s := New(tempRoot(t), nil)
-			c := start(t, s)
-			input = strings.ReplaceAll(input, "NAME", c.Choice.Name)
-			if _, e := s.Handle([]byte(input)); e == nil {
-				t.Fatalf("accepted %s", input)
-			}
-			respond(t, s, c, "Help")
-		})
+	for _, v := range done.Choice.Choices {
+		if v == "Continue" {
+			t.Fatal("manual progress prompt")
+		}
 	}
 }
-func cart(t *testing.T, root, name string) {
+
+func firstCatalogID(t *testing.T) string {
 	t.Helper()
-	dir := filepath.Join(root, "Assets/pico8/common/cards")
-	if e := os.MkdirAll(dir, 0755); e != nil {
+	c, e := offline.Catalog()
+	if e != nil {
 		t.Fatal(e)
 	}
-	data := "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\nprint('hi')\n__label__\n" + strings.Repeat(strings.Repeat("8", 128)+"\n", 128)
-	if e := os.WriteFile(filepath.Join(dir, name+".p8"), []byte(data), 0644); e != nil {
+	return c[0].ID
+}
+
+func TestMissingCartPreventsPartialPublication(t *testing.T) {
+	p, h := roots(t)
+	oldPNG := fixture(t, 1)
+	cached(t, h, "sorcerer", oldPNG)
+	s := New(p, h, nil, nil)
+	if _, e := s.Install("sorcerer", false); e != nil {
 		t.Fatal(e)
 	}
+	old := read(t, filepath.Join(p, offline.PackPath))
+	catalog, e := offline.Catalog()
+	if e != nil {
+		t.Fatal(e)
+	}
+	calls := 0
+	waits := 0
+	s.fetch = func(id string) (int, []byte, string, error) {
+		calls++
+		if id == catalog[1].ID {
+			return 500, nil, "", nil
+		}
+		return 200, fixture(t, 2), "", nil
+	}
+	s.Now = func() time.Time { return time.Unix(1700000000, 0) }
+	s.Sleep = func(d time.Duration) error {
+		waits++
+		if d != 15*time.Second {
+			t.Fatal(d)
+		}
+		return nil
+	}
+	if _, e = s.Install("arcade", false); e == nil || !strings.Contains(e.Error(), catalog[1].ID) {
+		t.Fatalf("%v", e)
+	}
+	if calls != 35 || waits != 34 {
+		t.Fatalf("calls %d waits %d", calls, waits)
+	}
+	if !bytes.Equal(old, read(t, filepath.Join(p, offline.PackPath))) {
+		t.Fatal("partial collection published")
+	}
+	if _, e = os.Stat(filepath.Join(p, offline.CartPath, catalog[0].Name+" ["+catalog[0].ID+"].p8.png")); !os.IsNotExist(e) {
+		t.Fatal("standalone written before preparation complete")
+	}
+	// Successful first downloads remain usable; a retry requests only the failed cart.
+	calls = 0
+	s.fetch = func(id string) (int, []byte, string, error) {
+		calls++
+		if id != catalog[1].ID {
+			t.Fatal(id)
+		}
+		return 200, fixture(t, 2), "", nil
+	}
+	waits = 0
+	if _, e = s.Install("arcade", false); e != nil {
+		t.Fatal(e)
+	}
+	if calls != 1 || waits != 1 {
+		t.Fatalf("retry calls %d waits %d; immediate retries retain the preceding request interval", calls, waits)
+	}
 }
-func TestGenerationPilotAllAndIdempotence(t *testing.T) {
-	root := tempRoot(t)
-	cart(t, root, "a")
-	cart(t, root, "b") // Different bytes give each cart its own CRC32 path.
-	p := filepath.Join(root, "Assets/pico8/common/cards/b.p8")
-	b, _ := os.ReadFile(p)
-	os.WriteFile(p, append(b, []byte("\n")...), 0644)
-	var logs []string
-	s := New(root, func(v string) { logs = append(logs, v) })
-	c := start(t, s)
-	done := respond(t, s, c, "Generate one test thumbnail")
-	if !strings.Contains(done.Choice.Query, "Generated 1") || !strings.Contains(done.Choice.Query, "Pocket") || !strings.Contains(done.Choice.Query, "unverified") {
-		t.Fatal(done)
+
+func TestCancelledBeforePublicationPreservesPack(t *testing.T) {
+	p, h := roots(t)
+	cached(t, h, "sorcerer", fixture(t, 1))
+	s := New(p, h, nil, nil)
+	if _, e := s.Install("sorcerer", false); e != nil {
+		t.Fatal(e)
 	}
-	images, _ := filepath.Glob(filepath.Join(root, "System/Library/Images/pico8/*"))
-	if len(images) != 1 {
-		t.Fatal(images)
+	old := read(t, filepath.Join(p, offline.PackPath))
+	cached(t, h, "sorcerer", fixture(t, 2))
+	cancelled := false
+	s.logger = func(msg string) {
+		if strings.HasPrefix(msg, "Prepared standalone carts") {
+			cancelled = true
+		}
 	}
-	c = respond(t, s, done, "Back")
-	done = respond(t, s, c, "Generate all thumbnails")
-	if !strings.Contains(done.Choice.Query, "Generated 1") || !strings.Contains(done.Choice.Query, "unchanged 1") {
-		t.Fatal(done)
+	s.CheckCancel = func() error {
+		if cancelled {
+			return ErrCancelled
+		}
+		return nil
 	}
-	images, _ = filepath.Glob(filepath.Join(root, "System/Library/Images/pico8/*"))
-	if len(images) != 2 || len(logs) == 0 {
-		t.Fatalf("images=%v logs=%v", images, logs)
+	if _, e := s.Install("sorcerer", false); !errors.Is(e, ErrCancelled) {
+		t.Fatal(e)
+	}
+	if !bytes.Equal(old, read(t, filepath.Join(p, offline.PackPath))) {
+		t.Fatal("cancelled final publication")
+	}
+	if bytes.Equal(fixture(t, 1), read(t, filepath.Join(p, offline.CartPath, "Trail of the Sorcerer companion [mot_sorcerergame].p8.png"))) {
+		t.Fatal("test did not reach standalone publication")
 	}
 }
-func TestGenerationErrorRemainsNavigable(t *testing.T) {
-	s := New(tempRoot(t), nil)
-	c := start(t, s)
-	done := respond(t, s, c, "Generate all thumbnails")
-	if !strings.Contains(done.Choice.Query, "failed") {
-		t.Fatal(done)
+
+func TestCourtesyDelaySurvivesSeparateActions(t *testing.T) {
+	p, h := roots(t)
+	requests := 0
+	waits := 0
+	s := New(p, h, nil, func(string) (int, []byte, string, error) { requests++; return 200, fixture(t, 4), "", nil })
+	s.Sleep = func(d time.Duration) error {
+		waits++
+		if d <= 14*time.Second || d > 15*time.Second {
+			t.Fatalf("unexpected remaining wait %v", d)
+		}
+		return nil
 	}
-	respond(t, s, done, "Back")
+	c := start(t, s)
+	c = respond(t, s, c, "Update Sorcerer")
+	respond(t, s, c, "Update Sorcerer")
+	if requests != 2 || waits != 1 {
+		t.Fatalf("requests %d waits %d; separate actions must retain the courtesy interval", requests, waits)
+	}
+}
+
+func TestRequestTimestampPersistsBeforeCancelledFetch(t *testing.T) {
+	p, h := roots(t)
+	now := time.Unix(1700000000, 0)
+	var persisted time.Time
+	calls := 0
+	s := New(p, h, nil, nil)
+	s.Now = func() time.Time { return now }
+	s.OnRequest = func(stamp time.Time) { persisted = stamp }
+	s.fetch = func(string) (int, []byte, string, error) {
+		calls++
+		if !persisted.Equal(now) || !s.LastRequest.Equal(now) {
+			t.Fatal("timestamp not persisted before HTTP")
+		}
+		return 0, nil, "", ErrCancelled
+	}
+	start(t, s)
+	before, e := s.Snapshot()
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.Install("sorcerer", true); !errors.Is(e, ErrCancelled) {
+		t.Fatal(e)
+	}
+	// A cancelled guest has not written a new conversation snapshot. The separate
+	// host timestamp must take precedence when the old snapshot is restored.
+	restored := New(p, h, nil, func(string) (int, []byte, string, error) { calls++; return 429, nil, "60", nil })
+	restored.LastRequest = persisted
+	if e = restored.Restore(before); e != nil {
+		t.Fatal(e)
+	}
+	now = now.Add(3 * time.Second)
+	restored.Now = func() time.Time { return now }
+	waits := 0
+	restored.Sleep = func(d time.Duration) error {
+		waits++
+		if d != 12*time.Second {
+			t.Fatalf("remaining %v", d)
+		}
+		now = now.Add(d)
+		return nil
+	}
+	if _, e = restored.Install("sorcerer", true); e == nil || !strings.Contains(e.Error(), "429") {
+		t.Fatal(e)
+	}
+	if calls != 2 || waits != 1 {
+		t.Fatalf("calls %d waits %d", calls, waits)
+	}
+	saved, e := restored.Snapshot()
+	if e != nil {
+		t.Fatal(e)
+	}
+	another := New(p, h, nil, nil)
+	if e = another.Restore(saved); e != nil {
+		t.Fatal(e)
+	}
+	if !another.LastRequest.Equal(now) {
+		t.Fatal("snapshot lost timestamp")
+	}
+}
+
+func TestCourtesyGateUsesOnlyRemainingInterval(t *testing.T) {
+	p, h := roots(t)
+	now := time.Unix(1700000000, 0)
+	s := New(p, h, nil, func(string) (int, []byte, string, error) { return 200, fixture(t, 5), "", nil })
+	s.Now = func() time.Time { return now }
+	waits := 0
+	s.Sleep = func(d time.Duration) error { waits++; t.Fatalf("unexpected sleep %v", d); return nil }
+	if _, e := s.Install("sorcerer", true); e != nil {
+		t.Fatal(e)
+	}
+	// Cache use does not enter the gate even while the timestamp is recent.
+	if _, e := s.Install("sorcerer", false); e != nil {
+		t.Fatal(e)
+	}
+	now = now.Add(15 * time.Second)
+	if _, e := s.Install("sorcerer", true); e != nil {
+		t.Fatal(e)
+	}
+	if waits != 0 {
+		t.Fatal(waits)
+	}
+}
+
+func TestCourtesyCooldownStartsAfterFetchCompletes(t *testing.T) {
+	p, h := roots(t)
+	now := time.Unix(1700000000, 0)
+	s := New(p, h, nil, nil)
+	s.Now = func() time.Time { return now }
+	s.fetch = func(string) (int, []byte, string, error) {
+		now = now.Add(5 * time.Second)
+		return 200, fixture(t, 6), "", nil
+	}
+	waits := 0
+	s.Sleep = func(d time.Duration) error {
+		waits++
+		if d != 15*time.Second {
+			t.Fatalf("cooldown after a five-second fetch was %v, want15s", d)
+		}
+		now = now.Add(d)
+		return nil
+	}
+	if _, e := s.Install("sorcerer", true); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.Install("sorcerer", true); e != nil {
+		t.Fatal(e)
+	}
+	if waits != 1 {
+		t.Fatal(waits)
+	}
 }
