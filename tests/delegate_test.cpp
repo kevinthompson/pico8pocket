@@ -28,6 +28,8 @@ static const TValue* probe(lua_State*L,const char*key,bool fallback){
 }
 /** @brief Require a guarded numeric hit equal to the expected fixed value. */
 static void number(lua_State*L,const char*key,int expected){const TValue*v=probe(L,key,false);CHECK(v&&ttisnumber(v)&&nvalue(v)==z8::fix32(expected));}
+/** @brief Require a guarded nil result: the chain ended without __index. */
+static void nil_hit(lua_State*L,const char*key){const TValue*v=probe(L,key,false);CHECK(v&&ttisnil(v));}
 /** @brief Do nothing when tests install a hook to isolate hook-mask eligibility. */
 static void hook(lua_State*,lua_Debug*){}
 void cold_thunk_contracts();
@@ -47,7 +49,7 @@ int main(){
     eval(L,"B.x=9");number(L,"x",9);
     eval(L,"O.base={x=13,f=false}");number(L,"x",13);
     const TValue*f=probe(L,"f",false);CHECK(f&&ttisboolean(f)&&!bvalue(f));
-    probe(L,"absent",true);
+    nil_hit(L,"absent");
     eval(L,"O.x=99 assert(O.x==99) O.x=nil assert(O.x==13)");
     eval(L,"B={x=21} O.base=setmetatable({base=B},{__index=D}) assert(O.x==21)");number(L,"x",21);
     eval(L,"B.x=23");number(L,"x",23);
@@ -74,9 +76,21 @@ int main(){
     eval(L,"D=function(self,k)return self.base[k]end B={} for i=1,1024 do B['key'..i]=i end O=setmetatable({base=B},{__index=D}) assert(O.key1==1)");
     for(int i=1;i<=1024;i++){char key[32];snprintf(key,sizeof(key),"key%d",i);number(L,key,i);}
     eval(L,"for i=1,1024,2 do B['key'..i]=nil end");
-    for(int i=1;i<=1024;i++){char key[32];snprintf(key,sizeof(key),"key%d",i);if(i%2)probe(L,key,true);else number(L,key,i);}
-    eval(L,"O.base={} assert(O.missing==nil)");probe(L,"missing",true);
-    eval(L,"B=setmetatable({}, {}) O.base=B assert(O.x==nil)");probe(L,"x",true);
+    for(int i=1;i<=1024;i++){char key[32];snprintf(key,sizeof(key),"key%d",i);if(i%2)nil_hit(L,key);else number(L,key,i);}
+    eval(L,"O.base={} assert(O.missing==nil)");nil_hit(L,"missing");
+    eval(L,"B=setmetatable({}, {}) O.base=B assert(O.x==nil)");nil_hit(L,"x");
     eval(L,"setmetatable(B,{__index=D}) B.base={x=97} assert(O.x==97)");number(L,"x",97);
+    // Nil results: the same answer as the ordinary call for every chain shape,
+    // and no stale absence once the chain or its metatables change.
+    eval(L,"D=function(self,k) return self.base[k] end T={} B=setmetatable({base=T},{__index=D}) O=setmetatable({base=B},{__index=D}) assert(O.x==nil and rawget(O,'x')==nil)");nil_hit(L,"x");
+    eval(L,"T.x=5 assert(O.x==5)");number(L,"x",5);
+    eval(L,"T.x=nil assert(O.x==nil)");nil_hit(L,"x");
+    eval(L,"T.x=false assert(O.x==false)");{const TValue*v=probe(L,"x",false);CHECK(v&&ttisboolean(v)&&!bvalue(v));}
+    eval(L,"T.x=nil M={} setmetatable(T,M) assert(O.x==nil)");nil_hit(L,"x");
+    eval(L,"M.__index=function(t,k) side=(side or 0)+1 return 67 end side=0 assert(O.x==67 and side==1)");probe(L,"x",true);
+    eval(L,"M.__index={x=61} assert(O.x==61)");probe(L,"x",true);
+    eval(L,"M.__index=nil assert(O.x==nil)");nil_hit(L,"x");
+    eval(L,"O.x=71 assert(O.x==71) O.x=nil assert(O.x==nil)");nil_hit(L,"x");
+    eval(L,"B.x=73 assert(O.x==73)");number(L,"x",73);
     lua_close(L);printf("delegate contracts: %d failures\n",failures);return failures?1:0;
 }
