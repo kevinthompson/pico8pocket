@@ -751,6 +751,14 @@ static void advance_sequencer(p8p_audio_t *audio) {
     }
 }
 
+/* x / 56 truncated toward zero, exact for every int32 x.  GCC keeps a
+ * hardware divide for the constant, which the os20 CPU's radix-2 divider
+ * runs for every active channel of every synthesized sample. */
+static inline int32_t divide_by_56(int32_t x) {
+    int32_t high = (int32_t)(((int64_t)x * -1840700269LL) >> 32);
+    return ((high + x) >> 5) - (x >> 31);
+}
+
 static int32_t synthesize(p8p_audio_t *audio) {
     int32_t mix = 0;
     advance_sequencer(audio);
@@ -802,7 +810,7 @@ static int32_t synthesize(p8p_audio_t *audio) {
         }
         if (channel->is_music)
             volume = (volume >> 8) * (audio->music_volume_q24 >> 16);
-        int32_t value = sample * ((volume + 4096) >> 13) / 56;
+        int32_t value = divide_by_56(sample * ((volume + 4096) >> 13));
         if (filters >= 24 || audio->ram[0x5f41] || audio->ram[0x5f43])
             value = channel_effects(audio, index, value, filters);
         mix += value;
