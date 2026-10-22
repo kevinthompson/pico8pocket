@@ -339,6 +339,72 @@ func TestTidyEditSearchAndConflictFilenameSurviveTextPrompts(t *testing.T) {
 	}
 }
 
+func TestTidyConflictReusesOnlyMatchingByteBoundMetadataOffline(t *testing.T) {
+	for _, tc := range []struct {
+		name, cache string
+		stale       bool
+	}{
+		{"missing PNG cache", "", false},
+		{"different PNG cache", "different", false},
+		{"stale metadata", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, h := roots(t)
+			data, other := fixture(t, 93), fixture(t, 94)
+			common := filepath.Join(p, offline.CommonPath, "cards")
+			source := filepath.Join(common, "90001.p8.png")
+			destination := filepath.Join(common, "Existing [90001].p8.png")
+			alternate := filepath.Join(common, "Alternate [90001].p8.png")
+			conflicting := []byte("preserve this existing destination")
+			put(t, source, data)
+			put(t, destination, conflicting)
+			if err := offline.RememberTitle(h, "90001", "Existing", data); err != nil {
+				t.Fatal(err)
+			}
+			if tc.cache != "" {
+				put(t, offline.CachePath(h, "90001"), other)
+			}
+			requests := 0
+			s := New(p, h, nil, func(string) (int, []byte, string, error) {
+				requests++
+				return 0, nil, "", fmt.Errorf("offline")
+			})
+			fastTidy(s)
+			prompt := respond(t, s, respond(t, s, start(t, s), "Library"), "Tidy filenames")
+			if !containsTidyID(prompt.Choice.Choices, "Choose another filename") || requests != 0 {
+				t.Fatal("initial metadata path did not reach conflict offline", prompt, requests)
+			}
+			if tc.stale {
+				if err := offline.RememberTitle(h, "90001", "Other revision", other); err != nil {
+					t.Fatal(err)
+				}
+			}
+			done := tidyTextAnswer(t, s, prompt, "Choose another filename", "Alternate", p, h)
+			if tc.stale {
+				if requests != 1 || !bytes.Equal(read(t, source), data) {
+					t.Fatal("stale metadata bypassed verification", done, requests)
+				}
+				if _, err := os.Stat(alternate); !os.IsNotExist(err) {
+					t.Fatal("renamed with stale metadata", err)
+				}
+			} else {
+				if requests != 0 || !strings.Contains(done.Choice.Query, "Renamed 1") || !bytes.Equal(read(t, alternate), data) {
+					t.Fatal("verified metadata required a network request", done, requests)
+				}
+				if _, err := os.Stat(source); !os.IsNotExist(err) {
+					t.Fatal("legacy source remains", err)
+				}
+			}
+			if !bytes.Equal(read(t, destination), conflicting) {
+				t.Fatal("conflicting destination changed")
+			}
+			if tc.cache != "" && !bytes.Equal(read(t, offline.CachePath(h, "90001")), other) {
+				t.Fatal("unrelated cache bytes changed")
+			}
+		})
+	}
+}
+
 func TestTidyStopKeepsCompletedChangesAndChangedTextDoesNotFetch(t *testing.T) {
 	p, h := roots(t)
 	data := fixture(t, 61)

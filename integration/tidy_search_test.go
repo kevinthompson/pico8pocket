@@ -19,6 +19,51 @@ import (
 const cakeListing = "<script id=cart_data_script>\npdat=[['90001',42,`Post`,\"thumb\",256,170,\"date\",7,\"Author\",\"date\",0,\"\",1,2,0,7,2,'0',[],2,21,7,`Cake Factory`,``]];</script>"
 const emptyTidyListing = `<div id="listing_page_nav"></div><br> &nbsp [no posts found] <br><br></div>`
 
+func TestTidyConflictUsesByteBoundMetadataOfflineThroughWASI(t *testing.T) {
+	h := newHarness(t, "host")
+	data := testcart.PNG(93)
+	common := filepath.Join(h.pocket, offline.CommonPath, "cards")
+	source := filepath.Join(common, "90001.p8.png")
+	destination := filepath.Join(common, "Existing [90001].p8.png")
+	conflicting := []byte("preserve this existing destination")
+	write(t, source, data)
+	write(t, destination, conflicting)
+	if err := offline.RememberTitle(h.host, "90001", "Existing", data); err != nil {
+		t.Fatal(err)
+	}
+	main := menu(t, h.call("start", nil))
+	library := menu(t, h.call("handle_response", answer(t, main, "Library")))
+	prompt := menu(t, h.call("handle_response", answer(t, library, "Tidy filenames")))
+	if !slices.Contains(prompt.Choice.Choices, "Choose another filename") {
+		t.Fatal("missing offline conflict options", prompt)
+	}
+	out := h.call("handle_response", answer(t, prompt, "Choose another filename"))
+	var text struct{ Text struct{ Name string } }
+	if err := json.Unmarshal(out, &text); err != nil || text.Text.Name == "" {
+		t.Fatal(string(out), err)
+	}
+	input, _ := json.Marshal(map[string]any{"Answer": map[string]string{"name": text.Text.Name, "value": "Alternate"}})
+	done := menu(t, h.call("handle_response", input))
+	if !strings.Contains(done.Choice.Query, "Renamed 1") {
+		t.Fatal("metadata required network access", done)
+	}
+	got, err := os.ReadFile(filepath.Join(common, "Alternate [90001].p8.png"))
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatal("verified source bytes changed", err)
+	}
+	got, err = os.ReadFile(destination)
+	if err != nil || !bytes.Equal(got, conflicting) {
+		t.Fatal("conflicting destination changed", err)
+	}
+	if _, err := os.Stat(source); !os.IsNotExist(err) {
+		t.Fatal("legacy source remains", err)
+	}
+	if title, err := offline.CachedTitle(h.host, "90001", data); err != nil || title != "Alternate" {
+		t.Fatal("alternate title metadata not saved", title, err)
+	}
+	h.assertPreserved()
+}
+
 func TestTidyLookupRetryAndEmptySearchThroughWASI(t *testing.T) {
 	h := newHarness(t, "host", "www.lexaloffle.com")
 	data := testcart.PNG(92)

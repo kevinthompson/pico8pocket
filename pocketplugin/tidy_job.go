@@ -532,13 +532,17 @@ func (s *Session) applyTidyChoice(c bbs.Cart) ([]byte, error) {
 		p.Note = "Source file changed or is unavailable; it has been left untouched."
 		return s.showTidy()
 	}
-	reason, err := s.verifyTidyCandidate(c.ID, data, true)
-	if err != nil {
-		return s.tidyFailure(err)
-	}
-	if reason != "" {
-		p.Note = "Verified copy could not be rechecked: " + reason
-		return s.showTidy()
+	// As in stepTidy, byte-bound metadata can re-establish the identity even
+	// when its PNG cache is missing. The chosen title may intentionally differ.
+	if _, err := offline.CachedTitle(s.hostRoot, c.ID, data); err != nil {
+		reason, err := s.verifyTidyCandidate(c.ID, data, true)
+		if err != nil {
+			return s.tidyFailure(err)
+		}
+		if reason != "" {
+			p.Note = "Verified copy could not be rechecked: " + reason
+			return s.showTidy()
+		}
 	}
 	done, err := s.publishTidy(c, data)
 	if err != nil {
