@@ -183,8 +183,13 @@ the same repository URL. Existing SD artwork is preserved. The native helper can
 before publication; see the linked instructions. Once distributed, choose
 **Collections**, select **Pico Arcade**, **Sorcerer**, or **Both collections**,
 then **Install**. **Refresh downloads** retrieves fresh copies; **Library → Status** reports installed and cached counts. **Library → Tidy
-filenames** updates existing verified downloads to `Title [BBS ID].p8.png`, using
-saved metadata or paced BBS title lookups. Unmatched files and conflicts are preserved.
+filenames** scans `Assets/pico8/common/` and its subfolders, renaming verified PNG
+carts in place to `Title [BBS ID].p8.png` using saved metadata or paced BBS verification and title
+lookups. Failed aliases fall back to title search with exact cart-byte verification;
+unresolved cases offer search, ID, more-results, skip and stop choices. Candidate batches and search pages
+continue automatically; a unique verified identity is used after all candidates
+are checked. Multiple verified matches require a choice.
+Unmatched files and conflicts are preserved.
 Downloads are cached and paced; a rate limit stops the batch so it can resume
 later from the cache. No PICO-8 installation is needed for these downloads.
 

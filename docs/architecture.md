@@ -125,16 +125,34 @@ The desktop plugin also browses public Recent, Popular and search release listin
 and cart GETs share the session's request cooldown. Selecting an individual cart
 installs its original PNG as a standalone asset; it does not modify the dependency
 bundle. Browser state persists across Extism calls; the WASI adapter constructs
-fixed same-host URLs from validated listing modes/pages, bounded URL-encoded search terms and numeric cart IDs.
+fixed same-host URLs from validated listing modes/pages, bounded URL-encoded search terms and validated cart IDs or aliases.
 Pocket Sync text prompts collect search terms; prompt kind, menu position and query
 persist across Extism calls. Home separates Browse BBS, Collections and Library,
 and collection selection precedes Install or Refresh downloads. Standalone SD
 assets use sanitized title-plus-ID filenames while cache and bundle keys stay ID
 based. Library holds status and an explicit tidy operation. Byte-bound title
-metadata is stored beside the host cache; missing numeric-ID titles use a bounded
-public BBS detail parser that checks the exact post ID and PICO-8 release category.
-Tidy verifies file bytes, preserves conflicts, and uses exclusive publication
-before removing an original filename. It never modifies the dependency bundle.
+metadata is stored beside the host cache; missing titles use a bounded public
+BBS detail parser that checks the exact numeric post or cart alias and PICO-8
+release category. Multi-cart posts provide versioned candidates. Failed or
+nonmatching aliases fall back to a public BBS title search; search metadata never
+establishes identity without an exact PNG byte match. Up to ten candidates are
+checked per batch through the shared request cooldown. Batches and pages continue
+automatically, rechecking source bytes and cancellation between iterations. An
+exhausted candidate set with one match publishes automatically; multiple matches,
+unresolved files and incomplete sets at a search limit return Choice/Text prompts
+for selection, refinement, a manual
+ID, more results, skip or stop. Conflicting destinations offer an alternate title.
+A bounded tidy job persists relative source paths, SHA-256 fingerprints, counts,
+candidate cursors and prompt state across Extism calls. Restore validates these
+fields before assigning state; callbacks and roots always come from the host.
+Source bytes are rechecked after prompts and before exclusive publication.
+Cross-ID resolution changes only the standalone filename and the verified ID's
+cache/metadata; it never associates matching bytes with the failed source alias.
+Tidy scans `Assets/pico8/common/` recursively, verifies file bytes, preserves
+conflicts, and uses exclusive publication before removing an original filename.
+Carts keep their containing directory. Symlinks are excluded and the entire scan
+has shared entry/depth limits and cancellation checks. It never modifies the
+dependency bundle.
 
 
 `compatibility/offline-carts.json` is the shared curated catalog. A generated C
@@ -173,8 +191,9 @@ a core at 32 slots.
 
 Therefore the complete browser uses a two-part design:
 
-1. Cards live under `/Assets/pico8/common/cards/` and can initially be
-   selected with Pocket's native asset picker.
+1. Carts can live anywhere under `/Assets/pico8/common/` and can initially be
+   selected with Pocket's native asset picker. Packaging uses `cards/` as a
+   convenience; the cartridge data slot does not require that subdirectory.
 2. A compact `cards.idx` catalog supplies paths, metadata, favorites, recent
    entries and ZIP members to the in-core browser. A host-side indexer updates
    it when cards are copied. Known paths can then be opened through APF target

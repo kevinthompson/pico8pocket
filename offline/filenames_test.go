@@ -110,7 +110,7 @@ func TestTidyStandalonePreservesConflictsAndDeduplicatesIdenticalFiles(t *testin
 		if err := AtomicWrite(target, existing); err != nil {
 			t.Fatal(err)
 		}
-		result, err := TidyStandalone(pocket, StandaloneFile{"15133.p8.png", "15133"}, "Celeste", data)
+		result, err := TidyStandalone(pocket, StandaloneFile{Name: "15133.p8.png", ID: "15133", Dir: "cards/bbs"}, "Celeste", data)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -135,7 +135,7 @@ func TestTidyCaseOnlyTitleChangePreservesCart(t *testing.T) {
 	if err := AtomicWrite(source, data); err != nil {
 		t.Fatal(err)
 	}
-	result, err := TidyStandalone(pocket, StandaloneFile{"Celeste [15133].p8.png", "15133"}, "celeste", data)
+	result, err := TidyStandalone(pocket, StandaloneFile{Name: "Celeste [15133].p8.png", ID: "15133", Dir: "cards/bbs"}, "celeste", data)
 	if err != nil {
 		t.Fatal(result, err)
 	}
@@ -172,7 +172,7 @@ func TestTidyCaseOnlyTitlePreservesDistinctConflictingTarget(t *testing.T) {
 	if err = f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	result, err := TidyStandalone(pocket, StandaloneFile{"Celeste [15133].p8.png", "15133"}, "celeste", data)
+	result, err := TidyStandalone(pocket, StandaloneFile{Name: "Celeste [15133].p8.png", ID: "15133", Dir: "cards/bbs"}, "celeste", data)
 	if err != nil || result != "conflict" {
 		t.Fatal(result, err)
 	}
@@ -184,7 +184,7 @@ func TestTidyCaseOnlyTitlePreservesDistinctConflictingTarget(t *testing.T) {
 	}
 }
 
-func TestStandaloneScanStaysAtTopLevelAndSkipsSymlinks(t *testing.T) {
+func TestStandaloneScanIncludesCommonRootAndNestedCartsAndSkipsSymlinks(t *testing.T) {
 	pocket := t.TempDir()
 	data := cartPNG()
 	dir := filepath.Join(pocket, CartPath)
@@ -194,14 +194,27 @@ func TestStandaloneScanStaysAtTopLevelAndSkipsSymlinks(t *testing.T) {
 	if err := AtomicWrite(filepath.Join(dir, "nested", "90001.p8.png"), data); err != nil {
 		t.Fatal(err)
 	}
+	if err := AtomicWrite(filepath.Join(pocket, CommonPath, "90003.p8.png"), data); err != nil {
+		t.Fatal(err)
+	}
 	if err := AtomicWrite(filepath.Join(dir, ".DS_Store"), []byte("metadata")); err != nil {
 		t.Fatal(err)
 	}
 	check := func(t *testing.T) {
 		t.Helper()
-		files, _, err := StandaloneFiles(pocket)
-		if err != nil || len(files) != 1 || files[0].ID != "15133" {
+		files, _, err := StandaloneFiles(pocket, nil)
+		if err != nil || len(files) != 3 {
 			t.Fatal(files, err)
+		}
+		want := map[string]string{"15133": "cards/bbs", "90001": "cards/bbs/nested", "90003": "."}
+		for _, file := range files {
+			if dir, ok := want[file.ID]; !ok || dir != file.Dir {
+				t.Fatal("incorrect cart location", file)
+			}
+			delete(want, file.ID)
+		}
+		if len(want) != 0 {
+			t.Fatal("missing carts", want)
 		}
 	}
 	check(t)
@@ -213,6 +226,43 @@ func TestStandaloneScanStaysAtTopLevelAndSkipsSymlinks(t *testing.T) {
 		if err := os.Symlink(outside, filepath.Join(dir, "90002.p8.png")); err != nil {
 			t.Skip("filesystem does not permit test symlinks:", err)
 		}
+		if err := os.Symlink(filepath.Dir(outside), filepath.Join(dir, "linked-directory")); err != nil {
+			t.Fatal(err)
+		}
 		check(t)
 	})
+}
+
+func TestTidyStandaloneAsValidatesSourceAndPreservesDifferentDestination(t *testing.T) {
+	for _, targetID := range []string{"32957", "../escape"} {
+		pocket := t.TempDir()
+		data := cartPNG()
+		source := filepath.Join(pocket, CommonPath, "cake_factory.p8.png")
+		if err := AtomicWrite(source, data); err != nil {
+			t.Fatal(err)
+		}
+		target := filepath.Join(pocket, CommonPath, "Cake Factory [32957].p8.png")
+		other := []byte("preserve conflicting destination")
+		if err := AtomicWrite(target, other); err != nil {
+			t.Fatal(err)
+		}
+		result, err := TidyStandaloneAs(pocket, StandaloneFile{Name: "cake_factory.p8.png", ID: "cake_factory"}, targetID, "Cake Factory", data)
+		if targetID == "32957" && (err != nil || result != "conflict") {
+			t.Fatal(result, err)
+		}
+		if targetID != "32957" && err == nil {
+			t.Fatal("unsafe target accepted")
+		}
+		got, e := os.ReadFile(source)
+		if e != nil || !bytes.Equal(got, data) {
+			t.Fatal("source changed", e)
+		}
+		got, e = os.ReadFile(target)
+		if e != nil || !bytes.Equal(got, other) {
+			t.Fatal("target changed", e)
+		}
+		if _, err := TidyStandaloneAs(pocket, StandaloneFile{Name: "cake_factory.p8.png", ID: "32957"}, "32957", "Cake Factory", data); err == nil {
+			t.Fatal("source identity validation bypassed")
+		}
+	}
 }

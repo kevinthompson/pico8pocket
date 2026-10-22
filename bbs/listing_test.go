@@ -9,6 +9,33 @@ import (
 // Project-owned metadata with the BBS lister's observed 24-field row shape.
 const sample = "<a href=#sub=2&page=2&mode=carts&orderby=ts>Next</a><script id=cart_data_script>\npdat=[\n['90001', 42, `Forum title`,\"/bbs/thumbs/example.png\",256,170.5,\"2026-10-20 01:00:00\",7,\"Author_8\",\"date\",0,\"\",10,3,0,7,2,'0',[\"puzzle\",],2,21,7,`A &amp; B`,``],\n];\nvar unrelated=1;</script>"
 
+// Empty lister.php searches omit cart_data_script entirely.
+const emptyListing = `<div id="listing_page_nav" style="position:relative"></div>
+<div>Searching for <b>Unlisted Game</b></div><br><br><br> &nbsp [no posts found] <br><br>
+</div>`
+
+func TestExplicitEmptyListingWithoutCartMetadata(t *testing.T) {
+	p, err := Parse([]byte(emptyListing), 1)
+	if err != nil || len(p.Carts) != 0 || p.HasNext {
+		t.Fatalf("empty search: %+v %v", p, err)
+	}
+	for _, bad := range []string{
+		"<html>Temporarily unavailable</html>",
+		"[no posts found]",
+		strings.Replace(emptyListing, "listing_page_nav", "other", 1),
+		strings.Replace(emptyListing, "[no posts found]", "Loading...", 1),
+		emptyListing + "<script id=cart_data_script>broken</script>",
+		"<script>\npdat=[broken];</script>" + emptyListing,
+	} {
+		if _, err := Parse([]byte(bad), 1); err == nil {
+			t.Fatalf("accepted unknown or malformed listing: %s", bad)
+		}
+	}
+	if _, err := ParseDetail([]byte(emptyListing), "90001"); err == nil {
+		t.Fatal("empty listing accepted as cart identity metadata")
+	}
+}
+
 func TestPublicListingMetadataAndPagination(t *testing.T) {
 	p, err := Parse([]byte(sample), 1)
 	if err != nil {
@@ -124,5 +151,52 @@ func TestDetailMetadataBindsRequestedPostAndFallsBackToPublicTitle(t *testing.T)
 	}
 	if _, err := DetailURL("../escape"); err == nil {
 		t.Fatal("unsafe detail URL")
+	}
+}
+
+func TestDetailAliasesResolveOnlyTheirOwnCart(t *testing.T) {
+	other := strings.ReplaceAll(detailSample, "fixture_cart-0", "other_cart-0")
+	other = strings.ReplaceAll(other, "Public Game Title", "Other Game")
+	row := other[strings.Index(other, "['other_cart-0'"):strings.Index(other, ",];")]
+	multi := strings.Replace(detailSample, ",];", ","+row+",];", 1)
+	for _, id := range []string{"fixture_cart", "fixture_cart-0"} {
+		cart, err := ParseDetail([]byte(multi), id)
+		if err != nil || cart.Title != "Public Game Title" || cart.ID != "90001" {
+			t.Fatal(cart, err)
+		}
+		url, err := DetailURL(id)
+		if err != nil || url != "https://www.lexaloffle.com/bbs/?pid="+id {
+			t.Fatal(url, err)
+		}
+	}
+	for _, id := range []string{"fixture", "fixture_cart-1", "../escape", "a&pid=90001", "", "9007199254740992", "0"} {
+		if _, err := ParseDetail([]byte(multi), id); err == nil {
+			t.Fatal("unbound alias accepted", id)
+		}
+	}
+}
+
+func TestDetailCandidatesRetainDistinctCartsWithinOnePost(t *testing.T) {
+	other := strings.ReplaceAll(detailSample, "fixture_cart-0", "other_cart-0")
+	other = strings.ReplaceAll(other, "Public Game Title", "Other Game")
+	row := other[strings.Index(other, "['other_cart-0'"):strings.Index(other, ",];")]
+	multi := strings.Replace(detailSample, ",];", ","+row+",];", 1)
+	if _, err := ParseDetail([]byte(multi), "90001"); err == nil {
+		t.Fatal("ambiguous numeric post guessed a title")
+	}
+	carts, err := ParseDetails([]byte(multi), "90001")
+	if err != nil || len(carts) != 2 {
+		t.Fatal(carts, err)
+	}
+	if carts[0].Alias != "fixture_cart-0" || carts[0].Title != "Public Game Title" || carts[1].Alias != "other_cart-0" || carts[1].Title != "Other Game" {
+		t.Fatal(carts)
+	}
+	duplicate := strings.ReplaceAll(multi, "other_cart-0", "fixture_cart-0")
+	if _, err := ParseDetails([]byte(duplicate), "90001"); err == nil {
+		t.Fatal("duplicate candidate identity accepted")
+	}
+	wrongPost := strings.ReplaceAll(multi, "90001,7,2", "90002,7,2")
+	if _, err := ParseDetail([]byte(wrongPost), "90001"); err == nil {
+		t.Fatal("wrong post accepted")
 	}
 }

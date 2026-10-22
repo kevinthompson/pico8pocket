@@ -36,6 +36,105 @@ type harness struct {
 	onOpen       func(string)
 }
 
+func TestTidyVerifiesUncachedCatalogCartThroughWASI(t *testing.T) {
+	h := newHarness(t, "host", "www.lexaloffle.com")
+	data := testcart.PNG(83)
+	common := filepath.Join(h.pocket, offline.CommonPath)
+	write(t, filepath.Join(common, "11437.p8.png"), data)
+	manual := filepath.Join(common, "Manual cart.p8.png")
+	write(t, manual, data)
+	oldPack := []byte("unchanged dependency bundle")
+	write(t, filepath.Join(h.pocket, offline.PackPath), oldPack)
+	previous := http.DefaultClient
+	requests := 0
+	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests++
+		if r.Method != "GET" || r.URL.Scheme != "https" || r.URL.Host != "www.lexaloffle.com" || r.URL.Path != "/bbs/get_cart.php" || r.URL.RawQuery != "cat=7&play_src=2&lid=11437" || requests != 1 {
+			t.Fatalf("unexpected verification request: %s", r.URL)
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(data)), Request: r}, nil
+	})}
+	t.Cleanup(func() { http.DefaultClient = previous })
+	main := menu(t, h.call("start", nil))
+	library := menu(t, h.call("handle_response", answer(t, main, "Library")))
+	done := menu(t, h.call("handle_response", answer(t, library, "Tidy filenames")))
+	if !strings.Contains(done.Choice.Query, "Renamed 1") || !strings.Contains(done.Choice.Query, "unrecognized filename or unreadable entry: 1") || requests != 1 {
+		t.Fatal(done, requests)
+	}
+	got, err := os.ReadFile(filepath.Join(common, "picoman [11437].p8.png"))
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatal("verified cart changed", err)
+	}
+	if _, err := os.Stat(filepath.Join(common, "11437.p8.png")); !os.IsNotExist(err) {
+		t.Fatal("legacy filename remains", err)
+	}
+	if title, err := offline.CachedTitle(h.host, "11437", data); err != nil || title != "picoman" {
+		t.Fatal(title, err)
+	}
+	done = menu(t, h.call("handle_response", answer(t, done, "Tidy filenames")))
+	if !strings.Contains(done.Choice.Query, "already tidy 1") || requests != 1 {
+		t.Fatal("repeat tidy used network", done, requests)
+	}
+	got, err = os.ReadFile(manual)
+	if err != nil || !bytes.Equal(got, data) || !bytes.Equal(h.pack(), oldPack) {
+		t.Fatal("manual cart or bundle changed", err)
+	}
+	h.assertPreserved()
+}
+
+func TestTidyResolvesNamedAliasThroughWASI(t *testing.T) {
+	h := newHarness(t, "host", "www.lexaloffle.com")
+	data := testcart.PNG(84)
+	common := filepath.Join(h.pocket, offline.CommonPath)
+	write(t, filepath.Join(common, "fixture_named.p8.png"), data)
+	previous := http.DefaultClient
+	var requests []time.Time
+	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != "GET" || r.URL.Scheme != "https" || r.URL.Host != "www.lexaloffle.com" {
+			t.Fatal(r.URL)
+		}
+		requests = append(requests, time.Now())
+		var body []byte
+		switch len(requests) {
+		case 1:
+			if r.URL.Path != "/bbs/" || r.URL.RawQuery != "pid=fixture_named" {
+				t.Fatal(r.URL)
+			}
+			body = []byte("<script id=cart_data_script>\npdat=[['fixture_named-0',42,`Named Game`,\"thumb\",256,170,\"date\",7,\"Author\",\"date\",0,\"\",1,2,90001,7,2,'0',[],0,1,,``,``],];</script>")
+		case 2:
+			if r.URL.Path != "/bbs/get_cart.php" || r.URL.RawQuery != "cat=7&play_src=2&lid=fixture_named" {
+				t.Fatal(r.URL)
+			}
+			body = data
+		default:
+			t.Fatalf("unexpected request %s", r.URL)
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: r}, nil
+	})}
+	t.Cleanup(func() { http.DefaultClient = previous })
+	main := menu(t, h.call("start", nil))
+	library := menu(t, h.call("handle_response", answer(t, main, "Library")))
+	done := menu(t, h.call("handle_response", answer(t, library, "Tidy filenames")))
+	if !strings.Contains(done.Choice.Query, "Renamed 1") || len(requests) != 2 {
+		t.Fatal(done, requests)
+	}
+	if requests[1].Sub(requests[0]) < 15*time.Second {
+		t.Fatal("alias metadata and download bypassed cooldown")
+	}
+	got, err := os.ReadFile(filepath.Join(common, "Named Game [fixture_named].p8.png"))
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatal("alias cart changed", err)
+	}
+	if _, err := os.Stat(filepath.Join(common, "fixture_named.p8.png")); !os.IsNotExist(err) {
+		t.Fatal("legacy alias remains", err)
+	}
+	done = menu(t, h.call("handle_response", answer(t, done, "Tidy filenames")))
+	if !strings.Contains(done.Choice.Query, "already tidy 1") || len(requests) != 2 {
+		t.Fatal("repeat alias tidy used network", done, requests)
+	}
+	h.assertPreserved()
+}
+
 func artifact(t *testing.T) string {
 	t.Helper()
 	path := os.Getenv("POCKET_PLUGIN_WASM")
@@ -87,7 +186,7 @@ func newHarness(t *testing.T, first string, allowedHosts ...string) *harness {
 		}
 		stack[0] = 0
 	}, []extism.ValueType{extism.ValueTypeI64}, []extism.ValueType{extism.ValueTypeI64})
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	t.Cleanup(cancel)
 	p, err := extism.NewPlugin(ctx,
 		extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: wasm}}, AllowedHosts: allowedHosts},
@@ -113,7 +212,12 @@ func write(t *testing.T, path string, data []byte) {
 
 func (h *harness) call(fn string, in []byte) []byte {
 	h.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	return h.callWithin(fn, in, 30*time.Second)
+}
+
+func (h *harness) callWithin(fn string, in []byte, timeout time.Duration) []byte {
+	h.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	code, out, err := h.plugin.CallWithContext(ctx, fn, in)
 	if err != nil || code != 0 {
@@ -679,6 +783,23 @@ func TestCompiledPluginLibraryTidiesLegacyFilesWithBBSMetadata(t *testing.T) {
 	for _, id := range []string{"90001", "15133"} {
 		write(t, filepath.Join(h.pocket, offline.CartPath, id+".p8.png"), png)
 	}
+	for _, cart := range []struct{ dir, id, title string }{
+		{".", "90011", "Root Library Game"},
+		{"favorites/nested", "90012", "Nested Library Game"},
+	} {
+		write(t, filepath.Join(h.pocket, offline.CommonPath, cart.dir, cart.id+".p8.png"), png)
+		if err := offline.RememberTitle(h.host, cart.id, cart.title, png); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outside := filepath.Join(h.pocket, "Assets/other-platform/90013.p8.png")
+	write(t, outside, png)
+	if err := offline.RememberTitle(h.host, "90013", "Outside Game", png); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../../other-platform", filepath.Join(h.pocket, offline.CommonPath, "linked-directory")); err != nil {
+		t.Log("directory symlink fixture unavailable:", err)
+	}
 	write(t, filepath.Join(h.pocket, offline.PackPath), oldPack)
 	const detail = "<script id=cart_data_script>\npdat=[['fixture_cart-0',42,`Public Game Title`,\"thumb\",256,170,\"date\",7,\"Author\",\"date\",0,\"\",1,2,90001,7,2,'0',[],0,1,,``,``],];</script>"
 	previous := http.DefaultClient
@@ -710,7 +831,7 @@ func TestCompiledPluginLibraryTidiesLegacyFilesWithBBSMetadata(t *testing.T) {
 	main = menu(t, h.call("handle_response", answer(t, list, "Back to main menu")))
 	library := menu(t, h.call("handle_response", answer(t, main, "Library")))
 	done := menu(t, h.call("handle_response", answer(t, library, "Tidy filenames")))
-	if !strings.Contains(done.Choice.Query, "Renamed 2") || len(requests) != 2 {
+	if !strings.Contains(done.Choice.Query, "Renamed 4") || len(requests) != 2 {
 		t.Fatal(done, requests)
 	}
 	if gap := requests[1].Sub(requests[0]); gap < 15*time.Second {
@@ -727,12 +848,28 @@ func TestCompiledPluginLibraryTidiesLegacyFilesWithBBSMetadata(t *testing.T) {
 			t.Fatal("legacy name not removed", id, err)
 		}
 	}
+	for _, cart := range []struct{ dir, id, title string }{
+		{".", "90011", "Root Library Game"},
+		{"favorites/nested", "90012", "Nested Library Game"},
+	} {
+		target := filepath.Join(h.pocket, offline.CommonPath, cart.dir, cart.title+" ["+cart.id+"].p8.png")
+		got, err := os.ReadFile(target)
+		if err != nil || !bytes.Equal(got, png) {
+			t.Fatal("common-root tidy changed a cart or moved its folder", target, err)
+		}
+		if _, err := os.Stat(filepath.Join(h.pocket, offline.CommonPath, cart.dir, cart.id+".p8.png")); !os.IsNotExist(err) {
+			t.Fatal("root or nested legacy filename remains", cart.id, err)
+		}
+	}
+	if got, err := os.ReadFile(outside); err != nil || !bytes.Equal(got, png) {
+		t.Fatal("tidy followed a directory symlink outside common", err)
+	}
 	title, err := offline.CachedTitle(h.host, "90001", png)
 	if err != nil || title != "Public Game Title" {
 		t.Fatal(title, err)
 	}
 	done = menu(t, h.call("handle_response", answer(t, done, "Tidy filenames")))
-	if !strings.Contains(done.Choice.Query, "already tidy 2") || len(requests) != 2 {
+	if !strings.Contains(done.Choice.Query, "already tidy 4") || len(requests) != 2 {
 		t.Fatal(done, requests)
 	}
 	if err := offline.RememberTitle(h.host, "90004", "Case Game", png); err != nil {

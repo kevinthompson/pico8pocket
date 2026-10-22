@@ -6,6 +6,13 @@ Sorcerer's companion from `compatibility/offline-carts.json`. No game assets or
 PICO-8 executable are included. PICO-8 is not required for plugin downloads.
 It also browses public BBS releases and downloads individually selected carts.
 
+The plugin list shows only the PICO-8 diamond from the existing project logo.
+Its PNG is embedded in `plugin.json` as `logo_url`, so installed artwork works
+offline and stays with the released manifest. `assets/branding/plugin-thumbnail.png`
+preserves the diamond's original pixels and colors from `pico8-platform.png`,
+with a transparent background and no text. Pocket Sync displays it at 120×120;
+the PNG uses nearest-neighbor scaling to 240×240 for Retina displays.
+
 ## Use
 
 Pocket Sync's normal installer takes a GitHub repository URL and retrieves
@@ -72,8 +79,9 @@ collection actions for Arcade/Sorcerer dependencies. Other multicart games may
 need additional carts, and downloaded games still depend on core compatibility.
 
 Listing requests, metadata lookups and cart downloads share the 15-second network cooldown,
-including across menu actions. Only the explicitly requested page/cart is fetched;
-there is no background crawl or bulk-download action. Cached cart reinstalls do
+including across menu actions. Browsing fetches only the requested page/cart;
+there is no background crawl or bulk-install action. Tidy may fetch existing cart
+IDs for verification as described below. Cached cart reinstalls do
 not make network requests. HTTP 429 stops the action without automatic retries.
 Errors preserve existing installed files and report a retryable menu.
 
@@ -85,22 +93,63 @@ or malformed data; a BBS format change may require updating the adapter.
 
 ## Tidy existing filenames
 
-Choose **Library → Tidy filenames**. It scans the top level of the plugin's
-`Assets/pico8/common/cards/bbs/` folder and recognizes ID-only and titled BBS
-filenames. New installs use names such as `Still Life [198121].p8.png`; title
+Choose **Library → Tidy filenames**. It scans `Assets/pico8/common/` recursively,
+including carts in the root and all subfolders, and recognizes ID-only and titled
+BBS PNG filenames. Verified carts are renamed in their existing folders. New
+downloads still go to `cards/bbs/` with names such as `Still Life [198121].p8.png`; title
 characters unsuitable for SD filesystems are replaced, and long titles are shortened.
-The BBS ID suffix stays intact. Cache files and bundle entries keep their original
-IDs, preserving collection handoffs.
+The suffix records the verified BBS identity. Cache entries use that identity;
+existing cache entries for a different alias and all bundle keys are preserved,
+so collection handoffs continue to match.
 
 Tidy uses byte-matched saved metadata or the verified cart cache to establish a
-file's identity. It uses saved titles or the curated catalog first; missing titles
-for known numeric IDs are retrieved from their public BBS posts. The public post
-title is used when a separate cart title is unavailable. The same 15-second
-request cooldown, cancellation and HTTP 429 stop behavior apply. Saved metadata
-lets subsequent tidy operations work offline.
+file's identity. Otherwise it checks the exact BBS ID or alias and downloads its
+cart to compare every PNG byte. Noncatalog aliases require metadata from their
+public BBS post first; a general-list fallback response cannot establish identity.
+Multi-cart posts supply versioned candidates. Saved titles and the curated catalog
+avoid unnecessary metadata requests.
 
+When the alias is unavailable or its downloads differ, Tidy searches the public
+BBS by title, starting with the filename's title or its alias with underscores and
+hyphens replaced by spaces. Search results are candidates only: every candidate
+must match the original PNG bytes before it can be used. For example, an unrelated
+`cake_factory` alias cannot rename an older Cake Factory cart; a matching title
+search result can supply its correct BBS identity instead. Modified carts and
+revisions with no exact match stay untouched. A matching cart is cached under its
+verified identity, without overwriting the unrelated alias cache.
+
+Tidy checks candidates in batches of at most **10**, automatically continuing
+through later batches and search pages without asking you to proceed. One
+verified match renames automatically once the candidate set is exhausted and
+there are no more search pages. Multiple verified identities require a choice;
+files with no verified match keep their resolution prompt. Resolution
+options include **Edit search**, **Enter BBS ID** (numeric post or cart alias),
+**Check more results**, **Skip file**, and **Stop**. Stop keeps completed changes;
+a new Tidy run rescans the library. A destination containing different bytes also
+offers **Choose another filename**, retaining the verified ID. Blank text returns
+to the resolution menu. Search is bounded to 512 checked identities and 20
+verified matches per file; refining a query or entering an ID starts a fresh
+candidate set. If a search limit prevents checking the entire candidate set,
+Tidy pauses rather than assuming a single match is unique. Each queued run must
+fit the saved-state size limit. Source bytes and cancellation are checked between
+batches and pages. A broad uncached search may take much longer than one batch.
+**Check more results** appears only when more candidates remain available;
+an interrupted lookup offers **Retry** instead. An empty BBS search is a normal
+no-match result: edit the search, enter a BBS ID, or skip the file.
+
+The queue, counts, candidate position and prompt survive Pocket Sync calls.
+The source file is read again after an answer; changed, missing or symlinked files
+are left untouched. Requests retain the shared **15-second cooldown**. HTTP 429
+and request failures pause with retry/skip/stop choices, preserving the cooldown.
+Saved metadata lets later runs work offline for previously verified files.
 The result reports renamed, already tidy, unmatched, conflicting and invalid
-files. Symlinks and subdirectories are skipped. Existing conflicting files are
+files, with unmatched reason counts and at most five example paths in the log.
+An ID-only cart such as `11437.p8.png` can be verified online even if it was copied
+from another computer or its original host cache is missing. Verification downloads
+and title lookups share the same 15-second cooldown, so a large uncached library
+can take several minutes. Symlinked files and directories are skipped. The complete scan is bounded
+to 4096 entries and 32 directory levels and can be cancelled before renaming starts.
+Existing conflicting files are
 preserved; identical copies can be consolidated. Cart bytes and the dependency
 bundle are preserved. Original files remain until the titled copy is complete;
 a hard host cancellation during copying can leave an incomplete destination,
