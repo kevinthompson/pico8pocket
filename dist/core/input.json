@@ -9,10 +9,10 @@
                     { "id": 1,  "name": "PICO-8 O",     "key": "pad_btn_b" },
                     { "id": 2,  "name": "PICO-8 X Alt", "key": "pad_btn_x" },
                     { "id": 3,  "name": "PICO-8 O Alt", "key": "pad_btn_y" },
-                    { "id": 10, "name": "Previous",     "key": "pad_trig_l" },
-                    { "id": 11, "name": "Next",         "key": "pad_trig_r" },
+                    { "id": 10, "name": "L",            "key": "pad_trig_l" },
+                    { "id": 11, "name": "R",            "key": "pad_trig_r" },
                     { "id": 20, "name": "Pause",        "key": "pad_btn_start" },
-                    { "id": 21, "name": "Card Browser", "key": "pad_btn_select" }
+                    { "id": 21, "name": "System Menu",  "key": "pad_btn_select" }
                 ]
             }
         ]

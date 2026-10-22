@@ -6,16 +6,16 @@
             "shortname": "pico8",
             "description": "PICO-8 player on openfpgaOS",
             "author": "zenibako",
-            "url": "",
-            "version": "0.0.33",
-            "date_release": "2026-10-06"
+            "url": "https://github.com/zenibako/pico8pocket",
+            "version": "0.0.35",
+            "date_release": "2026-10-21"
         },
         "framework": {
             "target_product": "Analogue Pocket",
             "version_required": "2.2",
             "sleep_supported": true,
             "dock": { "supported": true, "analog_output": false },
-            "hardware": { "link_port": false, "cartridge_adapter": 0 }
+            "hardware": { "link_port": false, "cartridge_adapter": -1 }
         },
         "cores": [
             {
