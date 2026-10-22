@@ -45,6 +45,17 @@ class PackageMetadataTests(unittest.TestCase):
         subprocess.run(['bash', str(script)], env=env, check=True, capture_output=True)
         self.tree = root / 'build/pocket/pico8pocket'
 
+    def test_release_metadata_does_not_advertise_cartridge_hardware(self):
+        """Publish the install URL and describe the actual system-menu controls."""
+        core = json.loads((self.tree / 'Cores/zenibako.pico8/core.json').read_text())['core']
+        self.assertEqual(core['framework']['hardware']['cartridge_adapter'], -1)
+        self.assertEqual(core['metadata']['url'], 'https://github.com/zenibako/pico8pocket')
+        mappings = json.loads((self.tree / 'Cores/zenibako.pico8/input.json').read_text())['input']['controllers'][0]['mappings']
+        labels = {item['key']: item['name'] for item in mappings}
+        self.assertEqual(labels['pad_btn_select'], 'System Menu')
+        self.assertEqual(labels['pad_trig_l'], 'L')
+        self.assertEqual(labels['pad_trig_r'], 'R')
+
     def test_ai_declaration_is_in_assembled_tree(self):
         """Keep the public AI declaration where catalog updaters read it."""
         path = self.tree / 'Cores/zenibako.pico8/updaters.json'

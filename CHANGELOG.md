@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.0.35 — 2026-10-21
+
+- Library filename cleanup scans `Assets/pico8/common/` recursively and keeps
+  carts in their existing folders. Title searches recover failed BBS aliases,
+  but only exact cart-byte matches can supply a new identity. A unique verified
+  identity is used automatically after checking all candidates; ambiguous and
+  unmatched files offer search, manual-ID, skip and stop choices.
+- Saved byte-bound metadata supports offline conflict resolution even when the
+  PNG cache is missing. Empty BBS searches are treated as no-match results;
+  interrupted requests offer Retry without a misleading more-results option.
+- Add a PICO-8 diamond icon to the Offline Collections plugin.
+- Add guarded VM delegate lookups, optimize dense iterator execution, and
+  update the production hot-code layout while retaining fallback paths.
+- Resolve inherited reads that end in nil inside the guarded delegate, avoiding
+  an unnecessary Lua fallback while respecting later table/metatable changes.
+- Replace the audio synthesizer's per-channel divide by 56 with an exact
+  reciprocal calculation, preserving integer results and PCM output.
+- Preserve the published v0.0.34 install URL, no-cartridge-adapter declaration,
+  and L/R/System Menu control labels in the packaged core.
+
 - Browse paginated Recent and Popular public BBS releases in the Pocket Sync
   plugin. View a cart's BBS page or download its original PNG to the Pocket.
   Listing and cart requests share pacing; cached installs work offline and
@@ -26,6 +46,9 @@
   explanation and Select-menu recovery. The compiled list and README table
   share one registry, initially covering Pico Arcade, Trail of the Sorcerer
   and Pico Backrooms. Matching uses decoded content rather than filenames.
+
+## 0.0.34 — 2026-10-19
+
 - Lua-to-Lua calls set up and tear down their frames inside the
   interpreter loop instead of through `luaD_precall`/`luaD_poscall`, and C
   functions reached by a tail call (`return peek(...)`) or used as a `for ...
