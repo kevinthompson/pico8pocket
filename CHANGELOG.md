@@ -15,6 +15,10 @@
 - Add a PICO-8 diamond icon to the Offline Collections plugin.
 - Add guarded VM delegate lookups, optimize dense iterator execution, and
   update the production hot-code layout while retaining fallback paths.
+- Resolve inherited reads that end in nil inside the guarded delegate, avoiding
+  an unnecessary Lua fallback while respecting later table/metatable changes.
+- Replace the audio synthesizer's per-channel divide by 56 with an exact
+  reciprocal calculation, preserving integer results and PCM output.
 - Preserve the published v0.0.34 install URL, no-cartridge-adapter declaration,
   and L/R/System Menu control labels in the packaged core.
 
