@@ -1,0 +1,41 @@
+name: Skills audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Check out pinned Harnessmith
+        uses: actions/checkout@v7
+        with:
+          repository: kevinglover/harnessmith
+          ref: 07f4c4749063ea7bd079870e6b9923635e0ffad6
+          path: .skill-audit/harnessmith
+      - name: Audit skill metadata, budgets and catalogs
+        env:
+          PYTHONPATH: ${{ github.workspace }}/.skill-audit/harnessmith
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in claude codex; do
+            for skill in .agents/skills/*/SKILL.md .claude/skills/*/SKILL.md; do
+              [ -f "$skill" ] || continue
+              python3 -m harnessmith "$skill" --target "$target" --audit --fail-on warning
+            done
+            for catalog in .agents/skills .claude/skills; do
+              [ -d "$catalog" ] || continue
+              python3 -m harnessmith catalog "$catalog" --target "$target" --fail-on warning
+            done
+          done
