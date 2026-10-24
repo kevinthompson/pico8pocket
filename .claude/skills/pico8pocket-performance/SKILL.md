@@ -1,7 +1,7 @@
 ---
 name: pico8pocket-performance
 description: Measure and optimize Pico8Pocket's frame time on the Analogue Pocket (RV32 openfpgaOS) - reading the profiler overlay, reproducing a slow scene, counting RV32 instructions, BRAM placement and the frame-skip scheduler. Use when a cart runs slowly on the Pocket, when the user sends overlay screenshots, or before changing the interpreter, drawing or audio hot paths.
-argument-hint: "[harness: path or host:path of openfpga-os25-harness with os20 support]"
+argument-hint: "[harness: path or host:path of a zenibako/pocket-harness checkout]"
 ---
 
 # Pico8Pocket performance
@@ -147,10 +147,13 @@ and exact binary before treating these shares as current hardware costs.
 
 ## Simulated runs: use the os20 adapter
 
-Use `openfpga-os25-harness` with os20 support (introduced in `7e747e7`).
-Take its location from the **harness** argument or session context, then
-`OS25_HARNESS_ROOT` or the known sibling checkout. Ask only if it is unavailable.
-Read its `AGENTS.md` and `pico8/README.md`; keep cases private and isolated.
+The harness is the private repository
+[zenibako/pocket-harness](https://github.com/zenibako/pocket-harness); this
+adapter lives in its `pico8/` directory (os20 support since `7e747e7`). Take
+the checkout's location from the **harness** argument, then
+`OS25_HARNESS_ROOT`; ask once if neither is set, and don't hunt for it.
+Read its `README.md`, `AGENTS.md` and `pico8/README.md`. Carts, cases and
+traces stay in its gitignored `experiments/`; never commit them there or here.
 
 From the harness root, verify an existing platform before using it. If
 `build/platforms/os20` does not exist, run
