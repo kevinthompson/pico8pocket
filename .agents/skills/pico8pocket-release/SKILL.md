@@ -1,6 +1,7 @@
 ---
 name: pico8pocket-release
 description: Build and verify Pico8Pocket distributions, prepare matched os20 API/runtime pin updates, coordinate explicit draft releases, and hand off hardware test builds. Use for dependency refreshes, packaging, release metadata, A/B cores and release PRs in the Pico8Pocket repository.
+argument-hint: "[card: SD mount path]"
 ---
 
 # Pico8Pocket builds, device testing and PRs
