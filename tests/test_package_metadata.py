@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,7 +29,7 @@ class PackageMetadataTests(unittest.TestCase):
             '.deps/openfpgaos-sdk/runtime/pocket/os20.rbf_r': b'bitstream fixture',
             '.deps/openfpgaos-sdk/runtime/pocket/loader.bin': b'loader fixture',
             '.deps/openfpgaos-sdk/runtime/pocket/os.bin': b'runtime fixture',
-            'src/app/pico8pocket.ini': b'config fixture',
+            'src/app/pico8pocket.ini': b'ELF=pico8pocket.elf\n',
             'assets/p8p_slot_pad.bin': b'padding fixture',
             'assets/cards/README.txt': b'Provide your own carts.',
             'LICENSE': b'license fixture',
@@ -60,6 +61,40 @@ class PackageMetadataTests(unittest.TestCase):
         """Keep the public AI declaration where catalog updaters read it."""
         path = self.tree / 'Cores/zenibako.pico8/updaters.json'
         self.assertEqual(json.loads(path.read_text())['declare_ai'], ['OpenAI Codex', 'Claude Code'])
+
+    def test_plugin_recommendation_survives_public_packaging(self):
+        """Keep the installer recommendation in the installable public core."""
+        metadata = 'Cores/zenibako.pico8/updaters.json'
+        expected = json.loads((ROOT / 'dist/core/updaters.json').read_text())
+        self.assertEqual(expected['plugins'], ['https://github.com/zenibako/pico8pocket'])
+        root = Path(self.temporary.name)
+        public_zip = Path(shutil.make_archive(str(root / 'public'), 'zip', self.tree))
+        with zipfile.ZipFile(public_zip) as packaged:
+            self.assertEqual(json.loads(packaged.read(metadata)), expected)
+
+    def test_plugin_recommendation_survives_variant_packaging(self):
+        """Retain updater metadata when the real variant script renames a core."""
+        root = Path(self.temporary.name)
+        env = dict(os.environ)
+        realpath = shutil.which('realpath')
+        supports_missing = realpath and subprocess.run(
+            [realpath, '-m', str(root / 'variant.zip')], capture_output=True).returncode == 0
+        if not supports_missing:
+            grealpath = shutil.which('grealpath')
+            if not grealpath:
+                self.skipTest('Variant packaging requires GNU realpath (-m)')
+            tools = root / 'tools'
+            tools.mkdir()
+            (tools / 'realpath').symlink_to(grealpath)
+            env['PATH'] = str(tools) + os.pathsep + env.get('PATH', '')
+        public_zip = Path(shutil.make_archive(str(root / 'public'), 'zip', self.tree))
+        variant_zip = root / 'variant.zip'
+        subprocess.run(['bash', str(ROOT / 'scripts/variant-core.sh'), str(public_zip),
+                        'b', 'Metadata test variant', str(variant_zip)],
+                       env=env, check=True, capture_output=True)
+        expected = json.loads((ROOT / 'dist/core/updaters.json').read_text())
+        with zipfile.ZipFile(variant_zip) as packaged:
+            self.assertEqual(json.loads(packaged.read('Cores/zenibako.pico8b/updaters.json')), expected)
 
     def test_game_association_selects_carts_not_internal_resources(self):
         """Expose real carts to Pocket Sync's first-required-filtered-slot selector."""
