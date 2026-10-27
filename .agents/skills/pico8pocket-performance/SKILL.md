@@ -145,14 +145,25 @@ and exact binary before treating these shares as current hardware costs.
 - Ship a test zip and ask the user for overlay screenshots of the same scene.
   Host numbers are estimates.
 
-## Simulated runs: use the os20 adapter
+## Shared device evidence collection
+
+Use the local [pocket-benchmarking router](../pocket-benchmarking/SKILL.md) and
+[project guide](../../../docs/BENCHMARKING.md) for profile selection, actual
+package identity, screenshot-backed device summaries and comparison modes.
+Keep per-cart hashes/routes, logical and visible rates, render divisor and audio
+settings separate. Collection complements every native, package and device check
+above; importing a summary neither certifies transcription nor adds RTL support.
+
+## Simulated runs: use the bounded os20 adapter
 
 The harness is the private repository
 [zenibako/pocket-harness](https://github.com/zenibako/pocket-harness); this
 adapter lives in its `pico8/` directory (os20 support since `7e747e7`). Take
 the checkout's location from the **harness** argument, then
 `OS25_HARNESS_ROOT`; ask once if neither is set, and don't hunt for it.
-Read its `README.md`, `AGENTS.md` and `pico8/README.md`. Carts, cases and
+Read its `README.md`, `AGENTS.md`, canonical
+`.agents/skills/os25-harness/SKILL.md` and `pico8/README.md`. The local benchmark
+router also supports shared checkout discovery for collection. Carts, cases and
 traces stay in its gitignored `experiments/`; never commit them there or here.
 
 From the harness root, verify an existing platform before using it. If
@@ -210,3 +221,13 @@ python3 pico8/run.py report --case EXACT_CASE
   os25 calibration does not calibrate Pico8Pocket on os20.
 - Existing single-lane os25 cache/pipeline observers are not validated for
   dual-issue os20. Distinguish instruction shares from cycle/frame-time shares.
+
+## Historical bare-metal os25 evidence
+
+The 2026-10-11 PICO-8 experiment used a separate bare-metal os25 build, not the
+shipped application ELF. Preserve its original model/clock, code-layout and
+Lua-hash-seed qualifications. Current bounded os20 runtime replay is a separate
+workflow; neither model includes the complete device presentation, render-skip
+and OS scheduling paths. Historical os25 timings cannot be frequency-rescaled
+into os20 device FPS. The collector's `harness-revision` import remains limited
+to Butterscotch os25 reports and does not import these PICO-8 replay results.

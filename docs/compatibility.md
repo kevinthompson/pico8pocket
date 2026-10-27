@@ -28,6 +28,11 @@ Out of scope for the Pocket hardware target:
 
 Compatibility claims must be backed by a named cart/test and a Pocket run.
 
+For device performance comparisons, use the [benchmark guide](BENCHMARKING.md):
+record each cart hash and route, retain manual screenshot limitations, and keep
+correctness/save-state checks independent from timing. Importing a result or
+selecting a faster platform does not establish compatibility.
+
 ## Known incompatible revisions
 
 [The README list](../README.md#known-incompatible-cartridges) is generated from

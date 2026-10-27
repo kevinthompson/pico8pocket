@@ -379,6 +379,13 @@ products and technologies of Analogue. Pico8Pocket is an independent,
 unofficial compatibility project and is not affiliated with, endorsed by, or
 sponsored by Lexaloffle Games LLP or Analogue.
 
+## Benchmarking and platform selection
+
+Use the [benchmark guide](docs/BENCHMARKING.md) for representative device trials,
+actual package/profile identity, profiler screenshots and project-specific
+platform selection. Shared collection complements compatibility and release checks;
+historical os25 simulation does not establish shipping os20 performance.
+
 ## Releases and plugin migration
 
 The [release guide](docs/RELEASING.md) covers the complete core/plugin distribution,

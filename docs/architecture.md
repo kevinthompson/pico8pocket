@@ -24,6 +24,11 @@ adds native save states and sleep/wake.
 Version 0.0.32 used the earlier `2687e3d0` snapshot (runtime source `453a283`,
 API 0.8.1).
 
+For performance evidence or an alternative platform evaluation, follow the
+[benchmark guide](BENCHMARKING.md). Identify the actual packaged runtime and
+application, shortlist compatible profiles, and keep historical os25 simulation
+separate from this os20 device configuration.
+
 ## Runtime boundaries
 
 ```text
