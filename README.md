@@ -32,8 +32,9 @@ started and how you can help improve it.
   independently (60 FPS carts to 30, 20 or 15 FPS; 30 FPS carts to 15). This
   prevents effect-heavy scenes from slowing the entire game clock. A 30 FPS
   frame keeps every draw while its measured cost fits 32 ms of the 33.3 ms
-  frame (15 ms at 60 FPS). The profiler's white number reports the resulting
-  visible frame rate.
+  frame (15 ms at 60 FPS). The profiler's labelled V row estimates visible
+  frame rate from logical FPS and the render divisor; actual presented frames
+  require a separate measurement.
 - The compatibility layer includes scaled `sspr`, texture-mapped `tline`,
   `oval`/`ovalfill`, patterned fills, 16/32-bit memory access, draw-state RAM
   aliases, remappable sprite/map memory and PICO-8's 32 KiB big-map mode.
@@ -64,14 +65,19 @@ started and how you can help improve it.
 - Pressing Select opens the PICO-8-styled system menu and fully pauses the
   cartridge with a short audio fade. Holding Select and pressing the physical X
   button, or pressing X from the main system menu, toggles the opt-in
-  profiler. Its labelled rows show logical FPS (`L`), visible FPS (`V`), update
+  profiler. Its labelled rows show logical FPS (`L`), estimated visible FPS (`V`), update
   time (`U`), draw time (`D`), audio time (`A`), presentation time (`P`), the
   active render divisor (`R`), a Lua activity count (`K`) and the full runtime
   step the frame-skip scheduler measures (`F`: update and draw plus audio
   serviced mid-frame, garbage collection and frame setup). A second column counts sprite/map work (`S`), primitive
   graphics calls (`G`), memory/map/flag access (`M`), draw-state changes (`C`),
   text calls (`T`), input reads (`B`) and helpers such as `rnd`, `all` and
-  `foreach` (`Q`). The profiler is hidden on every fresh launch.
+  `foreach` (`Q`). V does not count presentations and omits periodic skipped
+  probe frames at R1. U/D/A/P/F are smoothed timings rounded to milliseconds and
+  capped at 99; a displayed 99 is not an exact timing. Keep capped observations
+  in screenshots/notes and exclude them from numeric comparisons. See the
+  [benchmark guide](docs/BENCHMARKING.md#capture-and-archive-device-evidence)
+  before using overlay values as evidence. The profiler is hidden on every fresh launch.
 - The paused cartridge behind the system menu is rendered through a dedicated
   15%-brightness palette before the checkerboard shade is applied, while menu
   text and panels retain their full palette brightness.

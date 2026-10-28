@@ -32,7 +32,7 @@ argument-hint: "[harness: path or host:path of a zenibako/pocket-harness checkou
 ## Reading the overlay (Select + X)
 
 - **Left column:**
-  - L: logical FPS. V: visible FPS.
+  - L: logical FPS estimate. V: derived visible-FPS estimate, not counted presentations.
   - U, D: the cart's `_update` and `_draw` ms.
   - A: audio pump ms. P: present ms.
   - R: render divisor (R02 = every other frame drawn).
@@ -42,6 +42,14 @@ argument-hint: "[harness: path or host:path of a zenibako/pocket-harness checkou
 - **Right column:** API call counts per frame by group.
   - S: sprites. G: graphics. M: memory. C: draw state (`pal`/`palt`/`clip`...).
   - T: text. B: buttons. Q: helpers.
+- **Overlay limits:** V is L / R rounded up while running with R > 1, otherwise
+  L. It omits periodic R1 probe skips; measure actual presentation rate separately
+  for visible-rate acceptance. Archive V as `visible_estimate_hz`, not `visible_hz`.
+- U/D/A/P/F show smoothed timings rounded to the nearest millisecond and capped
+  at 99. Any 99 is censored (98.5 ms or higher), not an exact timing. Preserve it
+  in screenshots/notes and exclude that metric from numeric comparisons; keep
+  compared metric rosters matched. Other displayed timings retain millisecond
+  rounding even if converted to microseconds.
 - **Scheduler** (`src/app/scheduler.c`): it keeps R1 while F + A + P fits the
   budget, 32 ms at 30 FPS or 15 ms at 60 FPS. Update cost is only measured on
   skipped frames. At R1 and over budget, one draw in 15 is skipped to
@@ -150,8 +158,8 @@ and exact binary before treating these shares as current hardware costs.
 Use the local [pocket-benchmarking router](../pocket-benchmarking/SKILL.md) and
 [project guide](../../../docs/BENCHMARKING.md) for profile selection, actual
 package identity, screenshot-backed device summaries and comparison modes.
-Keep per-cart hashes/routes, logical and visible rates, render divisor and audio
-settings separate. Collection complements every native, package and device check
+Keep per-cart hashes/routes, logical rates, V estimates, separately measured
+presentation rates, render divisor and audio settings separate. Collection complements every native, package and device check
 above; importing a summary neither certifies transcription nor adds RTL support.
 
 ## Simulated runs: use the bounded os20 adapter

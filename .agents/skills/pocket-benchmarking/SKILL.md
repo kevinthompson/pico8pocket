@@ -17,8 +17,10 @@ If unavailable, report the missing dependency; do not copy or invent the workflo
 
 Keep project performance, compatibility and release skills responsible for
 workload, build and correctness checks. Device summaries need original profiler
-screenshots, per-cart hashes/routes, logical and visible rates, render skipping,
-audio settings and actual package/runtime identity. Transcriptions stay manual
+screenshots, per-cart hashes/routes, logical rates, V estimates, separately
+measured presentation rates, render skipping, audio settings and actual
+package/runtime identity. Exclude saturated timing metrics from numeric comparisons;
+the project guide defines rounding, censoring and matched-roster requirements. Transcriptions stay manual
 and unchecked. Variant-core packaging supplies no durable results exporter.
 For bounded os20/90 MHz PICO-8 runtime replay, use the canonical harness's
 `.agents/skills/os25-harness/SKILL.md` and `pico8/README.md`. That simulation

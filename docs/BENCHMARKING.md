@@ -63,14 +63,27 @@ the same scene in each build and capture original screenshots after sampling;
 capture pauses can disturb timing. Record which scene was actually reached,
 including whether it was recreated by a route or restored from a save.
 
-Transcribe only visible values into `device-summary` rows, with stable IDs and
-literal units: `logical_hz` and `visible_hz` are separate metrics. Record U/D/A/P/F
-in explicit units when displayed, render divisor/skipping and audio mode; a fast
-logical rate with skipped drawing does not establish the visible rate. Do not
-sum overlapping counters or infer percentiles/sample counts from a screenshot.
-The overlay's F covers runtime work beyond U + D. Keep audio-enabled gameplay
-separate from muted or no-draw diagnostics; those modes do not establish normal
-play performance.
+Transcribe only displayed values into `device-summary` rows, with stable IDs
+and literal units. Keep L (`logical_hz`) separate from V (`visible_estimate_hz`).
+V is derived from L and the render divisor: while running with R > 1 it is L / R
+rounded up; otherwise it equals L. It does not count presented frames and omits
+the periodic skipped probe frames at R1. Visible-rate acceptance needs a separate
+presentation-rate measurement and recorded method; reserve `visible_hz` for that
+evidence. A fast logical rate or a V estimate does not establish actual display FPS.
+
+Record U/D/A/P/F in explicit units, together with render divisor/skipping and
+audio mode. These timings are smoothed, rounded to the nearest millisecond and
+capped at 99. A displayed 99 is a censored reading, not an exact 99 ms: the
+smoothed value can be 98.5 ms or anything higher, including 150 or 250 ms. Preserve
+that observation in screenshots/notes, but omit the saturated metric from numeric
+comparisons; use matching metric rosters on both sides or obtain an unsaturated
+measurement. The collector has no bound-aware comparison mode. Converting a
+rounded millisecond reading to microseconds does not add precision.
+
+Do not sum overlapping counters or infer percentiles/sample counts from a
+screenshot. The overlay's F covers runtime work beyond U + D. Keep audio-enabled
+gameplay separate from muted or no-draw diagnostics; those modes do not establish
+normal play performance.
 
 Prepare the collector's full run metadata: project `pico8pocket`, cart/game and
 case IDs, exact expected row roster, route version, sampling, repeat, physical
