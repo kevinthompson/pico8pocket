@@ -95,6 +95,17 @@ Platforms/_images/pico8.bin        platform banner
 - Upgrading from `Askent.pico8pocket` means moving carts and saves from the
   `pico8pocket` folders to `pico8`.
 
+## Benchmark evidence
+
+For platform shortlisting, packaged artifact/profile identity and device
+comparisons, use [the project benchmark guide](../../../docs/BENCHMARKING.md)
+and the local [pocket-benchmarking router](../pocket-benchmarking/SKILL.md).
+Variant-core packaging isolates files; it adds no durable results exporter.
+Use the canonical harness's `os25-harness` skill for bounded os20 runtime replay;
+that simulation does not establish complete device parity. Preserve every build,
+compatibility and physical Pocket gate in this skill; collector import success
+is not hardware acceptance.
+
 ## Side-by-side A/B testing
 
 ```sh

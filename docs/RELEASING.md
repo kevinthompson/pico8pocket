@@ -10,6 +10,11 @@ records the retained Go/TinyGo implementation. The
 `scripts/fetch-deps.sh` remains the authoritative dependency lock; no second
 copy of those pins is introduced. Release app source is the exact Git commit.
 
+For candidate performance/platform evidence, use the
+[benchmark guide](BENCHMARKING.md). Bind profiles to actual packaged OS/RBF,
+Chip32 loader and CPU configuration hashes, plus application/toolchain identity.
+Benchmark collection does not replace any distribution or device gate below.
+
 ## Prepare a runtime pin update
 
 Run **Prepare runtime pin update** (`update-runtime.yml`) in this repository.

@@ -107,3 +107,10 @@ description: Debug PICO-8 cart compatibility problems and change the patched z8l
 - Changes to hook timing shift when scripted input lands in carts with long
   `_init` slicing. Check those carts for errors and plausible frames rather
   than identical hashes.
+
+For screenshot-backed device comparisons and actual package/profile identity,
+use [the benchmark guide](../../../docs/BENCHMARKING.md) and
+[shared router](../pocket-benchmarking/SKILL.md). Keep this skill's native,
+error/input and cross-version save-load checks independent from collection.
+Use the harness's canonical `os25-harness` skill for bounded os20 runtime replay;
+collector import success does not extend replay support or qualify device FPS.
