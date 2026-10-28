@@ -5,10 +5,17 @@ description: Use when selecting Pico8Pocket platform profiles, planning benchmar
 
 # Pocket benchmark evidence
 
+## Shared repository identity
+
+The canonical repository is <https://github.com/zenibako/pocket-dev-tools>,
+formerly `pocket-harness`. For discovery use a root explicitly established in
+the session, then `POCKET_DEV_TOOLS_ROOT`, then legacy `POCKET_HARNESS_ROOT`.
+Resolve conflicting explicit roots before proceeding. Both sibling directory
+names are candidates only; validate the canonical benchmark skill and collector
+as described below. Existing local paths and CLI names remain supported.
+
 Read this project's [benchmark guide](../../../docs/BENCHMARKING.md), then use
-the maintained workflow in an established `pocket-harness` checkout. Take its
-path from the session or `POCKET_HARNESS_ROOT`. With neither, consider only
-`../pocket-harness` relative to this repository root. Validate that it contains
+the maintained workflow in the shared checkout resolved above. Validate that it contains
 `.agents/skills/pocket-benchmarking/SKILL.md` and `benchmarks/__main__.py`;
 resolve the shared skill's canonical path before following its relative links.
 Read that skill and its `benchmarks/README.md`, `PLATFORMS.md` and `SELECTION.md`

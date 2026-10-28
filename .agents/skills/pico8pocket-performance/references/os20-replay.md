@@ -3,7 +3,7 @@
 ## Simulated runs: use the bounded os20 adapter
 
 The harness is the private repository
-[zenibako/pocket-harness](https://github.com/zenibako/pocket-harness); this
+[zenibako/pocket-dev-tools](https://github.com/zenibako/pocket-dev-tools); this
 adapter lives in its `pico8/` directory (os20 support since `7e747e7`). Take
 the checkout's location from the **harness** argument, then
 `OS25_HARNESS_ROOT`; ask once if neither is set, and don't hunt for it.
