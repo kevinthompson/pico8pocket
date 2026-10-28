@@ -9,9 +9,11 @@ It also browses public BBS releases and downloads individually selected carts.
 The plugin list shows only the PICO-8 diamond from the existing project logo.
 Its PNG is embedded in `plugin.json` as `logo_url`, so installed artwork works
 offline and stays with the released manifest. `assets/branding/plugin-thumbnail.png`
-preserves the diamond's original pixels and colors from `pico8-platform.png`,
-with a transparent background and no text. Pocket Sync displays it at 120×120;
-the PNG uses nearest-neighbor scaling to 240×240 for Retina displays.
+uses the diamond artwork and colors from `pico8-platform.png`, with a transparent
+background and no text. Keep both the PNG and embedded image at 40×40 pixels:
+Pocket Sync's compact core-detail plugin row uses the image's intrinsic size.
+Its separate Plugins screen displays the image at 120×120. The smaller PNG is
+a client-layout workaround, not a plugin schema requirement.
 
 ## Use
 
