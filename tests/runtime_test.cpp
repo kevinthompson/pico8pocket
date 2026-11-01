@@ -1144,6 +1144,29 @@ int main(void) {
         }
 
         {
+            /* With no wall clock, stat(80..85) and stat(90..95) still report a
+             * valid date: month-table lookups and date arithmetic at cart load
+             * must not hit nil or a zero month. */
+            static const char date_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "day=stat(80)%100*365+split\"0,31,59\"[stat(81)]+stat(82)\n"
+                "function _draw() cls()\n"
+                "if day==25551 and stat(90)==stat(80) and stat(91)==stat(81)\n"
+                "and stat(92)==stat(82) then pset(0,0,7) end\n"
+                "if stat(83)+stat(84)+stat(85)+stat(93)+stat(94)+stat(95)==0\n"
+                "then pset(1,0,7) end end\n";
+            p8p_cart_t date_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)date_source,
+                                            sizeof(date_source) - 1,
+                                            &date_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &date_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            CHECK(p8p_runtime_framebuffer(runtime)[0] == 7);
+            CHECK(p8p_runtime_framebuffer(runtime)[1] == 7);
+            p8p_cart_destroy(&date_cart);
+        }
+
+        {
             /* stat(26) counts 183/22050 s ticks into the music pattern:
              * 9600 samples at 48 kHz are 24 ticks. */
             audio_crossings_for(runtime,

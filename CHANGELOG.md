@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `stat(80)`-`stat(85)` and `stat(90)`-`stat(95)` report 1970-01-01 00:00:00
+  instead of nil or 0, so carts that read the date at load no longer stop with
+  an arithmetic error. The Pocket runtime exposes no wall clock; a year before
+  2000 tells a cart that the date is not real.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps
