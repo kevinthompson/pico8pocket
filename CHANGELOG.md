@@ -14,6 +14,9 @@
 - `pal(p)` resets the draw or display palette, as the manual describes. It
   previously mapped colour `p` to itself, so temporary palette changes
   carried over into later drawing.
+- `print()` applies its 1px left and top background padding only while padding
+  is on, so `\^-b` and `0x5f58` without the padding bit fill each character
+  cell exactly.
 
 ## 0.0.35 — 2026-10-21
 

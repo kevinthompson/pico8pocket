@@ -1276,6 +1276,35 @@ int main(void) {
             CHECK(p8p_runtime_screen_palette(runtime)[3] == 3);
             CHECK(p8p_runtime_screen_palette(runtime)[7] == 7);
             p8p_cart_destroy(&pal_reset_cart);
+            /* A character's solid background covers its cell: padded by 1px
+             * on the left and top by default, and exact without padding. */
+            static const char padding_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _draw() cls()\n"
+                "?\"\\#8 \",10,20\n"
+                "?\"\\^-b\\#9 \",30,20\n"
+                "poke(0x5f58,1)\n"
+                "?\"\\#a \",50,20\n"
+                "poke(0x5f58,0) end\n";
+            p8p_cart_t padding_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)padding_source,
+                                            sizeof(padding_source) - 1,
+                                            &padding_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &padding_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            CHECK(pixels[19 * 128 + 9] == 8);
+            CHECK(pixels[24 * 128 + 13] == 8);
+            CHECK(pixels[25 * 128 + 13] == 0);
+            CHECK(pixels[20 * 128 + 29] == 0);
+            CHECK(pixels[19 * 128 + 30] == 0);
+            CHECK(pixels[20 * 128 + 30] == 9);
+            CHECK(pixels[25 * 128 + 33] == 9);
+            CHECK(pixels[20 * 128 + 34] == 0);
+            /* 0x5f58 without its padding bit also leaves padding off. */
+            CHECK(pixels[20 * 128 + 49] == 0);
+            CHECK(pixels[25 * 128 + 53] == 10);
+            p8p_cart_destroy(&padding_cart);
         }
 
         {
