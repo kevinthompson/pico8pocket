@@ -8,6 +8,9 @@
   2000 tells a cart that the date is not real.
 - Add `rrect` and `rrectfill`, which draw through the same clip, camera,
   palette and fill-pattern path as `rectfill`.
+- `pal(p)` resets the draw or display palette, as the manual describes. It
+  previously mapped colour `p` to itself, so temporary palette changes
+  carried over into later drawing.
 
 ## 0.0.35 — 2026-10-21
 
