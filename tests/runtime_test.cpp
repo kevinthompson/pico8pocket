@@ -1164,6 +1164,9 @@ int main(void) {
             CHECK(p8p_runtime_framebuffer(runtime)[0] == 7);
             CHECK(p8p_runtime_framebuffer(runtime)[1] == 7);
             p8p_cart_destroy(&date_cart);
+        }
+
+        {
             static const char rrect_source[] =
                 "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
                 "function _draw() cls() rrectfill(50,80,40,30,2,8)\n"
@@ -1198,6 +1201,9 @@ int main(void) {
             /* Zero width draws nothing. */
             CHECK(pixels[42 * 128 + 0] == 0);
             p8p_cart_destroy(&rrect_cart);
+        }
+
+        {
             /* 0x5f2c transforms the whole screen at presentation.  One pixel
              * at (10,20) must land exactly on the listed display pixels. */
             static const struct {
@@ -1276,6 +1282,9 @@ int main(void) {
             CHECK(p8p_runtime_screen_palette(runtime)[3] == 3);
             CHECK(p8p_runtime_screen_palette(runtime)[7] == 7);
             p8p_cart_destroy(&pal_reset_cart);
+        }
+
+        {
             /* A character's solid background covers its cell: padded by 1px
              * on the left and top by default, and exact without padding. */
             static const char padding_source[] =
