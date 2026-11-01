@@ -23,6 +23,8 @@ struct p8p_runtime {
     uint16_t draw_target;
     /* Unpacked screen RAM for presentation while drawing is redirected. */
     uint8_t display[128 * 128];
+    /* The screen after the 0x5f2c transformation, when one is selected. */
+    uint8_t transformed[128 * 128];
     uint8_t draw_palette[16];
     uint8_t screen_palette[16];
     uint8_t transparent[16];

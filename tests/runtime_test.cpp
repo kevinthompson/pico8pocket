@@ -1198,6 +1198,57 @@ int main(void) {
             /* Zero width draws nothing. */
             CHECK(pixels[42 * 128 + 0] == 0);
             p8p_cart_destroy(&rrect_cart);
+            /* 0x5f2c transforms the whole screen at presentation.  One pixel
+             * at (10,20) must land exactly on the listed display pixels. */
+            static const struct {
+                int mode;
+                int count;
+                int pixels[4][2];
+            } screen_modes[] = {
+                {0, 1, {{10, 20}}},
+                {1, 2, {{20, 20}, {21, 20}}},
+                {2, 2, {{10, 40}, {10, 41}}},
+                {3, 4, {{20, 40}, {21, 40}, {20, 41}, {21, 41}}},
+                {4, 1, {{10, 20}}},
+                {5, 2, {{10, 20}, {117, 20}}},
+                {6, 2, {{10, 20}, {10, 107}}},
+                {7, 4, {{10, 20}, {117, 20}, {10, 107}, {117, 107}}},
+                {67, 4, {{20, 40}, {21, 40}, {20, 41}, {21, 41}}},
+                {128, 1, {{10, 20}}},
+                {129, 1, {{117, 20}}},
+                {130, 1, {{10, 107}}},
+                {131, 1, {{117, 107}}},
+                {132, 1, {{10, 20}}},
+                {133, 1, {{107, 10}}},
+                {134, 1, {{117, 107}}},
+                {135, 1, {{20, 117}}},
+            };
+            for (const auto &screen_mode : screen_modes) {
+                char mode_source[256];
+                snprintf(mode_source, sizeof(mode_source),
+                         "pico-8 cartridge // http://www.pico-8.com\n"
+                         "version 42\n__lua__\n"
+                         "poke(0x5f2c,%d)\n"
+                         "function _draw() cls() pset(10,20,8) end\n",
+                         screen_mode.mode);
+                p8p_cart_t mode_cart = {};
+                CHECK(p8p_cart_load_text_memory((const uint8_t *)mode_source,
+                                                strlen(mode_source),
+                                                &mode_cart) == 0);
+                CHECK(p8p_runtime_load(runtime, &mode_cart) == 0);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                const uint8_t *shown = p8p_runtime_display_framebuffer(runtime);
+                int lit = 0;
+                for (int pixel = 0; pixel < 128 * 128; ++pixel)
+                    lit += shown[pixel] == 8;
+                CHECK(lit == screen_mode.count);
+                for (int index = 0; index < screen_mode.count; ++index)
+                    CHECK(shown[screen_mode.pixels[index][1] * 128 +
+                                screen_mode.pixels[index][0]] == 8);
+                /* Screen memory keeps the normal layout. */
+                CHECK(p8p_runtime_framebuffer(runtime)[20 * 128 + 10] == 8);
+                p8p_cart_destroy(&mode_cart);
+            }
         }
 
         {

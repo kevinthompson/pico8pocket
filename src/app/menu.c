@@ -537,7 +537,7 @@ void p8p_menu_open(p8p_menu_t *menu, p8p_runtime_t *runtime,
     const uint8_t *palette;
     if (!menu || !runtime)
         return;
-    source = p8p_runtime_framebuffer(runtime);
+    source = p8p_runtime_display_framebuffer(runtime);
     palette = p8p_runtime_screen_palette(runtime);
     for (int i = 0; i < MENU_WIDTH * MENU_HEIGHT; ++i) {
         uint8_t color = palette ? palette[source[i] & 15] : source[i];

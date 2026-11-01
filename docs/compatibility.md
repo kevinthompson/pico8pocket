@@ -132,6 +132,10 @@ Implemented and covered by host tests:
 - `stat(80)`-`stat(85)` and `stat(90)`-`stat(95)` report a fixed 1970-01-01
   00:00:00 because the runtime has no wall clock; carts can treat a year before
   2000 as no date;
+- `0x5f2c` screen modes 1-3 (stretch), 5-7 (mirror), 129-131 (flip) and 133-135
+  (rotate), applied to the whole screen at presentation. Bit 6 is ignored, and
+  other values show the normal screen. The official manual does not document
+  this register; the mode list comes from the PICO-8 wiki;
 - 120 error-free headless frames of the official Celeste Classic cart.
 
 Not yet compatibility-complete:

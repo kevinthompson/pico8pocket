@@ -181,7 +181,7 @@ static int evict_oldest(uint8_t *store) {
 }
 
 static void make_thumbnail(p8p_runtime_t *runtime, uint8_t *thumbnail) {
-    const uint8_t *framebuffer = p8p_runtime_framebuffer(runtime);
+    const uint8_t *framebuffer = p8p_runtime_display_framebuffer(runtime);
     const uint8_t *palette = p8p_runtime_screen_palette(runtime);
     for (int y = 0; y < P8P_STATE_THUMB_HEIGHT; ++y) {
         for (int x = 0; x < P8P_STATE_THUMB_WIDTH; ++x) {

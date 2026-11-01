@@ -710,7 +710,7 @@ int main(int argc, char **argv) {
                 average_update_runtime_us = smooth_time(
                     average_update_runtime_us, runtime_us);
             if (running) {
-                present_framebuffer = p8p_runtime_framebuffer(runtime);
+                present_framebuffer = p8p_runtime_display_framebuffer(runtime);
                 present_palette = p8p_runtime_screen_palette(runtime);
                 if (drew_game_frame && average_draw_runtime_us) {
                     int desired = p8p_render_divisor_for_load(

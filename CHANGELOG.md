@@ -8,6 +8,9 @@
   2000 tells a cart that the date is not real.
 - Add `rrect` and `rrectfill`, which draw through the same clip, camera,
   palette and fill-pattern path as `rectfill`.
+- Support every `0x5f2c` screen mode: 64x128, 128x64 and 64x64 stretches,
+  mirroring, flips and quarter-turn rotations. Pause menus and save-state
+  previews show the transformed image.
 
 ## 0.0.35 — 2026-10-21
 
