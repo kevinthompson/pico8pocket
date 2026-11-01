@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add `rrect` and `rrectfill`, which draw through the same clip, camera,
+  palette and fill-pattern path as `rectfill`.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps

@@ -1144,6 +1144,43 @@ int main(void) {
         }
 
         {
+            static const char rrect_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _draw() cls() rrectfill(50,80,40,30,2,8)\n"
+                "rrect(2,2,10,10,2,9) rrectfill(0,40,0,5,1,7) end\n";
+            p8p_cart_t rrect_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)rrect_source,
+                                            sizeof(rrect_source) - 1,
+                                            &rrect_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &rrect_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            /* The manual's example: radius 2 leaves 3 pixels missing per corner. */
+            CHECK(pixels[80 * 128 + 50] == 0);
+            CHECK(pixels[80 * 128 + 51] == 0);
+            CHECK(pixels[80 * 128 + 52] == 8);
+            CHECK(pixels[81 * 128 + 50] == 0);
+            CHECK(pixels[81 * 128 + 51] == 8);
+            CHECK(pixels[82 * 128 + 50] == 8);
+            CHECK(pixels[95 * 128 + 70] == 8);
+            CHECK(pixels[109 * 128 + 89] == 0);
+            CHECK(pixels[109 * 128 + 87] == 8);
+            CHECK(pixels[110 * 128 + 70] == 0);
+            /* The outline follows the same corner shape and leaves the inside. */
+            CHECK(pixels[2 * 128 + 3] == 0);
+            CHECK(pixels[2 * 128 + 4] == 9);
+            CHECK(pixels[3 * 128 + 3] == 9);
+            CHECK(pixels[4 * 128 + 2] == 9);
+            CHECK(pixels[4 * 128 + 3] == 0);
+            CHECK(pixels[6 * 128 + 6] == 0);
+            CHECK(pixels[6 * 128 + 11] == 9);
+            CHECK(pixels[11 * 128 + 6] == 9);
+            /* Zero width draws nothing. */
+            CHECK(pixels[42 * 128 + 0] == 0);
+            p8p_cart_destroy(&rrect_cart);
+        }
+
+        {
             /* stat(26) counts 183/22050 s ticks into the music pattern:
              * 9600 samples at 48 kHz are 24 ticks. */
             audio_crossings_for(runtime,
