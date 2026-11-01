@@ -129,6 +129,10 @@ Implemented and covered by host tests:
 - offline `load("#id", breadcrumb, parameters)`, `stat(6)` parameters,
   `stat(100)` breadcrumb and `extcmd("go_back")`, including host-managed return
   history and Select-menu return; the shared catalog initially contains 36 carts;
+- `0x5f2c` screen modes 1-3 (stretch), 5-7 (mirror), 129-131 (flip) and 133-135
+  (rotate), applied to the whole screen at presentation. Bit 6 is ignored, and
+  other values show the normal screen. The official manual does not document
+  this register; the mode list comes from the PICO-8 wiki;
 - 120 error-free headless frames of the official Celeste Classic cart.
 
 Not yet compatibility-complete:

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Support every `0x5f2c` screen mode: 64x128, 128x64 and 64x64 stretches,
+  mirroring, flips and quarter-turn rotations. Pause menus and save-state
+  previews show the transformed image.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps

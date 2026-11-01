@@ -3710,6 +3710,72 @@ extern "C" const uint8_t *p8p_runtime_framebuffer(p8p_runtime_t *runtime) {
     return runtime->display;
 }
 
+/* Writes the 0x5f2c screen transformation of SOURCE to DESTINATION and returns
+ * nonzero, or returns zero when MODE leaves the screen unchanged.  The whole
+ * screen is transformed at presentation, as on PICO-8; drawing and screen
+ * memory always use the normal 128x128 layout. */
+static int transform_screen(int mode, const uint8_t *source,
+                            uint8_t *destination) {
+    switch (mode) {
+    case 1: case 2: case 3: {
+        /* Stretch the left half, top half or top-left quarter. */
+        int x_shift = mode & 1, y_shift = mode >> 1;
+        for (int y = 0; y < 128; ++y) {
+            const uint8_t *row = source + (y >> y_shift) * 128;
+            for (int x = 0; x < 128; ++x)
+                *destination++ = row[x >> x_shift];
+        }
+        return 1;
+    }
+    case 5: case 6: case 7: {
+        /* Reflect the left half, top half or top-left quarter. */
+        int mirror_x = mode & 1, mirror_y = mode & 2;
+        for (int y = 0; y < 128; ++y) {
+            const uint8_t *row =
+                source + (mirror_y && y >= 64 ? 127 - y : y) * 128;
+            for (int x = 0; x < 128; ++x)
+                *destination++ = row[mirror_x && x >= 64 ? 127 - x : x];
+        }
+        return 1;
+    }
+    case 129: case 130: case 131: case 134: {
+        /* 134 is a half turn, which is the same as flipping both axes. */
+        int flip_x = mode != 130, flip_y = mode != 129;
+        for (int y = 0; y < 128; ++y) {
+            const uint8_t *row = source + (flip_y ? 127 - y : y) * 128;
+            for (int x = 0; x < 128; ++x)
+                *destination++ = row[flip_x ? 127 - x : x];
+        }
+        return 1;
+    }
+    case 133:
+        /* Clockwise quarter turn. */
+        for (int y = 0; y < 128; ++y)
+            for (int x = 0; x < 128; ++x)
+                *destination++ = source[(127 - x) * 128 + y];
+        return 1;
+    case 135:
+        /* Counterclockwise quarter turn. */
+        for (int y = 0; y < 128; ++y)
+            for (int x = 0; x < 128; ++x)
+                *destination++ = source[x * 128 + 127 - y];
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+extern "C" const uint8_t *p8p_runtime_display_framebuffer(
+    p8p_runtime_t *runtime) {
+    const uint8_t *screen = p8p_runtime_framebuffer(runtime);
+    if (!screen)
+        return NULL;
+    /* Bit 6 of the mode is ignored. */
+    return transform_screen(runtime->ram[0x5f2c] & ~0x40, screen,
+                            runtime->transformed)
+               ? runtime->transformed : screen;
+}
+
 extern "C" const uint8_t *p8p_runtime_screen_palette(p8p_runtime_t *runtime) {
     return runtime ? runtime->screen_palette : NULL;
 }
