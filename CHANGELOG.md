@@ -6,6 +6,8 @@
   instead of nil or 0, so carts that read the date at load no longer stop with
   an arithmetic error. The Pocket runtime exposes no wall clock; a year before
   2000 tells a cart that the date is not real.
+- Add `rrect` and `rrectfill`, which draw through the same clip, camera,
+  palette and fill-pattern path as `rectfill`.
 
 ## 0.0.35 — 2026-10-21
 

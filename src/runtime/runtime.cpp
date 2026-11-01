@@ -938,6 +938,62 @@ static int api_rect(lua_State *lua) {
     return 0;
 }
 
+/* Horizontal inset of a rounded corner ROW pixels from the top or bottom
+ * edge.  It uses circfill's extents, so the manual's example holds: radius 2
+ * leaves 3 pixels missing at each corner. */
+static int rounded_corner_inset(int radius, int row) {
+    if (row >= radius)
+        return 0;
+    int offset_y = radius - row;
+    int extent = radius;
+    while (extent * extent + offset_y * offset_y > radius * radius)
+        --extent;
+    return radius - extent;
+}
+
+static void draw_rounded_rect(p8p_runtime_t *runtime, int x, int y,
+                              int width, int height, int radius, int color,
+                              int filled) {
+    if (width <= 0 || height <= 0)
+        return;
+    int max_radius = (width < height ? width : height) / 2;
+    if (radius < 0) radius = 0;
+    if (radius > max_radius) radius = max_radius;
+    int x1 = x + width - 1;
+    for (int row = 0; row < height; ++row) {
+        int edge_row = row < height - 1 - row ? row : height - 1 - row;
+        int inset = rounded_corner_inset(radius, edge_row);
+        if (filled || edge_row == 0) {
+            draw_hspan(runtime, x + inset, x1 - inset, y + row, color);
+            continue;
+        }
+        /* Join this row's edge pixel to the row nearer the edge, so the
+         * outline stays connected around the corner. */
+        int outer_inset = rounded_corner_inset(radius, edge_row - 1);
+        int run_end = outer_inset - 1 > inset ? outer_inset - 1 : inset;
+        draw_hspan(runtime, x + inset, x + run_end, y + row, color);
+        draw_hspan(runtime, x1 - run_end, x1 - inset, y + row, color);
+    }
+}
+
+static int api_rrect(lua_State *lua) {
+    profile_api(P8P_API_GRAPHICS);
+    p8p_runtime_t *runtime = active_runtime;
+    draw_rounded_rect(runtime, arg_int(lua, 1, 0), arg_int(lua, 2, 0),
+                      arg_int(lua, 3, 0), arg_int(lua, 4, 0),
+                      arg_int(lua, 5, 0), arg_pen(lua, 6, runtime), 0);
+    return 0;
+}
+
+static int api_rrectfill(lua_State *lua) {
+    profile_api(P8P_API_GRAPHICS);
+    p8p_runtime_t *runtime = active_runtime;
+    draw_rounded_rect(runtime, arg_int(lua, 1, 0), arg_int(lua, 2, 0),
+                      arg_int(lua, 3, 0), arg_int(lua, 4, 0),
+                      arg_int(lua, 5, 0), arg_pen(lua, 6, runtime), 1);
+    return 0;
+}
+
 static int api_circfill(lua_State *lua) {
     profile_api(P8P_API_GRAPHICS);
     p8p_runtime_t *runtime = active_runtime;
@@ -2766,6 +2822,7 @@ static const luaL_Reg runtime_api[] = {
     {"cls", api_cls}, {"pset", api_pset}, {"pget", api_pget},
     {"sget", api_sget}, {"sset", api_sset}, {"color", api_color},
     {"line", api_line}, {"rect", api_rect}, {"rectfill", api_rectfill},
+    {"rrect", api_rrect}, {"rrectfill", api_rrectfill},
     {"circ", api_circ}, {"circfill", api_circfill}, {"oval", api_oval},
     {"ovalfill", api_ovalfill}, {"spr", api_spr}, {"sspr", api_sspr},
     {"tline", api_tline},
