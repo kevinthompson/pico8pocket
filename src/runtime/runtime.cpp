@@ -2054,8 +2054,9 @@ static int api_print(lua_State *lua) {
     int underline = 0;
     int wrap_x = -1;
     int mode = runtime->ram[0x5f58];
+    /* With 0x5f58's enable bit clear, padding takes its default of on. */
     if (!(mode & PRINT_ON))
-        mode = 0;
+        mode = PRINT_ON | PRINT_PADDING;
     if (mode & PRINT_CUSTOM_FONT) {
         char_width = runtime->ram[0x5600];
         char_height = runtime->ram[0x5602];
@@ -2232,8 +2233,10 @@ static int api_print(lua_State *lua) {
                 line_height = char_height;
             if ((mode & PRINT_SOLID_BG) && bg_color >= 0) {
                 int saved_color = runtime->draw_color;
-                for (int row = y - 1; row < y + line_height - 1; ++row)
-                    draw_hspan(runtime, x - 1, x + char_width - 1, row,
+                int padding = (mode & PRINT_PADDING) != 0;
+                for (int row = y - padding; row < y + line_height - padding;
+                     ++row)
+                    draw_hspan(runtime, x - padding, x + char_width - 1, row,
                                bg_color);
                 runtime->draw_color = saved_color;
             }
