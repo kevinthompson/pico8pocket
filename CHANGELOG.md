@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `pal(p)` resets the draw or display palette, as the manual describes. It
+  previously mapped colour `p` to itself, so temporary palette changes
+  carried over into later drawing.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps

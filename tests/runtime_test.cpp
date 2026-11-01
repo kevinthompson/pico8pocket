@@ -1144,6 +1144,36 @@ int main(void) {
         }
 
         {
+            /* pal(p) resets one palette and leaves the other two alone. */
+            static const char pal_reset_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _draw() cls() palt(5,true)\n"
+                "pal(8,9) pal(3,4,1) pal(0) pset(0,0,8) pset(1,0,5)\n"
+                "pal(7,6,1) pal(8,9) pal(1) pset(2,0,8)\n"
+                "if pget(0,0)==8 then pset(3,0,7) end\n"
+                "if peek(0x5f13)==3 then pset(4,0,7) end\n"
+                "if peek(0x5f05)&16==16 then pset(5,0,7) end\n"
+                "pal(0) end\n";
+            p8p_cart_t pal_reset_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)pal_reset_source,
+                                            sizeof(pal_reset_source) - 1,
+                                            &pal_reset_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &pal_reset_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            CHECK(pixels[0] == 8);
+            /* pal(1) kept the remapped draw palette. */
+            CHECK(pixels[2] == 9);
+            CHECK(pixels[3] == 7);
+            CHECK(pixels[4] == 7);
+            /* pal(0) keeps transparency. */
+            CHECK(pixels[5] == 7);
+            CHECK(p8p_runtime_screen_palette(runtime)[3] == 3);
+            CHECK(p8p_runtime_screen_palette(runtime)[7] == 7);
+            p8p_cart_destroy(&pal_reset_cart);
+        }
+
+        {
             /* stat(26) counts 183/22050 s ticks into the music pattern:
              * 9600 samples at 48 kHz are 24 ticks. */
             audio_crossings_for(runtime,
