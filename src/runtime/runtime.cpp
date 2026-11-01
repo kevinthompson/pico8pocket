@@ -2385,14 +2385,20 @@ static int api_stat(lua_State *lua) {
     case 36:
     case 38:
     case 39:
-    case 90:
-    case 91:
-    case 92:
-    case 93:
-    case 94:
-    case 95:
+    case 83: case 84: case 85:
+    case 93: case 94: case 95:
     case 102:
         push_int(lua, 0);
+        break;
+    /* The openfpgaOS API exposes no wall clock.  UTC and local time report the
+     * Unix epoch: a valid date for cart arithmetic, and earlier than any real
+     * date so a cart can tell the clock is missing. */
+    case 80: case 90:
+        push_int(lua, 1970);
+        break;
+    case 81: case 82:
+    case 91: case 92:
+        push_int(lua, 1);
         break;
     case 31:
         lua_pushstring(lua, "");

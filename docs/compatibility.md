@@ -129,6 +129,9 @@ Implemented and covered by host tests:
 - offline `load("#id", breadcrumb, parameters)`, `stat(6)` parameters,
   `stat(100)` breadcrumb and `extcmd("go_back")`, including host-managed return
   history and Select-menu return; the shared catalog initially contains 36 carts;
+- `stat(80)`-`stat(85)` and `stat(90)`-`stat(95)` report a fixed 1970-01-01
+  00:00:00 because the runtime has no wall clock; carts can treat a year before
+  2000 as no date;
 - 120 error-free headless frames of the official Celeste Classic cart.
 
 Not yet compatibility-complete:
