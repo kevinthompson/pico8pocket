@@ -248,6 +248,44 @@ static void test_incompatible_carts(void) {
     }
 }
 
+/* A loop-back pattern returns to the nearest loop-start pattern at or before
+ * it, and that start pattern plays again. */
+static void audio_music_loop_start(void) {
+    static uint8_t ram[0x10000];
+    struct { uint8_t flags[4]; int expected[6]; } cases[] = {
+        {{1, 1, 0, 2}, {0, 1, 2, 3, 1, 2}},
+        {{3, 0, 0, 0}, {0, 0, 0, 0, 0, 0}},
+        {{0, 0, 2, 0}, {0, 1, 2, 0, 1, 2}},
+    };
+    for (auto &test_case : cases) {
+        memset(ram, 0, sizeof(ram));
+        ram[0x3200 + 65] = 1;
+        for (unsigned pattern = 0; pattern < 4; ++pattern) {
+            uint8_t *song = ram + 0x3100 + pattern * 4;
+            uint8_t flags = test_case.flags[pattern];
+            song[0] = (flags & 1) ? 0x80 : 0;
+            song[1] = (flags & 2) ? 0xc0 : 0x40;
+            song[2] = song[3] = 0x40;
+        }
+        p8p_audio_t *audio = p8p_audio_create(ram);
+        CHECK(audio != NULL);
+        if (!audio)
+            continue;
+        p8p_audio_music(audio, 0, 0, 0);
+        int seen[6] = {p8p_audio_music_pattern(audio)};
+        int played = 1, count = p8p_audio_music_count(audio);
+        for (int step = 0; step < 200000 && played < 6; ++step) {
+            p8p_audio_skip(audio, 16);
+            if (p8p_audio_music_count(audio) != count) {
+                count = p8p_audio_music_count(audio);
+                seen[played++] = p8p_audio_music_pattern(audio);
+            }
+        }
+        CHECK(memcmp(seen, test_case.expected, sizeof(seen)) == 0);
+        p8p_audio_destroy(audio);
+    }
+}
+
 static void audio_chunk_boundaries(void) {
     enum { FRAMES = 4099 };
     static uint8_t ram[0x10000];
@@ -559,6 +597,7 @@ int main(void) {
     palette_fast_path_semantics();
     draw_palette_transitions();
     audio_chunk_boundaries();
+    audio_music_loop_start();
     static const uint8_t source[] =
         "pico-8 cartridge // http://www.pico-8.com\n"
         "version 42\n"

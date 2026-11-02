@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Music loops return to the loop-start pattern. They previously resumed one
+  pattern after it, which could reach an empty pattern and play sfx 0 on all
+  four channels.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps
