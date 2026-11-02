@@ -2042,16 +2042,27 @@ static int api_print(lua_State *lua) {
     profile_api(P8P_API_TEXT);
     p8p_runtime_t *runtime = active_runtime;
     size_t length = 0;
+    if (arg_count(lua) == 0)
+        return 0;
     /* Strings need no conversion; luaL_tolstring would still probe for a
      * __tostring metamethod and push a copy. */
     int converted = lua_type(lua, 1) != LUA_TSTRING;
-    const uint8_t *text = (const uint8_t *)(converted ?
-        luaL_tolstring(lua, 1, &length) : lua_tolstring(lua, 1, &length));
+    if (lua_isnil(lua, 1))
+        lua_pushstring(lua, "[nil]");
+    else if (lua_istable(lua, 1) && !luaL_getmetafield(lua, 1, "__tostring"))
+        lua_pushstring(lua, "[table]");
+    else if (lua_istable(lua, 1))
+        lua_pop(lua, 1), luaL_tolstring(lua, 1, NULL);
+    const uint8_t *text = (const uint8_t *)(
+        lua_isnil(lua, 1) || lua_istable(lua, 1) ?
+            lua_tolstring(lua, -1, &length) :
+        converted ? luaL_tolstring(lua, 1, &length) :
+                    lua_tolstring(lua, 1, &length));
     int arguments = arg_count(lua) - converted;
     int x = runtime->cursor_x, y = runtime->cursor_y;
     if (arguments == 2) {
         /* print(str, col) */
-        runtime->draw_color = arg_int(lua, 2, runtime->draw_color) & 255;
+        runtime->draw_color = arg_int(lua, 2, 0) & 255;
         runtime->ram[0x5f25] = (uint8_t)runtime->draw_color;
     } else if (arguments >= 3) {
         x = arg_int(lua, 2, x);
