@@ -7,13 +7,8 @@
 - Music loops return to the loop-start pattern. They previously resumed one
   pattern after it, which could reach an empty pattern and play sfx 0 on all
   four channels.
-- `sfx(nil)` plays sfx 0, matching Fake-08. It previously acted as `sfx(-1)` and
-  stopped every playing sound effect.
 - `sfx(nil)` plays sfx 0, as PICO-8 does. It previously acted as `sfx(-1)` and
   stopped every playing sound effect. `sfx()` with no arguments does nothing.
-- Double the summed `sfx`/`music` voice level to match a PICO-8 export, which
-  measured about 6 dB louder. `serial()` PCM keeps its level and the mix still
-  saturates rather than wraps, so loud four-channel passages can now clip.
 - Notes no longer click when they start, change volume, change waveform or
   end. As in PICO-8 0.2.7, each volume change ramps over about 2.9 ms, a sound
   that ends fades out on its last waveform, and a new waveform crossfades from
