@@ -687,6 +687,7 @@ px(0,0,5) pal() rectfill(0,0,3,3,1) px(1,1,1) pal(1,9) print("\^c1",0,0) px(9,9,
     {"blank lines ignore tall", R"(print("\^t\n\nb",0,0,7) px(0,12,7) print("\^t",0,0) eq(peek(0x5f27),6))"},
     {"print argument conversion", R"(eq(print(nil,0,0),20) eq(print({},0,0),28) print("a",nil) eq(peek(0x5f25),0)
 local x,y=print() eq(x,nil))"},
+    {"foreground keeps the raw parameter", R"(print("\fga",0,0) eq(peek(0x5f25),16) px(0,0,0))"},
     /* end of print cases */
 };
 
