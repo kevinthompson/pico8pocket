@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `spr()` honours fractional sizes, drawing `w*8` by `h*8` pixels. It previously
+  truncated them to whole tiles, so a width below 1 drew nothing.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps

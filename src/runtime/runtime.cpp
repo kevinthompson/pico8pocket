@@ -623,14 +623,15 @@ static void blit_tile(p8p_runtime_t *runtime, int sprite, int screen_x,
 
 /* Not BRAM-resident: common sprites are handed to blit_tile(), which is. */
 static void draw_sprite(p8p_runtime_t *runtime, int sprite, int x,
-                        int y, int width, int height, int flip_x,
+                        int y, int pixel_width, int pixel_height, int flip_x,
                         int flip_y) {
     profile_api(P8P_API_SPRITE);
     int sprite_base = (int)runtime->ram[0x5f54] << 8;
     /* Unflipped 8x8-tile sprites that stay inside the sheet are exactly the
      * map tile case; reuse its unpacked two-pixels-per-byte blitter. */
+    int width = pixel_width >> 3, height = pixel_height >> 3;
     if (!flip_x && !flip_y && sprite >= 0 && sprite < 256 &&
-        width >= 1 && height >= 1 &&
+        width >= 1 && height >= 1 && !((pixel_width | pixel_height) & 7) &&
         (sprite & 15) + width <= 16 && (sprite >> 4) + height <= 16 &&
         sprite_base + 8192 <= 0x10000) {
         int screen_x = x - runtime->camera_x;
@@ -644,8 +645,6 @@ static void draw_sprite(p8p_runtime_t *runtime, int sprite, int x,
     }
     int source_x = (sprite & 15) * 8;
     int source_y = (sprite >> 4) * 8;
-    int pixel_width = width * 8;
-    int pixel_height = height * 8;
 
     int destination_x = x - runtime->camera_x;
     int destination_y = y - runtime->camera_y;
@@ -1027,8 +1026,10 @@ static int api_spr(lua_State *lua) {
         return 0;
     }
     flush_redirected_drawing(active_runtime);
-    draw_sprite(active_runtime, sprite, arg_int(lua, 2, 0),
-                arg_int(lua, 3, 0), arg_int(lua, 4, 1), arg_int(lua, 5, 1),
+    /* Sizes are in tiles and may be fractional: .875 draws 7 pixels. */
+    draw_sprite(active_runtime, sprite, arg_int(lua, 2, 0), arg_int(lua, 3, 0),
+                (int)(arg_number(lua, 4, fix32(1)) * fix32(8)),
+                (int)(arg_number(lua, 5, fix32(1)) * fix32(8)),
                 lua_toboolean(lua, 6), lua_toboolean(lua, 7));
     return 0;
 }
@@ -1391,7 +1392,7 @@ static int api_map(lua_State *lua) {
                                   origin_y + y * 8, sprite_base);
                 else
                     draw_sprite(runtime, sprite, screen_x + x * 8,
-                                screen_y + y * 8, 1, 1, 0, 0);
+                                screen_y + y * 8, 8, 8, 0, 0);
             }
         }
     }

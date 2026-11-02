@@ -1144,6 +1144,40 @@ int main(void) {
         }
 
         {
+            /* spr() sizes are in tiles but may be fractional: w and h set
+             * the size in pixels as w*8 and h*8. */
+            static const char fractional_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _draw() cls()\n"
+                "for y=0,15 do for x=0,15 do sset(8+x,y,7) end end\n"
+                "sset(8,0,9)\n"
+                "spr(1,10,10,.875,1)\n"
+                "spr(1,30,10,.5,.5)\n"
+                "spr(1,50,10,.5,.5,true)\n"
+                "spr(1,70,10,1.5,1)\n"
+                "end\n";
+            p8p_cart_t fractional_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)fractional_source,
+                                            sizeof(fractional_source) - 1,
+                                            &fractional_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &fractional_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            CHECK(pixels[10 * 128 + 10] == 9);
+            CHECK(pixels[17 * 128 + 16] == 7);
+            CHECK(pixels[17 * 128 + 17] == 0);
+            CHECK(pixels[13 * 128 + 33] == 7);
+            CHECK(pixels[13 * 128 + 34] == 0);
+            CHECK(pixels[14 * 128 + 33] == 0);
+            /* Flipping mirrors within the fractional width. */
+            CHECK(pixels[10 * 128 + 50] == 7);
+            CHECK(pixels[10 * 128 + 53] == 9);
+            CHECK(pixels[17 * 128 + 81] == 7);
+            CHECK(pixels[17 * 128 + 82] == 0);
+            p8p_cart_destroy(&fractional_cart);
+        }
+
+        {
             /* stat(26) counts 183/22050 s ticks into the music pattern:
              * 9600 samples at 48 kHz are 24 ticks. */
             audio_crossings_for(runtime,
