@@ -2124,7 +2124,8 @@ static int api_print(lua_State *lua) {
 
     auto newline = [&]() {
         x = home_x;
-        y += line_height > 0 ? line_height : PRINT_LINE_H();
+        /* A blank line ignores tall and pinball scaling. */
+        y += line_height > 0 ? line_height : char_height;
         line_height = 0;
         if (console_scroll && y - runtime->camera_y > 122) {
             scroll_console(runtime, 6);
@@ -2380,7 +2381,7 @@ static int api_print(lua_State *lua) {
             bottom_y = y;
     }
     if (line_height <= 0)
-        line_height = terminated ? 0 : PRINT_LINE_H();
+        line_height = terminated ? 0 : char_height;
 #undef PRINT_NEXT
 #undef PRINT_BG
 #undef PRINT_DRAW
