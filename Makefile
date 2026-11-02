@@ -10,6 +10,7 @@ COMPAT_SCAN_BIN := $(BUILD_DIR)/tools/pico8pocket_compat_scan
 APP_LOAD_TEST_BIN := $(BUILD_DIR)/tests/pico8pocket_app_load_tests
 APP_MULTICART_TEST_BIN := $(BUILD_DIR)/tests/pico8pocket_app_multicart_tests
 APP_RELOAD_TEST_BIN := $(BUILD_DIR)/tests/pico8pocket_app_reload_tests
+SLOT_READ_TEST_BIN := $(BUILD_DIR)/tests/pico8pocket_slot_read_tests
 APP_LOAD_TEST_OBJECTS := $(addprefix $(BUILD_DIR)/tests/app-load/,$(addsuffix .o,main state_store settings menu system_input scheduler multicart))
 BBS_TEST_BIN := $(BUILD_DIR)/tests/pico8pocket_bbs_tests
 MULTICART_TEST_BIN := $(BUILD_DIR)/tests/pico8pocket_multicart_tests
@@ -114,6 +115,10 @@ $(APP_RELOAD_TEST_BIN): tests/app_reload_test.cpp $(APP_LOAD_TEST_OBJECTS) src/r
 	$(CXX) $(HOST_RUNTIME_FLAGS) tests/app_reload_test.cpp src/runtime/bbs.c $(HOST_RUNTIME_SOURCES) \
 		-x none $(APP_LOAD_TEST_OBJECTS) -lm -o $@
 
+$(SLOT_READ_TEST_BIN): tests/slot_read_test.c src/platform/openfpgaos/slot_read.c include/p8p/platform.h
+	@mkdir -p $(dir $@)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -Iinclude tests/slot_read_test.c -o $@
+
 $(DELEGATE_TEST_BIN): tests/delegate_test.cpp tests/delegate_thunk.cpp src/runtime/vm_delegate.cpp $(Z8LUA_SOURCES)
 	@mkdir -p $(dir $@)
 	$(CXX) -x c++ -std=c++17 -O2 -fwrapv -Wall -Wextra \
@@ -122,7 +127,7 @@ $(DELEGATE_TEST_BIN): tests/delegate_test.cpp tests/delegate_thunk.cpp src/runti
 
 
 test: deps compatibility-check $(DELEGATE_TEST_BIN) $(TEST_BIN) $(RUNTIME_TEST_BIN) $(APP_LOAD_TEST_BIN) \
-	$(BBS_TEST_BIN) $(MULTICART_RUNTIME_TEST_BIN) $(MULTICART_TEST_BIN) $(APP_MULTICART_TEST_BIN) $(APP_RELOAD_TEST_BIN) $(COMPAT_SCAN_BIN) $(LEGACY_RUNTIME_STATE) $(LEGACY_ALIAS_STATE)
+	$(BBS_TEST_BIN) $(MULTICART_RUNTIME_TEST_BIN) $(MULTICART_TEST_BIN) $(APP_MULTICART_TEST_BIN) $(APP_RELOAD_TEST_BIN) $(SLOT_READ_TEST_BIN) $(COMPAT_SCAN_BIN) $(LEGACY_RUNTIME_STATE) $(LEGACY_ALIAS_STATE)
 	$(TEST_BIN)
 	$(RUNTIME_TEST_BIN)
 	$(DELEGATE_TEST_BIN)
@@ -133,6 +138,7 @@ test: deps compatibility-check $(DELEGATE_TEST_BIN) $(TEST_BIN) $(RUNTIME_TEST_B
 	$(APP_MULTICART_TEST_BIN)
 	$(APP_MULTICART_TEST_BIN) --missing
 	$(APP_RELOAD_TEST_BIN)
+	$(SLOT_READ_TEST_BIN)
 	python3 -m unittest discover -s tests -p 'test_compat_scan_multicart.py'
 
 compat-scan: deps compatibility-check $(COMPAT_SCAN_BIN)
