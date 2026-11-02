@@ -615,7 +615,8 @@ print("\^wa\b\0",0,0) eq(peek(0x5f26),0))"},
     {"tab reaches the next stop", R"(eq(print("a\tb",0,0),20) eq(print("\tb",0,0),20))"},
     {"tab width counts fours of pixels", R"(eq(print("\^s8a\tb",0,0),36) eq(print("\^s1a\tb",0,0),12)
 eq(print("\^s0a\tb",0,0),20))"},
-    {"default tab width", R"(poke(0x5f5a,0x30) eq(print("a\tb",0,0),16))"},
+    {"default tab width", R"(poke(0x5f5a,0x30) eq(print("a\tb",0,0),20) poke(0x5f5a,0x20) eq(print("a\tb",0,0),16)
+poke(0x5f5a,0x10) eq(print("\t\tb",0,0),20))"},
     {"custom font tab width", R"(poke(0x5600,4) poke(0x5606,10) eq(print("\014a\tb",0,0),14)
 eq(print("a\tb",0,0),20))"},
     {"tabs relative to home", R"(poke(0x5600,4) poke(0x5606,10) eq(print("\014a\tb",3,0),14)
@@ -657,7 +658,7 @@ print("\^y3\^:0000000000000001",30,60,7) px(30,67,7))"},
     {"outline stays one pixel thick", R"(print("\^w\^o8ffa",40,10,7) px(39,9,8) px(38,9,0))"},
     {"custom draw offsets", R"(poke(0x5600,8,8,8) poke(0x5600+97*8,1)
 poke(0x5603,2) poke(0x5604,3) print("\014a",10,10,7) px(12,13,7) px(10,10,0)
-poke(0x5603,0xff) poke(0x5604,0xff) print("\014a",10,20,7) px(9,19,7))"},
+poke(0x5603,0xff) poke(0x5604,0xff) print("\014a",10,20,7) px(9,19,0))"},
     {"custom high characters", R"(poke(0x5600,8,10,8) poke(0x5600+200*8,0x80)
 eq(print("\014\200",10,30,7),20) px(17,30,7))"},
     {"custom width adjustments", R"(poke(0x5600,8,8,8) poke(0x5605,1)
@@ -701,6 +702,12 @@ print("\v5z",10,20,7) px(11,13,0))"},
     {"glyphs are cut to their advance", R"(poke(0x5f5a,1) print("\130",10,0,7) px(11,1,0) px(10,1,7) poke(0x5f5a,0)
 poke(0x5600,8,8,8) poke(0x5600+97*8,0x80) poke(0x5605,1) poke(0x5608+40,0x70) print("\014a",20,0,7) px(27,0,0))"},
     {"default attributes skip custom fonts", R"(poke(0x5f59,5) poke(0x5600,6,9,7) eq(print("\014ab",0,0),12) poke(0x5f59,0))"},
+    {"attributes stop at the font codes", R"(poke(0x5f59,5) poke(0x5600,6,9,7) print("ab\014\015",0,0) eq(print("\014\015ab",0,0),8))"},
+    {"attribute offsets skip custom fonts", R"(poke(0x5f5b,1) poke(0x5600,8,8,8) poke(0x5600+97*8,1) print("\014a",10,10,7) px(10,10,7))"},
+    {"attribute font with an empty header", R"(poke(0x5f58,0x81) eq(print("ab",0,0),16) poke(0x5f58,0))"},
+    {"underline stops at eight rows", R"(poke(0x5600,8,8,12) print("\014\^ua",0,0,7) px(1,8,7) px(1,12,0))"},
+    {"underline follows offsets and raised", R"(poke(0x5f5b,0x10) print("\^ua",0,0,7) px(1,7,7) poke(0x5f5b,0))"},
+    {"invert stops at eight rows", R"(print("\^y9\^ia",10,10,7) px(12,17,7) px(12,18,0))"},
     /* end of print cases */
 };
 

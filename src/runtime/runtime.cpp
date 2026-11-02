@@ -1937,6 +1937,7 @@ static void draw_glyph_rows(p8p_runtime_t *runtime, const uint8_t *rows,
         if (cell_width > right) right = cell_width;
         if (cell_height > bottom) bottom = cell_height;
         if (inverted && right > 8 * w_factor) right = 8 * w_factor;
+        if (inverted && bottom > 8 * h_factor) bottom = 8 * h_factor;
     }
     /* Backgrounds are ordinary spans, so the fill pattern applies to them. */
     if (solid_bg)
@@ -2081,12 +2082,12 @@ static int api_print(lua_State *lua) {
     /* 0x5f59-0x5f5b nibbles override the font; zero means not set. */
     const uint8_t *attributes = runtime->ram + 0x5f59;
     int offset_x = 0, offset_y = 0;
-    auto select_font = [&]() {
+    auto select_font = [&](int use_attributes) {
         int custom = (mode & PRINT_CUSTOM_FONT) != 0;
         char_width = custom ? runtime->ram[0x5600] : 4;
         wide_char_width = custom ? runtime->ram[0x5601] : 8;
         char_height = custom ? runtime->ram[0x5602] : 6;
-        if (!custom) {
+        if (use_attributes && !custom) {
             if (attributes[0] & 15)
                 char_width = attributes[0] & 15;
             if (attributes[0] >> 4)
@@ -2094,13 +2095,21 @@ static int api_print(lua_State *lua) {
             if (attributes[1] & 15)
                 wide_char_width = attributes[1] & 15;
         }
-        offset_x = (attributes[2] & 15) + (custom ? (int8_t)runtime->ram[0x5603] : 0);
-        offset_y = (attributes[2] >> 4) + (custom ? (int8_t)runtime->ram[0x5604] : 0);
-        tab_width = attributes[1] >> 4 ? (attributes[1] >> 4) * 4 : 16;
+        offset_x = custom ? runtime->ram[0x5603] :
+                   use_attributes ? attributes[2] & 15 : 0;
+        offset_y = custom ? runtime->ram[0x5604] :
+                   use_attributes ? attributes[2] >> 4 : 0;
+        tab_width = attributes[1] >> 4 ? ((attributes[1] >> 4) + 1) * 4 : 16;
         if (custom && runtime->ram[0x5606])
             tab_width = runtime->ram[0x5606];
     };
-    select_font();
+    select_font(1);
+    /* An attribute-selected font with an empty header falls back to 8x8. */
+    if (mode & PRINT_CUSTOM_FONT) {
+        if (!char_width) char_width = 8;
+        if (!wide_char_width) wide_char_width = 8;
+        if (!char_height) char_height = 8;
+    }
     /* Only a console print without coordinates scrolls. */
     int last_width = (mode & PRINT_WIDE) ? char_width * 2 : char_width;
     int console_scroll = arguments < 3 && !(runtime->ram[0x5f36] & 0x40);
@@ -2115,11 +2124,15 @@ static int api_print(lua_State *lua) {
 #define PRINT_ADVANCE(character) \
     PRINT_SCALED_W((character) < 0x80 ? char_width : wide_char_width)
 
-    auto newline = [&]() {
+    auto line_feed = [&]() {
         x = home_x;
         /* A blank line ignores tall and pinball scaling. */
         y += line_height > 0 ? line_height : char_height;
         line_height = 0;
+    };
+    /* Only an explicit newline scrolls; wrapping leaves it to the character. */
+    auto newline = [&]() {
+        line_feed();
         if (console_scroll && y - runtime->camera_y > 122) {
             scroll_console(runtime, 6);
             y -= 6;
@@ -2140,7 +2153,7 @@ static int api_print(lua_State *lua) {
         int advance = one_off ? PRINT_SCALED_W(8) :
                       PRINT_ADVANCE(character) + PRINT_SCALED_W(adjust);
         if (wrap_x > 0 && x + advance > wrap_x)
-            newline();
+            line_feed();
         int cell_height = one_off ? ((mode & (PRINT_TALL | PRINT_PINBALL)) ? 16 : 8) :
                           PRINT_LINE_H();
         if (console_scroll && y - runtime->camera_y + cell_height > 128) {
@@ -2182,7 +2195,7 @@ static int api_print(lua_State *lua) {
                 draw_glyph_rows(runtime, rows, x + offset_x, draw_y + offset_y, 0,
                                 PRINT_BG(), mode & (PRINT_SOLID_BG | PRINT_WIDE |
                                 PRINT_TALL | PRINT_PINBALL), 0, 0, advance,
-                                line_height, padding);
+                                line_height, glyph_padding);
                 glyph_mode &= ~PRINT_SOLID_BG;
             }
             if (outline_hollow)
@@ -2190,8 +2203,7 @@ static int api_print(lua_State *lua) {
                                     draw_y + offset_y, mode, interior);
             for (int i = 0; i < 8; ++i)
                 if (outline_neighbours & (1 << i))
-                    draw(x + ox[i], draw_y + oy[i],
-                         outline_color, glyph_mode);
+                    draw(x + ox[i], draw_y + oy[i], outline_color, glyph_mode);
             if (outline_hollow)
                 swap_glyph_interior(runtime, rows, x + offset_x,
                                     draw_y + offset_y, mode, interior);
@@ -2200,9 +2212,11 @@ static int api_print(lua_State *lua) {
         {
             /* The bar keeps the unscaled width even in wide modes. */
             int scale = PRINT_SCALED_W(1);
-            int start = x - glyph_padding * scale;
+            int row_scale = (mode & (PRINT_TALL | PRINT_PINBALL)) ? 2 : 1;
+            int start = x + offset_x - glyph_padding * scale;
             draw_hspan(runtime, start, start + advance / scale,
-                       y + line_height, fg_color);
+                       draw_y + offset_y + (line_height < 8 * row_scale ? line_height :
+                                       8 * row_scale), fg_color);
         }
         if (!outline_hollow || !outline_neighbours)
             draw(x, draw_y, fg_color, glyph_mode);
@@ -2372,10 +2386,10 @@ static int api_print(lua_State *lua) {
             runtime->ram[0x5f25] = (uint8_t)color;
         } else if (ch == 14) {                /* custom font on */
             mode |= PRINT_CUSTOM_FONT;
-            select_font();
+            select_font(0);
         } else if (ch == 15) {                /* custom font off */
             mode &= ~PRINT_CUSTOM_FONT;
-            select_font();
+            select_font(0);
         } else if (ch == '\n') {
             newline();
         } else if (ch == '\t') {
