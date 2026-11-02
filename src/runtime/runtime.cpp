@@ -2055,7 +2055,8 @@ static int api_print(lua_State *lua) {
     int cancel_wrap = 0, terminated = 0;
     int outline_color = 0, outline_neighbours = 0, outline_hollow = 0;
     int underline = 0;
-    int wrap_x = -1;
+    /* 0x5f36 bit 7 is zepto8's char_wrap flag; the manual omits it. */
+    int wrap_x = (runtime->ram[0x5f36] & 0x80) ? 128 : -1;
     int mode = runtime->ram[0x5f58];
     if (!(mode & PRINT_ON))
         mode = 0;
@@ -2117,6 +2118,8 @@ static int api_print(lua_State *lua) {
         }
         int advance = one_off ? PRINT_SCALED_W(8) :
                       PRINT_ADVANCE(character) + PRINT_SCALED_W(adjust);
+        if (wrap_x > 0 && x + advance > wrap_x)
+            newline();
         int cell_height = one_off ? ((mode & PRINT_TALL) ? 16 : 8) :
                           PRINT_LINE_H();
         if (console_scroll && y + cell_height > 128) {
@@ -2340,9 +2343,6 @@ static int api_print(lua_State *lua) {
         }
         if (x > right_x)
             right_x = x;
-        if (wrap_x > 0 && x >= wrap_x) {
-            newline();
-        }
     }
     if (line_height <= 0)
         line_height = cancel_wrap ? 0 : PRINT_LINE_H();

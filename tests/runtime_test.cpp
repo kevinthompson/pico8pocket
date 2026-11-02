@@ -655,6 +655,10 @@ poke(0x5608,0x01) eq(print("\014\16",0,0),9) poke(0x5605,0) eq(print("\014a",0,0
 poke(0x5608+40,0x70) eq(print("\014\^wa",0,0),14))"},
     {"custom raised character", R"(poke(0x5600,8,8,8) poke(0x5600+97*8,1) poke(0x5605,1)
 poke(0x5608+40,0x80) print("\014a",10,40,7) px(10,39,7) px(10,40,0))"},
+    {"wrap moves the overflowing character", R"(print("\^r2abc",0,0,7) px(1,6,7) eq(peek(0x5f27),12))"},
+    {"wrap leaves an exact fit alone", R"(print("\^r2ab",0,0,7) eq(peek(0x5f27),6))"},
+    {"wrap returns home", R"(print("ab\^h\^r4cde",0,0,7) px(9,6,7))"},
+    {"screen wrap flag", R"(print("aaa",120,0,7) px(120,6,0) poke(0x5f36,0x80) print("aaa",120,10,7) px(120,16,7) poke(0x5f36,0))"},
     /* end of print cases */
 };
 
