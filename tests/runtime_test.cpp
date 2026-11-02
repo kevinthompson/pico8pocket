@@ -777,6 +777,8 @@ int main(void) {
         "if C.x==1 and C.y==2 and C.z==nil and F.q==\"q!\" and H[0.5]==\"half\" and D.x==1 and inenv() then pset(18,2,7) end\n"
         "lc=5 do local lc*=2 local ls=\"a\" local ls..=\"b\" if lc==10 and ls==\"ab\" then pset(14,2,7) end end\n"
         "if lc~=5 then pset(14,2,0) end\n"
+        "print(\"\\6y7a\\6y3\\n\\n\\f8b\",40,100,7) local row=0\n"
+        "for x=40,43 do if pget(x,110)==8 then row+=1 end end if row>0 then pset(19,2,7) end\n"
         "end\n";
     CHECK(p8p_cart_load_text_memory(text_engine_source,
                                     sizeof(text_engine_source) - 1,
@@ -1075,7 +1077,7 @@ int main(void) {
             fprintf(stderr, "text engine load: %s\n", p8p_runtime_error(runtime));
         CHECK(loaded == 0);
         CHECK(p8p_runtime_step(runtime, 0) == 0);
-        for (int check = 1; check <= 18; ++check) {
+        for (int check = 1; check <= 19; ++check) {
             if (p8p_runtime_framebuffer(runtime)[2 * 128 + check] != 7)
                 fprintf(stderr, "text engine check %d failed\n", check);
             CHECK(p8p_runtime_framebuffer(runtime)[2 * 128 + check] == 7);

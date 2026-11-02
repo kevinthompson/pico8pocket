@@ -2216,7 +2216,7 @@ static int api_print(lua_State *lua) {
             char_height = 6;
         } else if (ch == '\n') {
             x = home_x;
-            y += line_height > 0 ? line_height : 6;
+            y += line_height > 0 ? line_height : char_height;
             line_height = 0;
         } else if (ch == '\t') {
             int stop = tab_width * 4;
@@ -2270,7 +2270,7 @@ static int api_print(lua_State *lua) {
             right_x = x;
         if (wrap_x > 0 && x >= wrap_x) {
             x = home_x;
-            y += line_height > 0 ? line_height : 6;
+            y += line_height > 0 ? line_height : char_height;
             line_height = 0;
         }
     }

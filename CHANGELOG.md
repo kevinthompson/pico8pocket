@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A blank line in `print` advances by the current character height, so `\^y`
+  and custom fonts set its spacing. It previously always advanced six pixels.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps
