@@ -2300,7 +2300,7 @@ static int api_sfx(lua_State *lua) {
                                 /* Only a missing channel means any channel. */
                                 arg_count(lua) < 2 ? -1 : arg_int(lua, 2, 0),
                                 arg_int(lua, 3, 0), arg_int(lua, 4, 0));
-    push_int(lua, channel < 0 ? 0 : channel);
+    push_int(lua, channel);
     return 1;
 }
 
