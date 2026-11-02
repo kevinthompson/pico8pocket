@@ -2016,6 +2016,13 @@ static int draw_glyph(p8p_runtime_t *runtime, uint8_t character, int x, int y,
     return extra;
 }
 
+static void scroll_console(p8p_runtime_t *runtime, int rows) {
+    memmove(runtime->framebuffer, runtime->framebuffer + rows * 128,
+            (size_t)(128 - rows) * 128);
+    memset(runtime->framebuffer + (128 - rows) * 128, 0, (size_t)rows * 128);
+    runtime->screen_ram_dirty = 1;
+}
+
 static int api_print(lua_State *lua) {
     profile_api(P8P_API_TEXT);
     p8p_runtime_t *runtime = active_runtime;
@@ -2060,6 +2067,9 @@ static int api_print(lua_State *lua) {
         char_width = runtime->ram[0x5600];
         char_height = runtime->ram[0x5602];
     }
+    /* Only a console print without coordinates scrolls; \0 suppresses it. */
+    int console_scroll = arguments < 3 && !(runtime->ram[0x5f36] & 0x40) &&
+                         !(length > 0 && text[length - 1] == 0);
     const uint8_t *pal = runtime->draw_palette;
 #define PRINT_NEXT() (n + 1 < length ? text[++n] : (++n, (uint8_t)0))
 #define PRINT_BG() ((uint8_t)(bg_color < 0 ? 0 : pal[bg_color & 15]))
@@ -2232,6 +2242,11 @@ static int api_print(lua_State *lua) {
         } else if (ch == '\r') {
             x = home_x;
         } else if (ch >= 0x10) {
+            if (console_scroll && y + char_height > 128) {
+                int rows = y + char_height - 128;
+                scroll_console(runtime, rows < 128 ? rows : 128);
+                y -= rows;
+            }
             if (char_height > line_height)
                 line_height = char_height;
             if ((mode & PRINT_SOLID_BG) && bg_color >= 0) {
@@ -2282,6 +2297,10 @@ static int api_print(lua_State *lua) {
 #undef PRINT_BG
     if (line_height <= 0)
         line_height = cancel_wrap ? 0 : 6;
+    if (console_scroll && y + line_height > 122) {
+        scroll_console(runtime, 6);
+        y -= 6;
+    }
     /* \0 omits the newline that otherwise ends a print. */
     runtime->cursor_x = terminated ? x : home_x;
     runtime->cursor_y = terminated ? y : y + line_height;

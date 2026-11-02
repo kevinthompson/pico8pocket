@@ -580,6 +580,14 @@ px(60,60,1) px(0,0,7) px(50,50,1))"},
 print("c",7) px(9,0,7)
 print("a\0",20,30) eq(peek(0x5f26),24) eq(peek(0x5f27),30)
 eq(print("abc\0",0,0),12) print("\0abc",40,40) px(40,40,0))"},
+    {"console scrolls below 122", R"(cursor(0,120) pset(5,10,9) print("a",7)
+px(5,4,9) px(0,114,7) eq(peek(0x5f27),120))"},
+    {"scroll needs no coordinates", R"(pset(5,10,9) print("a",0,120,7)
+px(5,10,9) eq(peek(0x5f27),126))"},
+    {"scroll threshold", R"(cursor(0,114) pset(5,10,9) print("a",7) px(5,10,9) eq(peek(0x5f27),120))"},
+    {"scroll can be disabled", R"(poke(0x5f36,0x40) cursor(0,120) pset(5,10,9) print("a",7)
+px(5,10,9) eq(peek(0x5f27),126) poke(0x5f36,0))"},
+    {"scroll inside a string", R"(cursor(0,114) print("a\nb\nc",7) eq(peek(0x5f27),122))"},
     /* end of print cases */
 };
 
