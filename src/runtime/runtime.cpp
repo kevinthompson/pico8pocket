@@ -2238,7 +2238,7 @@ static int api_print(lua_State *lua) {
                        command == 'c' || command == 'x' || command == 'y') {
                 int value = print_param(PRINT_NEXT());
                 if (command == 's') {
-                    tab_width = value;
+                    tab_width = value ? value * 4 : 16;
                 } else if (command == 'r') {
                     wrap_x = value * 4;
                 } else if (command == 'c') {
