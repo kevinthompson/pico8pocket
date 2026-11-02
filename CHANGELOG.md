@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The runtime error screen and the performance overlay draw text with the
+  PICO-8 font instead of hand-drawn letters, so `M` and `N` are distinct and
+  messages look as they do in PICO-8.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps
