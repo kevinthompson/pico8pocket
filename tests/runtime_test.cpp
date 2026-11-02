@@ -1388,6 +1388,30 @@ int main(void) {
         }
 
         {
+            /* PICO-8 0.2.7 applies the 1x1 default only with three arguments
+             * or fewer: once w is passed, a missing or nil size is 0. */
+            static const char size_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _draw() cls() sset(8,0,7)\n"
+                "spr(1,0,0) spr(1,10,0,1) spr(1,20,0,nil,nil,true)\n"
+                "spr(1,30,0,1,nil) spr(1,40,0,nil,1) spr(1,50,0,1,1) end\n";
+            p8p_cart_t size_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)size_source,
+                                            sizeof(size_source) - 1,
+                                            &size_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &size_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            CHECK(pixels[0] == 7);
+            CHECK(pixels[10] == 0);
+            CHECK(pixels[27] == 0);
+            CHECK(pixels[30] == 0);
+            CHECK(pixels[40] == 0);
+            CHECK(pixels[50] == 7);
+            p8p_cart_destroy(&size_cart);
+        }
+
+        {
             /* stat(26) counts 183/22050 s ticks into the music pattern:
              * 9600 samples at 48 kHz are 24 ticks. */
             audio_crossings_for(runtime,

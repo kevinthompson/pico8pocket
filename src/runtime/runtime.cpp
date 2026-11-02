@@ -1093,10 +1093,14 @@ static int api_spr(lua_State *lua) {
         return 0;
     }
     flush_redirected_drawing(active_runtime);
-    /* Sizes are in tiles and may be fractional: .875 draws 7 pixels. */
+    /* Sizes are in tiles and may be fractional: .875 draws 7 pixels.  The
+     * 1x1 default only applies without a w argument; after that, a missing
+     * or nil size is 0, so spr(n,x,y,1) and spr(n,x,y,nil,nil,flip) draw
+     * nothing in PICO-8. */
+    fix32 default_size = fix32(arg_count(lua) < 4 ? 1 : 0);
     draw_sprite(active_runtime, sprite, arg_int(lua, 2, 0), arg_int(lua, 3, 0),
-                (int)(arg_number(lua, 4, fix32(1)) * fix32(8)),
-                (int)(arg_number(lua, 5, fix32(1)) * fix32(8)),
+                (int)(arg_number(lua, 4, default_size) * fix32(8)),
+                (int)(arg_number(lua, 5, default_size) * fix32(8)),
                 lua_toboolean(lua, 6), lua_toboolean(lua, 7));
     return 0;
 }

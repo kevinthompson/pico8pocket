@@ -13,7 +13,8 @@
   carried over into later drawing. `pal(0)` also resets transparency, as
   PICO-8 does.
 - `spr()` honours fractional sizes, drawing `w*8` by `h*8` pixels. It previously
-  truncated them to whole tiles, so a width below 1 drew nothing.
+  truncated them to whole tiles, so a width below 1 drew nothing. As in PICO-8,
+  a size left out or nil after `w` is passed counts as 0, not 1.
 
 ## 0.0.35 — 2026-10-21
 
