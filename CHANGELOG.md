@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Menu text uses the PICO-8 font data instead of a separate hand-drawn font, in
+  which letters such as `M` and `N` were hard to tell apart.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps

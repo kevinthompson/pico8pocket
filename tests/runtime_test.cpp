@@ -1,4 +1,5 @@
 #include "p8p/audio.h"
+#include "p8p/pico8_font.h"
 #include "p8p/cart.h"
 #include "p8p/menu.h"
 #include "p8p/platform.h"
@@ -246,6 +247,22 @@ static void test_incompatible_carts(void) {
         }
         p8p_cart_destroy(&cart);
     }
+}
+
+/* Menu text uses PICO-8's own letter shapes: its uppercase rows are the font's
+ * lowercase glyphs, the ones printed by default. */
+static void menu_glyphs_follow_pico8_font(void) {
+    for (unsigned character = 32; character < 127; ++character) {
+        unsigned source = character >= 'A' && character <= 'Z' ?
+            character + 32 : character;
+        uint16_t expected = 0;
+        for (int row = 0; row < 5; ++row)
+            for (int column = 0; column < 3; ++column)
+                if (p8p_pico8_font[source * 8 + row] & (1u << column))
+                    expected |= (uint16_t)(1u << (14 - row * 3 - column));
+        CHECK(p8p_menu_glyph(character) == expected);
+    }
+    CHECK(p8p_menu_glyph('N') != p8p_menu_glyph('M'));
 }
 
 static void audio_chunk_boundaries(void) {
@@ -559,6 +576,7 @@ int main(void) {
     palette_fast_path_semantics();
     draw_palette_transitions();
     audio_chunk_boundaries();
+    menu_glyphs_follow_pico8_font();
     static const uint8_t source[] =
         "pico-8 cartridge // http://www.pico-8.com\n"
         "version 42\n"
