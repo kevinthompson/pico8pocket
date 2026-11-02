@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Choosing another cart in Core Settings → Cartridge now switches to it while
+  the core keeps running. The cart slot used to restart the core, and
+  openfpgaOS stalled on "Loading app" after that restart. The app now checks
+  the slot once a second and loads a new cart in place, with its own save
+  states and cartdata.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps
