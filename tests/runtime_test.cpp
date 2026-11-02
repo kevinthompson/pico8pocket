@@ -396,6 +396,19 @@ static void audio_mix_level(void) {
         CHECK(left_rms(phaser, 0, 960) > left_rms(phaser, 10000, 960) * 2);
     }
 
+    /* Noise is brown and level-dependent on pitch: RMS from PICO-8 0.2.7. */
+    {
+        static const struct { unsigned key; double rms; } levels[] = {
+            {12, 6403}, {33, 7658}, {57, 13090},
+        };
+        for (size_t index = 0; index < 3; ++index) {
+            set_wave_sfx(ram, 0, 6, levels[index].key, 7, 0);
+            render_voices(ram, 1, NULL, 0, solo, FRAMES);
+            double rms = left_rms(solo, 0, FRAMES);
+            CHECK(rms > levels[index].rms * 0.75 && rms < levels[index].rms * 1.25);
+        }
+    }
+
     /* Volume is linear in steps of 1/7. */
     set_wave_sfx(ram, 0, 0, 24, 1, 0);
     render_voices(ram, 1, NULL, 0, solo, FRAMES);

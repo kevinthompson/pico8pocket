@@ -81,7 +81,7 @@ typedef struct p8p_audio_extra {
     uint32_t factor_q16;
     uint32_t detune_phase;
     uint32_t phaser_lag;             /* second phaser triangle falls behind */
-    int32_t noise_sample;
+    float noise_level;               /* noise low-pass state */
     uint32_t reverb_index;
     int16_t reverb_short[P8P_REVERB_SHORT];
     int16_t reverb_long[P8P_REVERB_LONG];
@@ -414,12 +414,9 @@ static inline int32_t waveform_sample(p8p_audio_channel_t *channel, int32_t incr
     uint32_t next_phase = phase + (uint32_t)(increment > 0 ? increment : 0);
     channel->phase = next_phase;
     if (channel->waveform == 6) {
-        /* Hold a pseudo-random value for one pitch period. */
-        if (next_phase < phase) {
-            channel->noise ^= channel->noise << 13;
-            channel->noise ^= channel->noise >> 17;
-            channel->noise ^= channel->noise << 5;
-        }
+        channel->noise ^= channel->noise << 13;
+        channel->noise ^= channel->noise >> 17;
+        channel->noise ^= channel->noise << 5;
         return (int16_t)(channel->noise >> 16) >> 2;
     }
     return basic_waveform(channel->waveform, phase);
@@ -433,6 +430,23 @@ static uint32_t detune_factor_q16(int waveform, int detune) {
     case 7: return detune == 1 ? 64225u : 131731u;     /* 49/50, 400/199 */
     default: return detune == 1 ? 65865u : 131731u;    /* 200/199, 400/199 */
     }
+}
+
+/*
+ * PICO-8's noise is white noise through a one-pole low-pass that opens with
+ * pitch, louder at low notes.  Formula from zepto8 via Fake-08 (WTFPL),
+ * measured from PICO-8 exports; in float, like the buzz filter.
+ */
+static int32_t filtered_noise(p8p_audio_extra_t *extra,
+                              const p8p_audio_channel_t *voice,
+                              int32_t increment, int32_t white) {
+    float scale = (float)(increment > 0 ? increment : 0) *
+                  (8.858923f / 4294967296.f);
+    float factor = 1.f - (float)voice->key / 63.f;
+    extra->noise_level = (extra->noise_level + scale * (float)white / 8192.f) /
+                         (1.f + scale);
+    return (int32_t)(extra->noise_level * 1.5f * (1.f + factor * factor) *
+                     16384.f);
 }
 
 /* One voice's sample including the buzz, noiz and detune filters. */
@@ -458,6 +472,8 @@ static inline int32_t voice_sample(p8p_audio_extra_t *extra,
         extra->phaser_lag += step / 110u;
     } else {
         sample = waveform_sample(voice, increment);
+        if (voice->waveform == 6)
+            sample = filtered_noise(extra, voice, increment, sample);
         if (noiz && voice->waveform == 6) {
             /* Sounds a bit like a saw tooth: scale by 2*(t or t-1). */
             int32_t saw = (int32_t)(phase >> 16);
