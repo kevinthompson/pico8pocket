@@ -286,6 +286,35 @@ static void audio_music_loop_start(void) {
     }
 }
 
+/* PICO-8 0.2.7 stops music on reaching a pattern whose four channels are all
+ * disabled, and music(n) on such a pattern plays nothing. */
+static void audio_music_empty_pattern(void) {
+    static uint8_t ram[0x10000];
+    memset(ram, 0, sizeof(ram));
+    ram[0x3200 + 65] = 1;
+    for (unsigned pattern = 0; pattern < 4; ++pattern) {
+        uint8_t *song = ram + 0x3100 + pattern * 4;
+        song[0] = pattern < 2 ? 0 : 0x40;
+        song[1] = song[2] = song[3] = 0x40;
+    }
+    p8p_audio_t *audio = p8p_audio_create(ram);
+    CHECK(audio != NULL);
+    if (!audio)
+        return;
+    p8p_audio_music(audio, 0, 0, 0);
+    int highest = 0;
+    for (int step = 0; step < 200000 && p8p_audio_music_pattern(audio) >= 0; ++step) {
+        p8p_audio_skip(audio, 16);
+        if (p8p_audio_music_pattern(audio) > highest)
+            highest = p8p_audio_music_pattern(audio);
+    }
+    CHECK(p8p_audio_music_pattern(audio) == -1);
+    CHECK(highest == 1);
+    p8p_audio_music(audio, 2, 0, 0);
+    CHECK(p8p_audio_music_pattern(audio) == -1);
+    p8p_audio_destroy(audio);
+}
+
 static void audio_chunk_boundaries(void) {
     enum { FRAMES = 4099 };
     static uint8_t ram[0x10000];
@@ -598,6 +627,7 @@ int main(void) {
     draw_palette_transitions();
     audio_chunk_boundaries();
     audio_music_loop_start();
+    audio_music_empty_pattern();
     static const uint8_t source[] =
         "pico-8 cartridge // http://www.pico-8.com\n"
         "version 42\n"
