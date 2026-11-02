@@ -572,6 +572,8 @@ local y=peek(0x5f27) print("\^!4310XY") eq(peek(0x4311),89) eq(peek(0x5f27),y))"
 local function glyph(c,x,rows) print(c,x,0,7) for y=0,4 do local b=rows[y+1]
 for i=0,2 do px(x+i,y,(b>>(2-i))&1==1 and 7 or 0) end end end
 glyph("n",0,{6,5,5,5,5}) glyph("m",8,{7,7,5,5,5}) glyph("N",16,{0,6,5,5,5}) glyph("M",24,{0,7,7,5,5}))"},
+    {"foreground persists", R"(print("\fca",0,0,7) eq(peek(0x5f25),12)
+color(7) print("\f9x",0,10) pset(5,5) px(5,5,9))"},
     /* end of print cases */
 };
 

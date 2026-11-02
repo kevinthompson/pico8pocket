@@ -2206,6 +2206,8 @@ static int api_print(lua_State *lua) {
                        mode, force_width, force_height);
         } else if (ch == 12) {                /* \f foreground */
             fg_color = print_param(PRINT_NEXT()) & 15;
+            runtime->draw_color = fg_color;
+            runtime->ram[0x5f25] = (uint8_t)fg_color;
         } else if (ch == 14) {                /* custom font on */
             mode |= PRINT_CUSTOM_FONT;
             char_width = runtime->ram[0x5600];
