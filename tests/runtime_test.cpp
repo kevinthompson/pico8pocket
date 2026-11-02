@@ -718,6 +718,8 @@ cursor(0,118) print("\^r3a\tb",7) eq(peek(0x5f27),122))"},
     {"explicit nil colour and function names", R"(color(9) print("a",10,20,nil) eq(peek(0x5f25),0) eq(print(print,0,0),40))"},
     {"delays make print return nothing", R"(eq(print("a\^1b",0,0),nil) eq(print("\^d1a",0,0),nil) eq(print("a\^d1",0,0),4)
 eq(print("\^d0a",0,0),4) print("a\^1b",10,20,7) px(14,20,7))"},
+    {"short hex prints as text", R"(eq(print("\^:ff",0,0),8) print("\^:ff",0,0,7) px(0,1,7))"},
+    {"flag 4 skips the final scroll", R"(poke(0x5f36,4) cursor(0,120) print("a",7) eq(peek(0x5f27),120) poke(0x5f36,0))"},
     /* end of print cases */
 };
 

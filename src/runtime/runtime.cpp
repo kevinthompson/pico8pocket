@@ -2322,8 +2322,11 @@ static int api_print(lua_State *lua) {
             } else if (command == ':' || command == ';' ||
                        command == '.' || command == ',') {
                 /* One-off 8x8 glyph from hex (: ;) or raw bytes (. ,). */
-                if (n + 1 >= length)
-                    break;
+                /* Short hex is ignored and prints as text; short raw data
+                 * ends the print. */
+                int hex = command == ':' || command == ';';
+                if (n + 1 >= length || (hex && n + 16 >= length))
+                    continue;
                 uint8_t rows[8] = {0};
                 int glyph_padding = (command == ',' || command == ';') ?
                                     padding : 0;
@@ -2447,14 +2450,14 @@ static int api_print(lua_State *lua) {
 #undef PRINT_SCALED_W
 #undef PRINT_LINE_H
 #undef PRINT_ADVANCE
+    if (runtime->ram[0x5f36] & 4)
+        terminated = 1;
     if (console_scroll && !terminated &&
         y - runtime->camera_y + line_height > 122) {
         scroll_console(runtime, 6);
         y -= 6;
     }
     /* \0 omits the newline that otherwise ends a print. */
-    if (runtime->ram[0x5f36] & 4)
-        terminated = 1;
     runtime->cursor_x = terminated ? x : home_x;
     runtime->cursor_y = terminated ? y : y + line_height;
     cursor_to_ram(runtime);
