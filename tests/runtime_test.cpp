@@ -672,6 +672,11 @@ print("\a12 ab",0,0,7) eq(stat(46),12) px(0,0,7))"},
     {"underline can be disabled", R"(print("\^ua\^-ub",0,0,7) px(1,6,7) px(5,6,0))"},
     {"second return is the lowest y", R"(local x,y=print("ab\ncd",10,20) eq(y,32)
 x,y=print("\|0a",10,20) eq(y,20) x,y=print("abc\0",10,20) eq(y,20))"},
+    {"print returns to the margin", R"(print("ab\^hcd",30,40,7) eq(peek(0x5f24),30) eq(peek(0x5f26),38)
+print("c") eq(peek(0x5f26),30)
+print("ab\0",30,40) print("c") eq(peek(0x5f26),30) cursor(9,0) eq(peek(0x5f24),9))"},
+    {"poke command ends the print", R"(print("ab\^!4300x",30,40,7) eq(peek(0x5f26),38) eq(peek(0x5f27),40)
+local x,y=print("ab\^!4300x",0,0) eq(x,8) eq(y,0))"},
     /* end of print cases */
 };
 

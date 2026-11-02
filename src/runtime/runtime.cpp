@@ -808,6 +808,7 @@ static int api_cls(lua_State *lua) {
     runtime->screen_ram_dirty = 1;
     runtime->cursor_x = 0;
     runtime->cursor_y = 0;
+    runtime->ram[0x5f24] = 0;
     cursor_to_ram(runtime);
     return 0;
 }
@@ -1844,7 +1845,10 @@ static int api_cursor(lua_State *lua) {
     profile_api(P8P_API_TEXT);
     int old_x = active_runtime->cursor_x;
     int old_y = active_runtime->cursor_y;
-    if (arg_count(lua) >= 1) active_runtime->cursor_x = arg_int(lua, 1, old_x);
+    if (arg_count(lua) >= 1) {
+        active_runtime->cursor_x = arg_int(lua, 1, old_x);
+        active_runtime->ram[0x5f24] = (uint8_t)active_runtime->cursor_x;
+    }
     if (arg_count(lua) >= 2) active_runtime->cursor_y = arg_int(lua, 2, old_y);
     cursor_to_ram(active_runtime);
     push_int(lua, old_x);
@@ -2042,13 +2046,15 @@ static int api_print(lua_State *lua) {
     } else if (arguments >= 3) {
         x = arg_int(lua, 2, x);
         y = arg_int(lua, 3, y);
+        runtime->ram[0x5f24] = (uint8_t)x;
         if (arguments >= 4) {
             runtime->draw_color = arg_int(lua, 4, runtime->draw_color) & 255;
             runtime->ram[0x5f25] = (uint8_t)runtime->draw_color;
         }
     }
 
-    int home_x = x, home_y = y;
+    /* 0x5f24 is the margin print returns to, separate from the cursor. */
+    int home_x = arguments >= 3 ? x : runtime->ram[0x5f24], home_y = y;
     int prev_x = x, prev_y = y;
     int right_x = x, bottom_y = y;
     int tab_width = 16;
@@ -2058,7 +2064,7 @@ static int api_print(lua_State *lua) {
     int force_width = -1, force_height = -1;
     int bg_color = -1;
     int fg_color = runtime->draw_color & 15;
-    int cancel_wrap = 0, terminated = 0;
+    int terminated = 0;
     int outline_color = 0, outline_neighbours = 0, outline_hollow = 0;
     int underline = 0;
     /* 0x5f36 bit 7 is zepto8's char_wrap flag; the manual omits it. */
@@ -2293,7 +2299,7 @@ static int api_print(lua_State *lua) {
                     write_ram_bytes(runtime, address, text + data,
                                     (int)(length - data));
                 n = length;
-                cancel_wrap = 1;
+                terminated = 1;
             } else if (command == '@') {
                 int address = print_hex(text, length, n + 1, 4);
                 int count = print_hex(text, length, n + 5, 4);
@@ -2364,7 +2370,7 @@ static int api_print(lua_State *lua) {
             bottom_y = y;
     }
     if (line_height <= 0)
-        line_height = cancel_wrap ? 0 : PRINT_LINE_H();
+        line_height = terminated ? 0 : PRINT_LINE_H();
 #undef PRINT_NEXT
 #undef PRINT_BG
 #undef PRINT_DRAW
