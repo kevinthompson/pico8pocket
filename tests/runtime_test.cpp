@@ -576,6 +576,10 @@ glyph("n",0,{6,5,5,5,5}) glyph("m",8,{7,7,5,5,5}) glyph("N",16,{0,6,5,5,5}) glyp
 color(7) print("\f9x",0,10) pset(5,5) px(5,5,9))"},
     {"cls homes cursor", R"(rectfill(0,0,127,127,3) print("\^c1ab",50,50,7)
 px(60,60,1) px(0,0,7) px(50,50,1))"},
+    {"terminator keeps cursor", R"(cursor(0,0) print("ab\0") eq(peek(0x5f26),8) eq(peek(0x5f27),0)
+print("c",7) px(9,0,7)
+print("a\0",20,30) eq(peek(0x5f26),24) eq(peek(0x5f27),30)
+eq(print("abc\0",0,0),12) print("\0abc",40,40) px(40,40,0))"},
     /* end of print cases */
 };
 

@@ -2049,7 +2049,7 @@ static int api_print(lua_State *lua) {
     int force_width = -1, force_height = -1;
     int bg_color = -1;
     int fg_color = runtime->draw_color & 15;
-    int cancel_wrap = 0;
+    int cancel_wrap = 0, terminated = 0;
     int outline_color = 0, outline_neighbours = 0;
     int underline = 0;
     int wrap_x = -1;
@@ -2067,6 +2067,7 @@ static int api_print(lua_State *lua) {
     for (size_t n = 0; n < length; ++n) {
         uint8_t ch = text[n];
         if (ch == 0) {
+            terminated = 1;
             break;
         } else if (ch == 1) {                 /* \* repeat */
             int times = print_param(PRINT_NEXT());
@@ -2281,8 +2282,9 @@ static int api_print(lua_State *lua) {
 #undef PRINT_BG
     if (line_height <= 0)
         line_height = cancel_wrap ? 0 : 6;
-    runtime->cursor_x = home_x;
-    runtime->cursor_y = y + line_height;
+    /* \0 omits the newline that otherwise ends a print. */
+    runtime->cursor_x = terminated ? x : home_x;
+    runtime->cursor_y = terminated ? y : y + line_height;
     cursor_to_ram(runtime);
     if (converted)
         lua_pop(lua, 1);
