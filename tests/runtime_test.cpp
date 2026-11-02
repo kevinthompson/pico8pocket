@@ -714,6 +714,10 @@ cursor(0,118) print("\^r3a\tb",7) eq(peek(0x5f27),122))"},
     {"audio stops at control characters", R"(eq(print("\a12\nab",0,0),8))"},
     {"truncated one-off and outline", R"(eq(print("\^:",0,0),0) eq(peek(0x5f27),6) print("\^.\1",0,0) eq(peek(0x5f27),0) print("\^o",0,0) eq(peek(0x5f27),6) print("\^o8f",0,0) eq(peek(0x5f27),0))"},
     {"flag 4 keeps the cursor on the line", R"(poke(0x5f36,4) print("ab",10,20) eq(peek(0x5f26),18) eq(peek(0x5f27),20) poke(0x5f36,0))"},
+    {"cursor without arguments goes home", R"(cursor(9,9) cursor() eq(peek(0x5f24),0) eq(peek(0x5f26),0) eq(peek(0x5f27),0))"},
+    {"explicit nil colour and function names", R"(color(9) print("a",10,20,nil) eq(peek(0x5f25),0) eq(print(print,0,0),40))"},
+    {"delays make print return nothing", R"(eq(print("a\^1b",0,0),nil) eq(print("\^d1a",0,0),nil) eq(print("a\^d1",0,0),4)
+eq(print("\^d0a",0,0),4) print("a\^1b",10,20,7) px(14,20,7))"},
     /* end of print cases */
 };
 

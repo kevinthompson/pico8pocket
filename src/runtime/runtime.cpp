@@ -1849,6 +1849,10 @@ static int api_cursor(lua_State *lua) {
     profile_api(P8P_API_TEXT);
     int old_x = active_runtime->cursor_x;
     int old_y = active_runtime->cursor_y;
+    if (arg_count(lua) == 0) {
+        active_runtime->cursor_x = active_runtime->cursor_y = 0;
+        active_runtime->ram[0x5f24] = 0;
+    }
     if (arg_count(lua) >= 1) {
         active_runtime->cursor_x = arg_int(lua, 1, old_x);
         active_runtime->ram[0x5f24] = (uint8_t)active_runtime->cursor_x;
@@ -2030,15 +2034,18 @@ static int api_print(lua_State *lua) {
     /* Strings need no conversion; luaL_tolstring would still probe for a
      * __tostring metamethod and push a copy. */
     int converted = lua_type(lua, 1) != LUA_TSTRING;
+    int plain_name = lua_isnil(lua, 1) || lua_istable(lua, 1) ||
+                     lua_isfunction(lua, 1);
     if (lua_isnil(lua, 1))
         lua_pushstring(lua, "[nil]");
+    else if (lua_isfunction(lua, 1))
+        lua_pushstring(lua, "[function]");
     else if (lua_istable(lua, 1) && !luaL_getmetafield(lua, 1, "__tostring"))
         lua_pushstring(lua, "[table]");
     else if (lua_istable(lua, 1))
         lua_pop(lua, 1), luaL_tolstring(lua, 1, NULL);
     const uint8_t *text = (const uint8_t *)(
-        lua_isnil(lua, 1) || lua_istable(lua, 1) ?
-            lua_tolstring(lua, -1, &length) :
+        plain_name ? lua_tolstring(lua, -1, &length) :
         converted ? luaL_tolstring(lua, 1, &length) :
                     lua_tolstring(lua, 1, &length));
     int arguments = arg_count(lua) - converted;
@@ -2052,7 +2059,7 @@ static int api_print(lua_State *lua) {
         y = arg_int(lua, 3, y);
         runtime->ram[0x5f24] = (uint8_t)x;
         if (arguments >= 4) {
-            runtime->draw_color = arg_int(lua, 4, runtime->draw_color) & 255;
+            runtime->draw_color = arg_int(lua, 4, 0) & 255;
             runtime->ram[0x5f25] = (uint8_t)runtime->draw_color;
         }
     }
@@ -2063,6 +2070,7 @@ static int api_print(lua_State *lua) {
     int prev_x = 0, prev_y = 0;
     int decorating = 0, decorate_x = 0, decorate_y = 0;
     int repeats = 1;
+    int delayed = 0, char_delay = 0;
     int right_x = x, bottom_y = y;
     int tab_width = 16;
     /* Unscaled metrics; wide and tall apply when they are used. */
@@ -2223,6 +2231,7 @@ static int api_print(lua_State *lua) {
             draw(x, draw_y, fg_color, glyph_mode);
         last_width = advance;
         x += advance;
+        delayed |= char_delay;
         if (decorating) {
             decorating = 0;
             x = decorate_x;
@@ -2260,8 +2269,12 @@ static int api_print(lua_State *lua) {
         } else if (ch == 6) {                 /* \^ commands */
             uint8_t command = PRINT_NEXT();
             if (command >= '1' && command <= '9') {
-                /* Frame delays are not emulated. */
-            } else if (command == 'd' || command == 's' || command == 'r' ||
+                /* Delays do not wait, but PICO-8's print returns nothing
+                 * once it has waited. */
+                delayed = 1;
+            } else if (command == 'd') {
+                char_delay = print_param(PRINT_NEXT());
+            } else if (command == 's' || command == 'r' ||
                        command == 'c' || command == 'x' || command == 'y') {
                 int value = print_param(PRINT_NEXT());
                 if (command == 's') {
@@ -2447,6 +2460,8 @@ static int api_print(lua_State *lua) {
     cursor_to_ram(runtime);
     if (converted)
         lua_pop(lua, 1);
+    if (delayed)
+        return 0;
     push_int(lua, right_x);
     push_int(lua, runtime->cursor_y > bottom_y ? runtime->cursor_y : bottom_y);
     return 2;
