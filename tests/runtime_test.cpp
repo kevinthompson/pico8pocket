@@ -662,6 +662,7 @@ poke(0x5608+40,0x80) print("\014a",10,40,7) px(10,39,7) px(10,40,0))"},
     {"audio plays an existing sfx", R"(poke(0x3200+68*12,0x18,0x0a) poke(0x3200+68*12+65,32)
 print("\a12 ab",0,0,7) eq(stat(46),12) px(0,0,7))"},
     {"audio skips note data", R"(print("\accc ab",0,0,7) eq(stat(46),-1) px(0,0,7))"},
+    {"underline can be disabled", R"(print("\^ua\^-ub",0,0,7) px(1,6,7) px(5,6,0))"},
     /* end of print cases */
 };
 

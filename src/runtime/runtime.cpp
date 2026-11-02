@@ -2274,6 +2274,7 @@ static int api_print(lua_State *lua) {
                     mode &= ~(PRINT_WIDE | PRINT_TALL | PRINT_STRIPEY);
                 else if (off == 'i') mode &= ~PRINT_INVERTED;
                 else if (off == 'b') padding = 0;
+                else if (off == 'u') underline = 0;
                 else if (off == '#') mode &= ~PRINT_SOLID_BG;
             } else if (command == '!') {
                 /* Poke the rest of the string at a hex address. */
