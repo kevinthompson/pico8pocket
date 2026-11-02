@@ -693,6 +693,11 @@ px(0,0,5) pal() rectfill(0,0,3,3,1) px(1,1,1) pal(1,9) print("\^c1",0,0) px(9,9,
     {"print argument conversion", R"(eq(print(nil,0,0),20) eq(print({},0,0),28) print("a",nil) eq(peek(0x5f25),0)
 local x,y=print() eq(x,nil))"},
     {"foreground keeps the raw parameter", R"(print("\fga",0,0) eq(peek(0x5f25),16) px(0,0,0))"},
+    {"repeat re-runs any code", R"(eq(print("\*3\tb",0,0),52) eq(print("\*2\*3x",0,0),12) print("\*3\f8x",0,0) eq(peek(0x5f25),8))"},
+    {"truncated code ends the print", R"(print("\#",10,20) eq(peek(0x5f27),20) print("\-",10,20) eq(peek(0x5f26),250)
+print("\^j",10,20) eq(peek(0x5f26),0) eq(peek(0x5f27),0))"},
+    {"decoration starts from the last character", R"(local x,y=print("\v5z",-10,-20) eq(x,-1) eq(y,-7)
+print("\v5z",10,20,7) px(11,13,0))"},
     /* end of print cases */
 };
 

@@ -2076,7 +2076,10 @@ static int api_print(lua_State *lua) {
 
     /* 0x5f24 is the margin print returns to, separate from the cursor. */
     int home_x = arguments >= 3 ? x : runtime->ram[0x5f24], home_y = y;
-    int prev_x = x, prev_y = y;
+    /* \v starts from the previous character, or 0,0 before the first one. */
+    int prev_x = 0, prev_y = 0;
+    int decorating = 0, decorate_x = 0, decorate_y = 0;
+    int repeats = 1;
     int right_x = x, bottom_y = y;
     int tab_width = 16;
     /* Unscaled metrics; wide and tall apply when they are used. */
@@ -2119,7 +2122,8 @@ static int api_print(lua_State *lua) {
     int last_width = (mode & PRINT_WIDE) ? char_width * 2 : char_width;
     int console_scroll = arguments < 3 && !(runtime->ram[0x5f36] & 0x40);
     const uint8_t *pal = runtime->draw_palette;
-#define PRINT_NEXT() (n + 1 < length ? text[++n] : (++n, (uint8_t)0))
+/* A parameter past the end still reads as 0, then ends the print like \0. */
+#define PRINT_NEXT() (n + 1 < length ? text[++n] : (++n, terminated = 1, (uint8_t)0))
 #define PRINT_BG() ((uint8_t)(bg_color < 0 ? 0 : bg_color & 15))
 #define PRINT_DRAW(character, glyph_x, glyph_y, color, draw_mode, cell_width, \
                    cell_height) \
@@ -2217,9 +2221,21 @@ static int api_print(lua_State *lua) {
             draw(x, draw_y, fg_color, glyph_mode);
         last_width = advance;
         x += advance;
+        if (decorating) {
+            decorating = 0;
+            x = decorate_x;
+            y = decorate_y;
+        }
     };
 
     for (size_t n = 0; n < length; ++n) {
+        /* \* re-runs the next code, parameters and all; only the last \*
+         * counts when they stack. */
+        if (repeats == 0) {
+            repeats = 1;
+            continue;
+        }
+        size_t code_start = n;
         uint8_t ch = text[n];
         if (ch >= 0x10) {
             emit(ch, NULL, padding);
@@ -2227,14 +2243,8 @@ static int api_print(lua_State *lua) {
             terminated = 1;
             break;
         } else if (ch == 1) {                 /* \* repeat */
-            int times = print_param(PRINT_NEXT());
-            uint8_t repeated = PRINT_NEXT();
-            for (int i = 0; i < times; ++i) {
-                if (repeated >= 0x10)
-                    emit(repeated, NULL, padding);
-                else if (repeated == '\n')
-                    newline();
-            }
+            repeats = print_param(PRINT_NEXT());
+            continue;
         } else if (ch == 2) {                 /* \# background */
             bg_color = print_param(PRINT_NEXT());
             mode |= PRINT_ON | PRINT_SOLID_BG;
@@ -2361,11 +2371,13 @@ static int api_print(lua_State *lua) {
             if (n + 1 < length)
                 ++n;
         } else if (ch == 11) {                /* \v decorate */
+            /* The next character lands here, then the cursor comes back. */
             int offset = print_param(PRINT_NEXT());
-            uint8_t decoration = PRINT_NEXT();
-            PRINT_DRAW(decoration, prev_x + offset % 4 - 2,
-                       prev_y + offset / 4 - 8, fg_color, mode,
-                       PRINT_ADVANCE(decoration), PRINT_LINE_H());
+            decorating = 1;
+            decorate_x = x;
+            decorate_y = y;
+            x = prev_x + offset % 4 - 2;
+            y = prev_y + offset / 4 - 8;
         } else if (ch == 12) {                /* \f foreground */
             int color = print_param(PRINT_NEXT());
             fg_color = color & 15;
@@ -2397,6 +2409,12 @@ static int api_print(lua_State *lua) {
             right_x = x;
         if (y > bottom_y)
             bottom_y = y;
+        if (terminated)
+            break;
+        if (repeats > 1) {
+            --repeats;
+            n = code_start - 1;
+        }
     }
     if (line_height <= 0)
         line_height = terminated ? 0 : char_height;
