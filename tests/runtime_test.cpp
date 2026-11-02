@@ -659,6 +659,9 @@ poke(0x5608+40,0x80) print("\014a",10,40,7) px(10,39,7) px(10,40,0))"},
     {"wrap leaves an exact fit alone", R"(print("\^r2ab",0,0,7) eq(peek(0x5f27),6))"},
     {"wrap returns home", R"(print("ab\^h\^r4cde",0,0,7) px(9,6,7))"},
     {"screen wrap flag", R"(print("aaa",120,0,7) px(120,6,0) poke(0x5f36,0x80) print("aaa",120,10,7) px(120,16,7) poke(0x5f36,0))"},
+    {"audio plays an existing sfx", R"(poke(0x3200+68*12,0x18,0x0a) poke(0x3200+68*12+65,32)
+print("\a12 ab",0,0,7) eq(stat(46),12) px(0,0,7))"},
+    {"audio skips note data", R"(print("\accc ab",0,0,7) eq(stat(46),-1) px(0,0,7))"},
     /* end of print cases */
 };
 
