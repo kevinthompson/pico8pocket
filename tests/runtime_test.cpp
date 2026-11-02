@@ -547,8 +547,8 @@ static void palette_leaf_contracts(void) {
     free(runtime);
 }
 
-/* P8SCII behaviour from the manual's Appendix A.  Each body draws with print()
- * and asserts through eq(actual, expected) and px(x, y, color). */
+/* P8SCII behaviour measured on PICO-8 0.2.7.  Each body draws with print() and
+ * asserts through eq(actual, expected) and px(x, y, color). */
 struct print_case_t {
     const char *label;
     const char *body;

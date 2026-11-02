@@ -2,19 +2,16 @@
 
 ## Unreleased
 
-- A blank line in `print` advances by the current character height, so `\^y`
-  and custom fonts set its spacing. It previously always advanced six pixels.
-- `print` now follows the manual's P8SCII appendix much more closely. `\f` keeps
-  the pen, `\^c` homes the cursor, `\0` omits the newline and the console
-  scrolls. Tabs use the documented widths and stops, and `\^o` accepts black,
-  `$` and `!`. Padding, invert and solid backgrounds cover the full character
-  cell, wide and tall respect `\^x`, `\^y` and custom font sizes, and characters
-  from 128 keep their width in every mode. `\*`, `\^.` and `\^:` share the
-  normal character path.
-- `print` reads default sizes, tab width and offsets from `0x5f59`-`0x5f5b`, and
-  custom font offsets and raised characters from `0x5603`, `0x5604` and the size
-  table. `\a12` plays an existing sfx. Frame delays and the `\a` note language
-  remain unimplemented.
+- `print` and P8SCII now match PICO-8 0.2.7 in a pixel-exact comparison of 5,383
+  cases, apart from the limits in `docs/compatibility.md`. `print` returns the
+  lowest y as a second value, and `0x5f24` holds the print margin. Console
+  scrolling, tabs, wrapping, blank lines, padded cells, backgrounds, invert,
+  stripes, pinball mode, outlines, underlines, `\*`, `\v`, one-off characters,
+  default attributes and custom fonts all follow the measured behaviour.
+- `\^c` homes the cursor, `\0` omits the newline, `\f` keeps the pen and `\a12`
+  plays an existing sfx. `cls()` resets the clip and ignores the draw palette,
+  and `cursor()` with no arguments returns to 0,0. Frame delays and the `\a`
+  note language remain unimplemented.
 
 ## 0.0.35 — 2026-10-21
 

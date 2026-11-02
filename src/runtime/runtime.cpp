@@ -2081,7 +2081,7 @@ static int api_print(lua_State *lua) {
     int terminated = 0;
     int outline_color = 0, outline_neighbours = 0, outline_hollow = 0;
     int underline = 0;
-    /* 0x5f36 bit 7 is zepto8's char_wrap flag; the manual omits it. */
+    /* 0x5f36 bit 7 wraps at the screen edge; the manual omits it. */
     int wrap_x = (runtime->ram[0x5f36] & 0x80) ? 128 : -1;
     int mode = runtime->ram[0x5f58];
     if (!(mode & PRINT_ON))
@@ -2270,7 +2270,7 @@ static int api_print(lua_State *lua) {
             uint8_t command = PRINT_NEXT();
             if (command >= '1' && command <= '9') {
                 /* Delays do not wait, but PICO-8's print returns nothing
-                 * once it has waited. */
+                 * after one. */
                 delayed = 1;
             } else if (command == 'd') {
                 char_delay = print_param(PRINT_NEXT());
@@ -2385,7 +2385,7 @@ static int api_print(lua_State *lua) {
                 underline = 1;
             }
         } else if (ch == 7) {                 /* \a audio */
-            /* Only "\a12" plays; the note language is skipped. */
+            /* Only "\a12" plays; note text is skipped, not written to sfx 63. */
             int sfx_index = 0, digits = 0;
             for (; n + 1 < length && text[n + 1] >= '0' && text[n + 1] <= '9';
                  ++n, ++digits)

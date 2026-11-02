@@ -130,22 +130,52 @@ Implemented and covered by host tests:
   `stat(100)` breadcrumb and `extcmd("go_back")`, including host-managed return
   history and Select-menu return; the shared catalog initially contains 36 carts;
 - P8SCII control codes, default attributes at `0x5f58`-`0x5f5b` and custom
-  fonts at `0x5600`, audited against manual Appendix A (see below);
+  fonts at `0x5600`, checked pixel by pixel against PICO-8 0.2.7 (see below);
 - 120 error-free headless frames of the official Celeste Classic cart.
 
-P8SCII limits. These are known differences from PICO-8:
+P8SCII behaviour was measured on PICO-8 0.2.7 with a differential harness that
+compares the return values, cursor and every screen pixel of each case. Where
+the manual and PICO-8 disagree, PICO-8 wins. Measured facts worth keeping:
 
-- `\^1`-`\^9` and `\^d` parse but do not wait. `print` runs as one C call with
-  its state in locals, while `flip()` yields a coroutine. Waiting would need a
-  resumable print state that survives Eris save states.
-- `\a` plays an existing sfx (`\a12`). The note language is skipped, because
-  its beep and default speed cannot be confirmed without PICO-8.
-- The manual leaves some details open, and PICO-8 is not available to settle
-  them: `\^c` keeps the home position, `0x5f5b` offsets apply as unsigned
-  values, `\^;` advances eight pixels, and the underline sits on the row after
-  the line. Scroll amounts, `\*` on a newline, a tab moving on from a stop and
-  `0x5f36` bit 7 follow zepto8. `\^s` follows the manual's pixels, where Fake-08
-  and zepto8 multiply by four.
+- `print` returns the rightmost x and the lowest y, neither below the start
+  position. It returns nothing once `\^1`-`\^9` or a non-zero `\^d` took effect.
+- `0x5f24` holds the margin that `print` returns to, set by `cursor`, `cls` and
+  `print` with coordinates. `\^h` changes it for one call only. `\^c` moves the
+  cursor to 0,0 and keeps the margin and `\^g` home. `\^!` ends like `\0`.
+- `\^s` counts fours of pixels, and 0 restores 16. The `0x5f5a` tab nibble `n`
+  means `(n+1)*4` pixels. A tab on a stop moves to the next stop.
+- A newline landing past row 122 of the screen scrolls six pixels, and the end
+  of `print` scrolls again when the cursor would pass 122. A character that
+  overhangs row 127 scrolls by the overhang. Wrapping does not scroll, scrolling
+  stays inside the clip rectangle, and `0x5f36` bit 6 turns it off.
+- `\*` repeats the next code, including its parameters and `\n`. `\v` moves the
+  next character and comes back, from 0,0 before the first character.
+- Blank lines use the unscaled character height. Glyphs are cut to their advance
+  and to eight columns. `\^u` draws at most eight rows down, spans the unscaled
+  advance plus one pixel and starts at the padded edge.
+- `\^p` is its own wide, tall and dotted state. Backgrounds are ordinary spans
+  that honour `fillp`, `pal` and `clip`, and `cls()` resets the clip and ignores
+  `pal`. `\^c` keeps the clip and also ignores `pal`.
+- `0x5f59`-`0x5f5b` apply to the default font at the start of a call. `\014` and
+  `\015` discard them. Offsets at `0x5f5b`, `0x5603` and `0x5604` are unsigned.
+  A font selected through `0x5f58` with an empty header uses 8x8.
+- `0x5f36` bit 2 leaves the cursor after the last character. Bit 7 wraps at the
+  screen edge using the unscaled width.
+- A code whose parameter runs off the end of the string reads zero and ends the
+  print like `\0`. Short `\^:` hex is ignored and prints as text.
+
+Known differences from PICO-8:
+
+- `\^1`-`\^9` wait `2^(n-1)` frames and `\^d` waits per character there. Here they
+  parse but do not wait, because `print` runs as one C call with its state in
+  locals. Waiting needs a resumable print state that survives Eris save states.
+- `\a12` plays an existing sfx. PICO-8 writes other `\a` text into sfx 63 and
+  plays it, a plain `\a` included. Here it is skipped.
+- The default font comes from Fake-08 and differs from 0.2.7 in 69 glyphs.
+- Outlines differ when a glyph's stored pixels pass its advance, and inverted
+  or pinball hollow outlines differ. `\^#` backgrounds ignore the `0x5f34`
+  colour flag. Codes that read past the end of the string differ when PICO-8
+  reads whatever follows it: `\*n`, a bare `\+` and `\^o8`.
 
 Not yet compatibility-complete:
 
