@@ -1990,6 +1990,27 @@ static void draw_glyph(p8p_runtime_t *runtime, uint8_t character, int x, int y,
                     padding);
 }
 
+/* Exchanges the glyph's lit screen pixels with saved[] so an interior-free
+ * outline can put back what its neighbour passes painted over them. */
+static void swap_glyph_interior(p8p_runtime_t *runtime, const uint8_t *rows,
+                                int x, int y, int mode, uint8_t *saved) {
+    int w_factor = (mode & PRINT_WIDE) ? 2 : 1;
+    int h_factor = (mode & PRINT_TALL) ? 2 : 1;
+    x -= runtime->camera_x;
+    y -= runtime->camera_y;
+    for (int dy = 0; dy < 8 * h_factor; ++dy)
+        for (int dx = 0; dx < 8 * w_factor; ++dx) {
+            int px = x + dx, py = y + dy;
+            if (!((rows[dy / h_factor] >> (dx / w_factor)) & 1) ||
+                (unsigned)px >= 128u || (unsigned)py >= 128u)
+                continue;
+            uint8_t *pixel = &runtime->framebuffer[py * 128 + px];
+            uint8_t held = saved[dy * 16 + dx];
+            saved[dy * 16 + dx] = *pixel;
+            *pixel = held;
+        }
+}
+
 static void scroll_console(p8p_runtime_t *runtime, int rows) {
     memmove(runtime->framebuffer, runtime->framebuffer + rows * 128,
             (size_t)(128 - rows) * 128);
@@ -2032,7 +2053,7 @@ static int api_print(lua_State *lua) {
     int bg_color = -1;
     int fg_color = runtime->draw_color & 15;
     int cancel_wrap = 0, terminated = 0;
-    int outline_color = 0, outline_neighbours = 0;
+    int outline_color = 0, outline_neighbours = 0, outline_hollow = 0;
     int underline = 0;
     int wrap_x = -1;
     int mode = runtime->ram[0x5f58];
@@ -2065,10 +2086,11 @@ static int api_print(lua_State *lua) {
     const uint8_t *pal = runtime->draw_palette;
 #define PRINT_NEXT() (n + 1 < length ? text[++n] : (++n, (uint8_t)0))
 #define PRINT_BG() ((uint8_t)(bg_color < 0 ? 0 : pal[bg_color & 15]))
-#define PRINT_DRAW(character, glyph_x, glyph_y, color, cell_width, cell_height) \
+#define PRINT_DRAW(character, glyph_x, glyph_y, color, draw_mode, cell_width, \
+                   cell_height) \
     draw_glyph(runtime, character, (glyph_x) + offset_x, (glyph_y) + offset_y, \
-               pal[(color) & 15], PRINT_BG(), mode, force_width, force_height, \
-               cell_width, cell_height, padding)
+               pal[(color) & 15], PRINT_BG(), draw_mode, force_width, \
+               force_height, cell_width, cell_height, padding)
 #define PRINT_SCALED_W(width) ((mode & PRINT_WIDE) ? (width) * 2 : (width))
 #define PRINT_LINE_H() ((mode & PRINT_TALL) ? char_height * 2 : char_height)
 #define PRINT_ADVANCE(character) \
@@ -2094,27 +2116,48 @@ static int api_print(lua_State *lua) {
             line_height = cell_height;
         prev_x = x;
         prev_y = y;
-        auto draw = [&](int glyph_x, int glyph_y, int color, int draw_cell) {
+        auto draw = [&](int glyph_x, int glyph_y, int color, int draw_mode) {
             if (one_off)
                 draw_glyph_rows(runtime, one_off, glyph_x, glyph_y,
-                                pal[color & 15], PRINT_BG(), mode, 8, 8,
+                                pal[color & 15], PRINT_BG(), draw_mode, 8, 8,
                                 advance, cell_height + glyph_padding,
                                 glyph_padding);
             else
-                PRINT_DRAW(character, glyph_x, glyph_y, color, advance,
-                           draw_cell);
+                PRINT_DRAW(character, glyph_x, glyph_y, color, draw_mode,
+                           advance, line_height);
         };
-        if (outline_color && outline_neighbours) {
+        int glyph_mode = mode;
+        if (outline_neighbours) {
             static const int8_t ox[8] = {-1, 0, 1, -1, 1, -1, 0, 1};
             static const int8_t oy[8] = {-1, -1, -1, 0, 0, 1, 1, 1};
+            static const uint8_t blank[8] = {0};
+            const uint8_t *rows = one_off ? one_off : (mode & PRINT_CUSTOM_FONT ?
+                runtime->ram + 0x5600 : p8p_pico8_font) + character * 8;
+            uint8_t interior[256];
+            /* Paint the background first so it cannot cover the outline. */
+            if (mode & PRINT_SOLID_BG) {
+                draw_glyph_rows(runtime, blank, x + offset_x, y + offset_y, 0,
+                                PRINT_BG(), PRINT_SOLID_BG, 8, 8, advance,
+                                line_height, padding);
+                glyph_mode &= ~PRINT_SOLID_BG;
+            }
+            if (outline_hollow)
+                swap_glyph_interior(runtime, rows, x + offset_x, y + offset_y,
+                                    mode, interior);
             for (int i = 0; i < 8; ++i)
                 if (outline_neighbours & (1 << i))
-                    draw(x + ox[i], y + oy[i], outline_color, line_height);
+                    draw(x + ox[i], y + oy[i],
+                         outline_color < 0 ? fg_color : outline_color,
+                         mode & ~(PRINT_SOLID_BG | PRINT_INVERTED));
+            if (outline_hollow)
+                swap_glyph_interior(runtime, rows, x + offset_x, y + offset_y,
+                                    mode, interior);
         }
         if (underline)
             draw_hspan(runtime, x - 1, x + advance - 1, y + line_height,
                        fg_color);
-        draw(x, y, fg_color, line_height);
+        if (!outline_hollow || !outline_neighbours)
+            draw(x, y, fg_color, glyph_mode);
         int adjust = 0;
         if ((mode & PRINT_CUSTOM_FONT) && (runtime->ram[0x5605] & 1)) {
             int nibble_index = character - 16;
@@ -2247,7 +2290,11 @@ static int api_print(lua_State *lua) {
                 write_ram_bytes(runtime, address, text + data, count);
                 n = data + (size_t)count - 1;
             } else if (command == 'o') {
-                outline_color = print_param(PRINT_NEXT());
+                /* $ uses the current colour; ! also skips the interior. */
+                uint8_t color = PRINT_NEXT();
+                outline_color = color == '$' || color == '!' ? -1 :
+                                print_param(color);
+                outline_hollow = color == '!';
                 outline_neighbours = print_hex(text, length, n + 1, 2);
                 n += 2;
             } else if (command == 'u') {
@@ -2262,7 +2309,7 @@ static int api_print(lua_State *lua) {
             int offset = print_param(PRINT_NEXT());
             uint8_t decoration = PRINT_NEXT();
             PRINT_DRAW(decoration, prev_x + offset % 4 - 2,
-                       prev_y + offset / 4 - 8, fg_color,
+                       prev_y + offset / 4 - 8, fg_color, mode,
                        PRINT_ADVANCE(decoration), PRINT_LINE_H());
         } else if (ch == 12) {                /* \f foreground */
             fg_color = print_param(PRINT_NEXT()) & 15;

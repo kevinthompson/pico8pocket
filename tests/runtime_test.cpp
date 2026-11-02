@@ -637,6 +637,11 @@ print("\^y3\^:0000000000000001",30,60,7) px(30,67,7))"},
     {"decoration restores cursor", R"(eq(print("a\v5zb",0,10),8))"},
     {"repeat keeps outline", R"(print("\^o8ff\*2a",10,30,7) px(9,29,8) px(15,31,8))"},
     {"one-off keeps outline", R"(print("\^o8ff\^:0100000000000000",10,50,7) px(10,50,7) px(9,49,8))"},
+    {"black outline", R"(rectfill(0,0,30,30,5) print("\^o0ffa",10,10,7) px(9,9,0) px(10,10,7) px(11,11,0))"},
+    {"outline in the current colour", R"(print("\^o$ffa",10,40,12) px(9,39,12) print("\f8\^o$ffa",30,40) px(29,39,8))"},
+    {"outline without interior", R"(rectfill(10,60,30,80,5) print("\^o!ffa",12,62,7) px(11,61,7) px(12,62,5) px(13,63,7))"},
+    {"outline over a background", R"(print("\#9\^o8ff.",10,90,7) px(9,90,9) px(10,93,8) px(11,94,7))"},
+    {"outline stays one pixel thick", R"(print("\^w\^o8ffa",40,10,7) px(39,9,8) px(38,9,0))"},
     /* end of print cases */
 };
 
