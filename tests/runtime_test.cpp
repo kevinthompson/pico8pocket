@@ -547,12 +547,71 @@ static void palette_leaf_contracts(void) {
     free(runtime);
 }
 
+/* P8SCII behaviour from the manual's Appendix A.  Each body draws with print()
+ * and asserts through eq(actual, expected) and px(x, y, color). */
+struct print_case_t {
+    const char *label;
+    const char *body;
+};
+
+static const print_case_t print_cases[] = {
+    {"escapes lex to control codes", R"(eq(ord("\*"),1) eq(ord("\#"),2) eq(ord("\-"),3) eq(ord("\|"),4)
+eq(ord("\+"),5) eq(ord("\^"),6) eq(ord("\a"),7) eq(ord("\b"),8) eq(ord("\t"),9)
+eq(ord("\v"),11) eq(ord("\f"),12) eq(ord("\r"),13) eq(ord("\014"),14) eq(ord("\015"),15))"},
+    {"shifts, home and jump", R"(eq(print("\-ka",8,0),16) eq(print("a\|ga",0,8),8)
+print("\+kga",8,8,7) px(12,8,7)
+print("ab\^hc\^gd\ne",0,20,7) eq(print("\^j24",0,0),8)
+print("ab\rx",0,30,7) px(0,30,7) px(1,31,0))"},
+    {"modes toggle and stripe", R"(print("\^t\^=l",0,0,7) px(0,0,7) px(0,1,0) px(0,2,7)
+print("\^w\^=l",10,0,7) px(10,0,7) px(11,0,0) px(12,8,0)
+print("\^pl",20,0,7) px(20,0,7) px(21,0,0) px(20,1,0)
+eq(print("\^p\^-pl",30,0),34))"},
+    {"raw memory writes", R"(print("\^@43000002ABc") eq(peek(0x4300),65) eq(peek(0x4301),66)
+local y=peek(0x5f27) print("\^!4310XY") eq(peek(0x4311),89) eq(peek(0x5f27),y))"},
+    {"default n and m differ", R"(
+local function glyph(c,x,rows) print(c,x,0,7) for y=0,4 do local b=rows[y+1]
+for i=0,2 do px(x+i,y,(b>>(2-i))&1==1 and 7 or 0) end end end
+glyph("n",0,{6,5,5,5,5}) glyph("m",8,{7,7,5,5,5}) glyph("N",16,{0,6,5,5,5}) glyph("M",24,{0,7,7,5,5}))"},
+    /* end of print cases */
+};
+
+static void p8scii_print_cases(void) {
+    static const char cart_format[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "function eq(a,b) if a~=b then bad=true end end\n"
+        "function px(x,y,c) eq(pget(x,y),c) end\n"
+        "function _draw() cls()\n%s\ncls(bad and 8 or 11) end\n";
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    if (!runtime)
+        return;
+    for (const print_case_t &print_case : print_cases) {
+        char text[4096];
+        int length = snprintf(text, sizeof(text), cart_format, print_case.body);
+        p8p_cart_t cart = {};
+        int ok = length > 0 && (size_t)length < sizeof(text) &&
+                 p8p_cart_load_text_memory((const uint8_t *)text, (size_t)length,
+                                           &cart) == 0 &&
+                 p8p_runtime_load(runtime, &cart) == 0 &&
+                 p8p_runtime_step(runtime, 0) == 0 &&
+                 p8p_runtime_framebuffer(runtime)[0] == 11;
+        if (!ok) {
+            fprintf(stderr, "FAIL print case: %s (%s)\n", print_case.label,
+                    p8p_runtime_error(runtime));
+            ++failures;
+        }
+        p8p_cart_destroy(&cart);
+    }
+    p8p_runtime_destroy(runtime);
+}
+
 /** @brief Run host runtime contracts and embedded cartridge regression cases.
  * Checks API state and rendered pixel markers, including all(t) traversal
  * through deletion, growth, collection and mixed values. Returns nonzero on
  * failed checks so iterator changes are covered by the normal test target.
  */
 int main(void) {
+    p8scii_print_cases();
     test_terminal_nul_source();
     test_incompatible_carts();
     palette_leaf_contracts();
