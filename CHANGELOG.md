@@ -7,6 +7,8 @@
 - Music loops return to the loop-start pattern. They previously resumed one
   pattern after it, which could reach an empty pattern and play sfx 0 on all
   four channels.
+- `sfx(nil)` plays sfx 0, matching Fake-08. It previously acted as `sfx(-1)` and
+  stopped every playing sound effect.
 
 ## 0.0.35 — 2026-10-21
 
