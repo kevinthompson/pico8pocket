@@ -613,6 +613,8 @@ int main(void) {
     p8p_cart_t tap_cart = {};
     p8p_cart_t late_press_cart = {};
     p8p_cart_t no_repeat_cart = {};
+    p8p_cart_t repeat_60_cart = {};
+    p8p_cart_t repeat_30_cart = {};
     p8p_runtime_t *runtime;
     const uint8_t *framebuffer;
     const uint8_t *screen_palette;
@@ -798,6 +800,23 @@ int main(void) {
         "r=0 function _init() poke(0x5f5c,255) end\n"
         "function _update60() if btnp(4) then r+=1 end end\n"
         "function _draw() cls() pset(r,0,7) end\n";
+    /* The manual gives the btnp() repeat in frames at 30 fps, doubled at 60. */
+    static const uint8_t repeat_60_source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "r=0 function _init() poke(0x5f5c,10) poke(0x5f5d,2) end\n"
+        "function _update60() if btnp(4) then r+=1 end end\n"
+        "function _draw() cls() pset(r,0,7) end\n";
+    static const uint8_t repeat_30_source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "r=0 function _init() poke(0x5f5c,10) poke(0x5f5d,2) end\n"
+        "function _update() if btnp(4) then r+=1 end end\n"
+        "function _draw() cls() pset(r,0,7) end\n";
+    CHECK(p8p_cart_load_text_memory(repeat_60_source,
+                                    sizeof(repeat_60_source) - 1,
+                                    &repeat_60_cart) == 0);
+    CHECK(p8p_cart_load_text_memory(repeat_30_source,
+                                    sizeof(repeat_30_source) - 1,
+                                    &repeat_30_cart) == 0);
     CHECK(p8p_cart_load_text_memory(tap_source, sizeof(tap_source) - 1,
                                     &tap_cart) == 0);
     CHECK(p8p_cart_load_text_memory(late_press_source,
@@ -1103,6 +1122,24 @@ int main(void) {
         for (int frame = 0; frame < 40; ++frame)
             CHECK(p8p_runtime_step(runtime, 1u << 4) == 0);
         CHECK(p8p_runtime_framebuffer(runtime)[1] == 7);
+
+        /* A 250 ms press at 60 fps stays one press: the delay of 10 means
+         * 20 frames, and repeats then come every 4 frames, not every 2. */
+        loaded = p8p_runtime_load(runtime, &repeat_60_cart);
+        CHECK(loaded == 0);
+        for (int frame = 0; frame < 15; ++frame)
+            CHECK(p8p_runtime_step(runtime, 1u << 4) == 0);
+        CHECK(p8p_runtime_framebuffer(runtime)[1] == 7);
+        for (int frame = 15; frame < 36; ++frame)
+            CHECK(p8p_runtime_step(runtime, 1u << 4) == 0);
+        CHECK(p8p_runtime_framebuffer(runtime)[5] == 7);
+
+        /* The same pokes in a 30 fps cart are taken as written. */
+        loaded = p8p_runtime_load(runtime, &repeat_30_cart);
+        CHECK(loaded == 0);
+        for (int frame = 0; frame < 18; ++frame)
+            CHECK(p8p_runtime_step(runtime, 1u << 4) == 0);
+        CHECK(p8p_runtime_framebuffer(runtime)[5] == 7);
 
         {
             int plain = audio_crossings_for(runtime, "sfx(2)");
@@ -1455,6 +1492,8 @@ int main(void) {
     p8p_cart_destroy(&tap_cart);
     p8p_cart_destroy(&late_press_cart);
     p8p_cart_destroy(&no_repeat_cart);
+    p8p_cart_destroy(&repeat_60_cart);
+    p8p_cart_destroy(&repeat_30_cart);
     if (store_fd >= 0)
         unlink(store_path);
 
