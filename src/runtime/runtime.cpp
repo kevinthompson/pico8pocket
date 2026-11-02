@@ -803,9 +803,13 @@ static P8P_FASTTEXT void draw_hspan(p8p_runtime_t *runtime, int x0, int x1,
 static int api_cls(lua_State *lua) {
     profile_api(P8P_API_GRAPHICS);
     p8p_runtime_t *runtime = active_runtime;
-    uint8_t color = runtime->draw_palette[arg_int(lua, 1, 0) & 15];
-    memset(runtime->framebuffer, color & 15, sizeof(runtime->framebuffer));
+    memset(runtime->framebuffer, arg_int(lua, 1, 0) & 15,
+           sizeof(runtime->framebuffer));
     runtime->screen_ram_dirty = 1;
+    runtime->clip_x0 = runtime->clip_y0 = 0;
+    runtime->clip_x1 = runtime->clip_y1 = 128;
+    runtime->ram[0x5f20] = runtime->ram[0x5f21] = 0;
+    runtime->ram[0x5f22] = runtime->ram[0x5f23] = 128;
     runtime->cursor_x = 0;
     runtime->cursor_y = 0;
     runtime->ram[0x5f24] = 0;
@@ -2238,8 +2242,7 @@ static int api_print(lua_State *lua) {
                 } else if (command == 'r') {
                     wrap_x = value * 4;
                 } else if (command == 'c') {
-                    uint8_t color = pal[value & 15] & 15;
-                    memset(runtime->framebuffer, color,
+                    memset(runtime->framebuffer, value & 15,
                            sizeof(runtime->framebuffer));
                     runtime->screen_ram_dirty = 1;
                     x = y = 0;

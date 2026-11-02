@@ -338,7 +338,7 @@ static void draw_palette_transitions(void) {
         {"transparent nonzero", "pal(1,8,1) palt(1,true)", 6,6,15,8,15},
         {"transparency reset", "pal(1,8,1) palt(1,true) palt()", 6,1,15,8,15},
         {"screen-only reset", "pal({[1]=8,[15]=139},1) pal()", 6,1,15,1,15},
-        {"all draw entries", "for i=0,15 do pal(i,(i+1)%16) end", 7,2,0,1,15},
+        {"all draw entries", "for i=0,15 do pal(i,(i+1)%16) end", 6,2,0,1,15},
         {"all entries restored", "for i=0,15 do pal(i,(i+1)%16) end for i=0,15 do pal(i,i) end", 6,1,15,1,15},
         {"print memory", "print(chr(6)..'!5f01'..chr(4),0,100)", 6,4,15,1,15},
     };
@@ -681,6 +681,8 @@ local x,y=print("ab\^!4300x",0,0) eq(x,8) eq(y,0))"},
     {"pinball is its own state", R"(eq(print("\^p\^-wa",0,0),8) print("\^p\^-=l",0,0,7) px(0,0,0) px(1,0,7) px(1,1,0))"},
     {"padded cells scale and reach the last row", R"(print("\#8 ",10,20) px(13,25,8) px(14,25,0)
 print("\^w\#9 ",30,20) px(28,19,9) px(27,19,0) print("\^t\#a ",50,40) px(49,38,10) px(49,37,0))"},
+    {"cls resets clip and ignores pal", R"(clip(10,10,20,20) pal(5,8) cls(5) eq(peek(0x5f20),0) eq(peek(0x5f22),128)
+px(0,0,5) pal() rectfill(0,0,3,3,1) px(1,1,1) pal(1,9) print("\^c1",0,0) px(9,9,1))"},
     /* end of print cases */
 };
 
