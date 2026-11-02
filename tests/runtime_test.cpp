@@ -574,6 +574,8 @@ for i=0,2 do px(x+i,y,(b>>(2-i))&1==1 and 7 or 0) end end end
 glyph("n",0,{6,5,5,5,5}) glyph("m",8,{7,7,5,5,5}) glyph("N",16,{0,6,5,5,5}) glyph("M",24,{0,7,7,5,5}))"},
     {"foreground persists", R"(print("\fca",0,0,7) eq(peek(0x5f25),12)
 color(7) print("\f9x",0,10) pset(5,5) px(5,5,9))"},
+    {"cls homes cursor", R"(rectfill(0,0,127,127,3) print("\^c1ab",50,50,7)
+px(60,60,1) px(0,0,7) px(50,50,1))"},
     /* end of print cases */
 };
 

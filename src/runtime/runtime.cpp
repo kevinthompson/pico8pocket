@@ -2100,6 +2100,7 @@ static int api_print(lua_State *lua) {
                     memset(runtime->framebuffer, color,
                            sizeof(runtime->framebuffer));
                     runtime->screen_ram_dirty = 1;
+                    x = y = 0;
                 } else if (command == 'x') {
                     force_width = char_width = value;
                 } else if (command == 'y') {
