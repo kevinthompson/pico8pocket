@@ -248,15 +248,16 @@ typedef struct input_latch {
     uint32_t instruction_hooks;
 } input_latch_t;
 
-static void input_latch_poll(input_latch_t *latch, int force) {
+/* Returns whether it sampled, which is at most once per 4 ms unless forced. */
+static int input_latch_poll(input_latch_t *latch, int force) {
     p8p_physical_input_t sample;
     uint32_t now_us;
 
     if (!latch)
-        return;
+        return 0;
     now_us = p8p_platform_time_us();
     if (!force && now_us - latch->last_poll_us < 4000u)
-        return;
+        return 0;
     p8p_platform_poll_input(&sample);
     sample.pressed |= sample.held & (uint16_t)~latch->previous_held;
     sample.released |= latch->previous_held & (uint16_t)~sample.held;
@@ -265,13 +266,22 @@ static void input_latch_poll(input_latch_t *latch, int force) {
     latch->pending.released |= sample.released;
     latch->previous_held = sample.held;
     latch->last_poll_us = now_us;
+    return 1;
 }
+
+/* The loop refills audio once per pass, and the queue is kept short because
+ * sound effects share it, so one step longer than the queue would silence
+ * the music.  16 ms of audio left is below what a frame that merely runs late
+ * reaches, and leaves time to render the refill before the queue empties. */
+#define AUDIO_REFILL_MID_STEP_FRAMES 768
 
 static void input_latch_service(void *userdata) {
     input_latch_t *latch = (input_latch_t *)userdata;
     if (latch)
         ++latch->instruction_hooks;
-    input_latch_poll(latch, 0);
+    if (input_latch_poll(latch, 0) && latch->runtime &&
+        p8p_platform_audio_queued_frames() < AUDIO_REFILL_MID_STEP_FRAMES)
+        p8p_platform_audio_pump(latch->runtime);
     if (latch && latch->runtime && latch->controls) {
         uint16_t physical = latch->pending.held &
                             (uint16_t)~latch->suppressed;

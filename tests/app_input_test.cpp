@@ -29,9 +29,21 @@ static uint32_t audio_cost_us;
 static uint32_t present_cost_us;
 static uint32_t run_until_us;
 static uint32_t now_us;
+static uint32_t time_per_read_us;
 static int counted_presses;
+/* The Pocket's audio queue on the virtual clock: 48 frames drain per ms. */
+static uint32_t queue_frames, queue_checked_us;
+static int queue_started, queue_ran_dry;
 static uint8_t screen[128 * 128];
 static jmp_buf app_exit;
+
+static void drain_audio_queue(void) {
+    uint32_t drained = (now_us - queue_checked_us) * 48u / 1000u;
+    queue_checked_us = now_us;
+    if (queue_started && drained >= queue_frames)
+        queue_ran_dry = 1;
+    queue_frames = drained >= queue_frames ? 0 : queue_frames - drained;
+}
 
 static int button_is_down(void) {
     for (unsigned i = 0; i < press_count; ++i)
@@ -51,7 +63,17 @@ void p8p_platform_present(const uint8_t *pixels, const uint8_t *) {
     if (now_us >= run_until_us)
         longjmp(app_exit, 1);
 }
-void p8p_platform_audio_pump(struct p8p_runtime *) { now_us += audio_cost_us; }
+void p8p_platform_audio_pump(struct p8p_runtime *) {
+    drain_audio_queue();
+    now_us += audio_cost_us;
+    drain_audio_queue();
+    queue_frames = 2048;
+    queue_started = 1;
+}
+int p8p_platform_audio_queued_frames(void) {
+    drain_audio_queue();
+    return (int)queue_frames;
+}
 void p8p_platform_audio_set_paused(int) {}
 void p8p_platform_audio_set_volume(unsigned) {}
 void p8p_platform_audio_debug(unsigned *, unsigned *, unsigned *, unsigned *) {}
@@ -65,7 +87,7 @@ void p8p_platform_poll_input(p8p_physical_input_t *input) {
 uint16_t p8p_platform_poll_physical(void) { return 0; }
 uint8_t p8p_platform_poll_buttons(void) { return 0; }
 void p8p_platform_wait_frame(void) {}
-uint32_t p8p_platform_time_us(void) { return ++now_us; }
+uint32_t p8p_platform_time_us(void) { return now_us += time_per_read_us; }
 void p8p_platform_sleep_us(uint32_t duration) { now_us += duration; }
 void p8p_platform_exit(void) { longjmp(app_exit, 1); }
 int p8p_platform_savestate_enable(uint32_t) { return -1; }
@@ -81,6 +103,8 @@ static int count_presses(char *cart_path) {
     char *app_argv[] = {executable, cart_path, NULL};
     now_us = 0;
     counted_presses = 0;
+    queue_frames = queue_checked_us = 0;
+    queue_started = queue_ran_dry = 0;
     if (setjmp(app_exit) == 0) {
         p8p_app_main(2, app_argv);
         assert(!"app loop returned before the timeline ended");
@@ -101,6 +125,7 @@ int main(void) {
                  "function _draw() cls() pset(r,0,7) end\n", file) >= 0);
     assert(fclose(file) == 0);
     assert(chdir(temporary) == 0);
+    time_per_read_us = 1;
 
     /* Taps of 20 ms at every phase of a frame whose audio and presentation
      * each take 14 ms: all of them are longer than any unpolled stretch. */
@@ -135,9 +160,30 @@ int main(void) {
         return 1;
     }
 
+    /* A step that stays in Lua for about 100 ms, three times the time the
+     * queue holds, must not let audio run dry.  Each clock read stands for
+     * the Lua work between two service hooks. */
+    file = fopen(cart_path, "wb");
+    assert(file);
+    assert(fputs("pico-8 cartridge // http://www.pico-8.com\nversion 42\n"
+                 "__lua__\nfunction _update60()\n"
+                 "for j=1,25 do for i=1,20000 do end end end\n"
+                 "function _draw() end\n", file) >= 0);
+    assert(fclose(file) == 0);
+    audio_cost_us = 3000;
+    present_cost_us = 3000;
+    time_per_read_us = 400;
+    press_count = 0;
+    run_until_us = 1000000u;
+    count_presses(cart_path);
+    if (queue_ran_dry) {
+        fprintf(stderr, "FAIL audio queue ran dry during a long Lua step\n");
+        return 1;
+    }
+
     assert(unlink(cart_path) == 0);
     assert(chdir("/") == 0);
     assert(rmdir(temporary) == 0);
-    puts("PASS short taps and quick re-presses survive slow frames");
+    puts("PASS taps survive slow frames and long Lua steps keep audio fed");
     return 0;
 }
