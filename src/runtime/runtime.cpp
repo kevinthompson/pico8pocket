@@ -2538,17 +2538,29 @@ static int api_stub(lua_State *lua) {
 /* menuitem(index, [label, [callback]]) adds, replaces, relabels (no
  * callback) or (without a label) removes pause-menu entry 1-5.  Bits 8-15 of index filter which button
  * presses reach the callback. */
+/* The menu table holds the callbacks in slots 1-5, then what PICO-8 keeps
+ * of the last callback that ran. */
+enum { MENU_LAST_CALLBACK = 6, MENU_LAST_SLOT = 7 };
+
 static int api_menuitem(lua_State *lua) {
     p8p_runtime_t *runtime = active_runtime;
-    int index = arg_int(lua, 1, 0);
-    int slot = (index & 0xff) - 1;
-    if (slot < 0 || slot >= 5)
-        return 0;
     if (runtime->menu_ref == LUA_NOREF) {
         lua_newtable(lua);
         runtime->menu_ref = luaL_ref(lua, LUA_REGISTRYINDEX);
     }
     lua_rawgeti(lua, LUA_REGISTRYINDEX, runtime->menu_ref);
+    int menu = lua_gettop(lua);
+    /* A nil index means the slot of the last callback that ran. */
+    lua_rawgeti(lua, menu, MENU_LAST_SLOT);
+    int last_slot = (int)lua_tonumber(lua, -1);
+    lua_pop(lua, 1);
+    int index = lua_isnil(lua, 1) || lua_isnone(lua, 1) ?
+                last_slot : arg_int(lua, 1, 0);
+    int slot = (index & 0xff) - 1;
+    if (slot < 0 || slot >= 5) {
+        lua_pop(lua, 1);
+        return 0;
+    }
     if (lua_isstring(lua, 2)) {
         /* The system menu font is ASCII: button glyphs become letters and
          * arrows, other P8SCII characters '?'. */
@@ -2565,19 +2577,17 @@ static int api_menuitem(lua_State *lua) {
         }
         runtime->menu_labels[slot][used] = '\0';
         runtime->menu_filters[slot] = (uint8_t)((index >> 8) & 0xff);
-        if (lua_isfunction(lua, 3)) {
+        /* A new label alone takes the last callback that ran, as PICO-8
+         * does: carts relabel a toggle from inside its own callback. */
+        if (lua_isfunction(lua, 3))
             lua_pushvalue(lua, 3);
-        } else {
-            /* A new label alone keeps the callback, as PICO-8 does: carts
-             * relabel a toggle from inside its own callback. */
-            lua_pop(lua, 1);
-            return 0;
-        }
+        else
+            lua_rawgeti(lua, menu, MENU_LAST_CALLBACK);
     } else {
         runtime->menu_labels[slot][0] = '\0';
         lua_pushnil(lua);
     }
-    lua_rawseti(lua, -2, slot + 1);
+    lua_rawseti(lua, menu, slot + 1);
     lua_pop(lua, 1);
     return 0;
 }
@@ -3795,6 +3805,12 @@ extern "C" int p8p_runtime_menu_select(p8p_runtime_t *runtime, int slot,
         lua_pop(runtime->lua, 1);
         return 0;
     }
+    lua_rawgeti(runtime->lua, LUA_REGISTRYINDEX, runtime->menu_ref);
+    lua_pushvalue(runtime->lua, -2);
+    lua_rawseti(runtime->lua, -2, MENU_LAST_CALLBACK);
+    lua_pushnumber(runtime->lua, fix32(slot));
+    lua_rawseti(runtime->lua, -2, MENU_LAST_SLOT);
+    lua_pop(runtime->lua, 1);
     lua_State *thread = lua_newthread(runtime->lua);
     int reference = luaL_ref(runtime->lua, LUA_REGISTRYINDEX);
     lua_xmove(runtime->lua, thread, 1);

@@ -1473,6 +1473,34 @@ int main(void) {
             CHECK(strstr(p8p_runtime_error(runtime), "boom") != NULL);
 
             {
+                /* Only a callback that has run is reused: menuitem(nil,...)
+                 * addresses its slot, and a label with no callback takes the
+                 * last one run, so an item relabelled first has no callback. */
+                static const char last_source[] =
+                    "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                    "n=0\n"
+                    "function _init() local f=function() n+=1 menuitem(nil,\"new\") return true end\n"
+                    "menuitem(1,\"a\",f) menuitem(2,\"b\",f) menuitem(2,\"c\") end\n"
+                    "function _draw() cls() pset(0,0,n) end\n";
+                p8p_cart_t last_cart = {};
+                CHECK(p8p_cart_load_text_memory(
+                          (const uint8_t *)last_source,
+                          sizeof(last_source) - 1, &last_cart) == 0);
+                CHECK(p8p_runtime_load(runtime, &last_cart) == 0);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                CHECK(p8p_runtime_menu_select(runtime, 2, 112) == 0);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                CHECK(p8p_runtime_framebuffer(runtime)[0] == 0);
+                CHECK(p8p_runtime_menu_select(runtime, 1, 112) == 1);
+                const char *renamed = p8p_runtime_menu_item(runtime, 1);
+                CHECK(renamed && strcmp(renamed, "new") == 0);
+                CHECK(p8p_runtime_menu_select(runtime, 1, 112) == 1);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                CHECK(p8p_runtime_framebuffer(runtime)[0] == 2);
+                p8p_cart_destroy(&last_cart);
+            }
+
+            {
                 /* Bits 8-15 name buttons to ignore: they are masked out of the
                  * value, and nothing happens when no button remains. */
                 static const char filter_source[] =
