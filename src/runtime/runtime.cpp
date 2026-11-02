@@ -2036,7 +2036,7 @@ static int api_print(lua_State *lua) {
     int home_x = x, home_y = y;
     int prev_x = x, prev_y = y;
     int right_x = x;
-    int tab_width = 4;
+    int tab_width = 16;
     /* Unscaled metrics; wide and tall apply when they are used. */
     int char_width = 4, wide_char_width = 8, char_height = 6;
     int line_height = 0;
@@ -2064,6 +2064,9 @@ static int api_print(lua_State *lua) {
             force_height = char_height = attributes[0] >> 4;
         if (attributes[1] & 15)
             wide_char_width = attributes[1] & 15;
+        tab_width = attributes[1] >> 4 ? (attributes[1] >> 4) * 4 : 16;
+        if (custom && runtime->ram[0x5606])
+            tab_width = runtime->ram[0x5606];
     };
     select_font();
     /* Only a console print without coordinates scrolls; \0 suppresses it. */
@@ -2234,10 +2237,14 @@ static int api_print(lua_State *lua) {
             y += line_height > 0 ? line_height : PRINT_LINE_H();
             line_height = 0;
         } else if (ch == '\t') {
-            int stop = tab_width * 4;
-            if (stop > 0)
-                while (x % stop)
-                    ++x;
+            if (tab_width > 0) {
+                int origin = (mode & PRINT_CUSTOM_FONT) &&
+                             (runtime->ram[0x5605] & 2) ? home_x : 0;
+                int into_stop = (x - origin) % tab_width;
+                if (into_stop < 0)
+                    into_stop += tab_width;
+                x += tab_width - into_stop;
+            }
         } else if (ch == '\b') {
             x -= last_width;
         } else if (ch == '\r') {

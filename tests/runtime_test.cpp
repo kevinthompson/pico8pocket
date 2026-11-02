@@ -605,6 +605,13 @@ print("\^wa\b\0",0,0) eq(peek(0x5f26),0))"},
     {"default high width", R"(poke(0x5f5a,0x06) eq(print("\130",0,0),6) eq(print("a",0,0),4))"},
     {"zero nibbles are ignored", R"(poke(0x5f59,0x05) print("\na",0,0,7) px(0,6,7) eq(print("a",0,0),5))"},
     {"default offsets", R"(poke(0x5f5b,0x21) print("a",0,0,7) px(1,2,7) px(0,0,0))"},
+    {"tab reaches the next stop", R"(eq(print("a\tb",0,0),20) eq(print("\tb",0,0),20))"},
+    {"tab width in pixels", R"(eq(print("\^s4a\tb",0,0),12) eq(print("\^sga\tb",0,0),20))"},
+    {"default tab width", R"(poke(0x5f5a,0x30) eq(print("a\tb",0,0),16))"},
+    {"custom font tab width", R"(poke(0x5600,4) poke(0x5606,10) eq(print("\014a\tb",0,0),14)
+eq(print("a\tb",0,0),20))"},
+    {"tabs relative to home", R"(poke(0x5600,4) poke(0x5606,10) eq(print("\014a\tb",3,0),14)
+poke(0x5605,2) eq(print("\014a\tb",3,0),17))"},
     /* end of print cases */
 };
 
