@@ -1905,18 +1905,18 @@ static void write_ram_bytes(p8p_runtime_t *runtime, int address,
         cartdata_mark_dirty(runtime);
 }
 
+/* Invert and solid backgrounds paint a whole character cell, which starts
+ * one pixel up and left of the glyph when padded.  Other modes touch only the
+ * glyph's own pixels. */
 static void draw_glyph_rows(p8p_runtime_t *runtime, const uint8_t *rows,
                             int x, int y, uint8_t fg, uint8_t bg, int mode,
-                            int width, int height) {
-    int w_factor = 1, h_factor = 1;
-    int stripey = 0, inverted = 0, solid_bg = 0;
-    if (mode & PRINT_ON) {
-        if (mode & PRINT_WIDE) w_factor = 2;
-        if (mode & PRINT_TALL) h_factor = 2;
-        stripey = (mode & PRINT_STRIPEY) != 0;
-        inverted = (mode & PRINT_INVERTED) != 0;
-        solid_bg = (mode & PRINT_SOLID_BG) != 0;
-    }
+                            int width, int height, int cell_width,
+                            int cell_height, int padding) {
+    int w_factor = (mode & PRINT_WIDE) ? 2 : 1;
+    int h_factor = (mode & PRINT_TALL) ? 2 : 1;
+    int stripey = (mode & PRINT_STRIPEY) != 0;
+    int inverted = (mode & PRINT_INVERTED) != 0;
+    int solid_bg = (mode & PRINT_SOLID_BG) != 0;
     x -= runtime->camera_x;
     y -= runtime->camera_y;
     fg &= 15;
@@ -1928,27 +1928,32 @@ static void draw_glyph_rows(p8p_runtime_t *runtime, const uint8_t *rows,
         x >= runtime->clip_x0 && x + out_w <= runtime->clip_x1 &&
         y >= runtime->clip_y0 && y + out_h <= runtime->clip_y1) {
         /* Common case: plain glyph fully inside the clip rectangle. */
+        unsigned mask = (1u << width) - 1u;
         uint8_t *row_start = runtime->framebuffer + y * 128 + x;
         for (int row = 0; row < height; ++row, row_start += 128) {
-            unsigned bits = rows[row];
-            for (int column = 0; bits && column < width; ++column, bits >>= 1)
+            unsigned bits = rows[row] & mask;
+            for (uint8_t *pixel = row_start; bits; bits >>= 1, ++pixel)
                 if (bits & 1u)
-                    row_start[column] = fg;
+                    *pixel = fg;
         }
         runtime->screen_ram_dirty = 1;
         return;
     }
-    for (int dy = 0; dy < out_h; ++dy) {
-        int font_row = dy / h_factor;
-        if (font_row >= 8)
-            continue;
-        for (int dx = 0; dx < out_w; ++dx) {
-            int font_column = dx / w_factor;
-            if (font_column >= 8)
-                continue;
-            int on = (rows[font_row] >> font_column) & 1;
-            if (stripey && h_factor > 1 && (dy & 1)) on = 0;
-            if (stripey && w_factor > 1 && (dx & 1)) on = 0;
+    int left = 0, top = 0, right = out_w, bottom = out_h;
+    if (inverted || solid_bg) {
+        left = top = -padding;
+        if (cell_width > right) right = cell_width;
+        if (cell_height - padding > bottom) bottom = cell_height - padding;
+    }
+    for (int dy = top; dy < bottom; ++dy) {
+        for (int dx = left; dx < right; ++dx) {
+            int on = 0;
+            if (dx >= 0 && dy >= 0 && dx < out_w && dy < out_h &&
+                dx / w_factor < 8 && dy / h_factor < 8) {
+                on = (rows[dy / h_factor] >> (dx / w_factor)) & 1;
+                if (stripey && h_factor > 1 && (dy & 1)) on = 0;
+                if (stripey && w_factor > 1 && (dx & 1)) on = 0;
+            }
             int px = x + dx, py = y + dy;
             if (!in_clip(runtime, px, py) || (unsigned)px >= 128u ||
                 (unsigned)py >= 128u)
@@ -1968,38 +1973,21 @@ static void draw_glyph_rows(p8p_runtime_t *runtime, const uint8_t *rows,
 
 static void draw_glyph(p8p_runtime_t *runtime, uint8_t character, int x, int y,
                        uint8_t fg, uint8_t bg, int mode, int force_width,
-                       int force_height) {
+                       int force_height, int cell_width, int cell_height,
+                       int padding) {
+    if (character <= 0x0f)
+        return;
     int custom = (mode & PRINT_CUSTOM_FONT) != 0;
     const uint8_t *font = custom ? runtime->ram + 0x5600 : p8p_pico8_font;
-    int char_height = font[2];
-    if (character > 0x0f) {
-        int width_forced = force_width > -1 && force_width < 4;
-        int render_width = width_forced ?
-            (character < 0x80 ? force_width : force_width + 4) :
-            custom ? 8 : font[character < 0x80 ? 0 : 1];
-        int render_height = force_height > -1 && force_height < 5 ?
-            force_height : char_height;
-        int sx = x - runtime->camera_x, sy = y - runtime->camera_y;
-        if (!(mode & PRINT_ON) && render_width <= 8 && render_height <= 8 &&
-            sx >= runtime->clip_x0 && sx + render_width <= runtime->clip_x1 &&
-            sy >= runtime->clip_y0 && sy + render_height <= runtime->clip_y1) {
-            /* Plain glyph fully inside the clip rectangle. */
-            const uint8_t *rows = font + character * 8;
-            unsigned mask = (1u << render_width) - 1u;
-            uint8_t color = fg & 15;
-            uint8_t *row_start = runtime->framebuffer + sy * 128 + sx;
-            for (int row = 0; row < render_height; ++row, row_start += 128) {
-                unsigned bits = rows[row] & mask;
-                for (uint8_t *pixel = row_start; bits; bits >>= 1, ++pixel)
-                    if (bits & 1u)
-                        *pixel = color;
-            }
-            runtime->screen_ram_dirty = 1;
-            return;
-        }
-        draw_glyph_rows(runtime, font + character * 8, x, y, fg, bg, mode,
-                        render_width, render_height);
-    }
+    int width_forced = force_width > -1 && force_width < 4;
+    int render_width = width_forced ?
+        (character < 0x80 ? force_width : force_width + 4) :
+        custom ? 8 : font[character < 0x80 ? 0 : 1];
+    int render_height = force_height > -1 && force_height < 5 ?
+        force_height : font[2];
+    draw_glyph_rows(runtime, font + character * 8, x, y, fg, bg, mode,
+                    render_width, render_height, cell_width, cell_height,
+                    padding);
 }
 
 static void scroll_console(p8p_runtime_t *runtime, int rows) {
@@ -2050,6 +2038,7 @@ static int api_print(lua_State *lua) {
     int mode = runtime->ram[0x5f58];
     if (!(mode & PRINT_ON))
         mode = 0;
+    int padding = !(mode & PRINT_ON) || (mode & PRINT_PADDING);
     /* 0x5f59-0x5f5b nibbles override the font; zero means not set. */
     const uint8_t *attributes = runtime->ram + 0x5f59;
     int offset_x = attributes[2] & 15, offset_y = attributes[2] >> 4;
@@ -2076,9 +2065,10 @@ static int api_print(lua_State *lua) {
     const uint8_t *pal = runtime->draw_palette;
 #define PRINT_NEXT() (n + 1 < length ? text[++n] : (++n, (uint8_t)0))
 #define PRINT_BG() ((uint8_t)(bg_color < 0 ? 0 : pal[bg_color & 15]))
-#define PRINT_DRAW(character, glyph_x, glyph_y, color) \
+#define PRINT_DRAW(character, glyph_x, glyph_y, color, cell_width, cell_height) \
     draw_glyph(runtime, character, (glyph_x) + offset_x, (glyph_y) + offset_y, \
-               pal[(color) & 15], PRINT_BG(), mode, force_width, force_height)
+               pal[(color) & 15], PRINT_BG(), mode, force_width, force_height, \
+               cell_width, cell_height, padding)
 #define PRINT_SCALED_W(width) ((mode & PRINT_WIDE) ? (width) * 2 : (width))
 #define PRINT_LINE_H() ((mode & PRINT_TALL) ? char_height * 2 : char_height)
 #define PRINT_ADVANCE(character) \
@@ -2093,8 +2083,8 @@ static int api_print(lua_State *lua) {
             int times = print_param(PRINT_NEXT());
             uint8_t repeated = PRINT_NEXT();
             for (int i = 0; i < times; ++i) {
-                PRINT_DRAW(repeated, x, y, fg_color);
                 last_width = PRINT_ADVANCE(repeated);
+                PRINT_DRAW(repeated, x, y, fg_color, last_width, PRINT_LINE_H());
                 x += last_width;
             }
         } else if (ch == 2) {                 /* \# background */
@@ -2151,14 +2141,15 @@ static int api_print(lua_State *lua) {
             } else if (command == 'i') {
                 mode |= PRINT_ON | PRINT_INVERTED;
             } else if (command == 'b') {
-                mode |= PRINT_ON | PRINT_PADDING;
+                padding = 1;
             } else if (command == '#') {
                 mode |= PRINT_ON | PRINT_SOLID_BG;
             } else if (command == ':' || command == ';' ||
                        command == '.' || command == ',') {
                 /* One-off 8x8 glyph from hex (: ;) or raw bytes (. ,). */
                 uint8_t rows[8] = {0};
-                int glyph_height = force_height > 0 ? force_height : 8;
+                int glyph_padding = (command == ',' || command == ';') ?
+                                    padding : 0;
                 for (int i = 0; i < 8; ++i) {
                     if (command == ':' || command == ';') {
                         rows[i] = (uint8_t)print_hex(text, length, n + 1 + i * 2, 2);
@@ -2167,26 +2158,24 @@ static int api_print(lua_State *lua) {
                     }
                 }
                 n += (command == ':' || command == ';') ? 16 : 8;
-                draw_glyph_rows(runtime, rows, x, y, pal[fg_color], PRINT_BG(),
-                                mode, 8, glyph_height);
                 last_width = PRINT_SCALED_W(8);
+                int glyph_height = (mode & PRINT_TALL) ? 16 : 8;
+                draw_glyph_rows(runtime, rows, x, y, pal[fg_color], PRINT_BG(),
+                                mode, 8, 8, last_width,
+                                glyph_height + glyph_padding, glyph_padding);
                 x += last_width;
-                if (mode & PRINT_TALL)
-                    glyph_height *= 2;
                 if (glyph_height > line_height)
                     line_height = glyph_height;
             } else if (command == '-') {
                 uint8_t off = PRINT_NEXT();
-                if (mode) {
-                    if (off == 'w') mode &= ~PRINT_WIDE;
-                    else if (off == 't') mode &= ~PRINT_TALL;
-                    else if (off == '=') mode &= ~PRINT_STRIPEY;
-                    else if (off == 'p')
-                        mode &= ~(PRINT_WIDE | PRINT_TALL | PRINT_STRIPEY);
-                    else if (off == 'i') mode &= ~PRINT_INVERTED;
-                    else if (off == 'b') mode &= ~PRINT_PADDING;
-                    else if (off == '#') mode &= ~PRINT_SOLID_BG;
-                }
+                if (off == 'w') mode &= ~PRINT_WIDE;
+                else if (off == 't') mode &= ~PRINT_TALL;
+                else if (off == '=') mode &= ~PRINT_STRIPEY;
+                else if (off == 'p')
+                    mode &= ~(PRINT_WIDE | PRINT_TALL | PRINT_STRIPEY);
+                else if (off == 'i') mode &= ~PRINT_INVERTED;
+                else if (off == 'b') padding = 0;
+                else if (off == '#') mode &= ~PRINT_SOLID_BG;
             } else if (command == '!') {
                 /* Poke the rest of the string at a hex address. */
                 int address = print_hex(text, length, n + 1, 4);
@@ -2221,7 +2210,8 @@ static int api_print(lua_State *lua) {
             int offset = print_param(PRINT_NEXT());
             uint8_t decoration = PRINT_NEXT();
             PRINT_DRAW(decoration, prev_x + offset % 4 - 2,
-                       prev_y + offset / 4 - 8, fg_color);
+                       prev_y + offset / 4 - 8, fg_color,
+                       PRINT_ADVANCE(decoration), PRINT_LINE_H());
         } else if (ch == 12) {                /* \f foreground */
             fg_color = print_param(PRINT_NEXT()) & 15;
             runtime->draw_color = fg_color;
@@ -2259,12 +2249,6 @@ static int api_print(lua_State *lua) {
             }
             if (cell_height > line_height)
                 line_height = cell_height;
-            if ((mode & PRINT_SOLID_BG) && bg_color >= 0) {
-                int saved_color = runtime->draw_color;
-                for (int row = y - 1; row < y + line_height - 1; ++row)
-                    draw_hspan(runtime, x - 1, x + advance - 1, row, bg_color);
-                runtime->draw_color = saved_color;
-            }
             prev_x = x;
             prev_y = y;
             if (outline_color && outline_neighbours) {
@@ -2272,12 +2256,13 @@ static int api_print(lua_State *lua) {
                 static const int8_t oy[8] = {-1, -1, -1, 0, 0, 1, 1, 1};
                 for (int i = 0; i < 8; ++i)
                     if (outline_neighbours & (1 << i))
-                        PRINT_DRAW(ch, x + ox[i], y + oy[i], outline_color);
+                        PRINT_DRAW(ch, x + ox[i], y + oy[i], outline_color,
+                                   advance, line_height);
             }
             if (underline)
                 draw_hspan(runtime, x - 1, x + advance - 1, y + line_height,
                            fg_color);
-            PRINT_DRAW(ch, x, y, fg_color);
+            PRINT_DRAW(ch, x, y, fg_color, advance, line_height);
             int adjust = 0;
             if ((mode & PRINT_CUSTOM_FONT) && (runtime->ram[0x5605] & 1)) {
                 int nibble_index = ch - 16;
