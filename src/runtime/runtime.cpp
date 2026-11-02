@@ -1936,6 +1936,7 @@ static void draw_glyph_rows(p8p_runtime_t *runtime, const uint8_t *rows,
         top = -padding * h_factor;
         if (cell_width > right) right = cell_width;
         if (cell_height > bottom) bottom = cell_height;
+        if (inverted && right > 8 * w_factor) right = 8 * w_factor;
     }
     /* Backgrounds are ordinary spans, so the fill pattern applies to them. */
     if (solid_bg)
@@ -1983,25 +1984,6 @@ static void draw_glyph_rows(p8p_runtime_t *runtime, const uint8_t *rows,
             runtime->screen_ram_dirty = 1;
         }
     }
-}
-
-static void draw_glyph(p8p_runtime_t *runtime, uint8_t character, int x, int y,
-                       uint8_t fg, uint8_t bg, int mode, int force_width,
-                       int force_height, int cell_width, int cell_height,
-                       int padding) {
-    if (character <= 0x0f)
-        return;
-    int custom = (mode & PRINT_CUSTOM_FONT) != 0;
-    const uint8_t *font = custom ? runtime->ram + 0x5600 : p8p_pico8_font;
-    int width_forced = force_width > -1 && force_width < 4;
-    int render_width = width_forced ?
-        (character < 0x80 ? force_width : force_width + 4) :
-        custom ? 8 : font[character < 0x80 ? 0 : 1];
-    int render_height = force_height > -1 && force_height < 5 ?
-        force_height : font[2];
-    draw_glyph_rows(runtime, font + character * 8, x, y, fg, bg, mode,
-                    render_width, render_height, cell_width, cell_height,
-                    padding);
 }
 
 /* Exchanges the glyph's lit screen pixels with saved[] so an interior-free
@@ -2085,7 +2067,6 @@ static int api_print(lua_State *lua) {
     /* Unscaled metrics; wide and tall apply when they are used. */
     int char_width = 4, wide_char_width = 8, char_height = 6;
     int line_height = 0;
-    int force_width = -1, force_height = -1;
     int bg_color = -1;
     int fg_color = runtime->draw_color & 15;
     int terminated = 0;
@@ -2105,12 +2086,14 @@ static int api_print(lua_State *lua) {
         char_width = custom ? runtime->ram[0x5600] : 4;
         wide_char_width = custom ? runtime->ram[0x5601] : 8;
         char_height = custom ? runtime->ram[0x5602] : 6;
-        if (attributes[0] & 15)
-            force_width = char_width = attributes[0] & 15;
-        if (attributes[0] >> 4)
-            force_height = char_height = attributes[0] >> 4;
-        if (attributes[1] & 15)
-            wide_char_width = attributes[1] & 15;
+        if (!custom) {
+            if (attributes[0] & 15)
+                char_width = attributes[0] & 15;
+            if (attributes[0] >> 4)
+                char_height = attributes[0] >> 4;
+            if (attributes[1] & 15)
+                wide_char_width = attributes[1] & 15;
+        }
         offset_x = (attributes[2] & 15) + (custom ? (int8_t)runtime->ram[0x5603] : 0);
         offset_y = (attributes[2] >> 4) + (custom ? (int8_t)runtime->ram[0x5604] : 0);
         tab_width = attributes[1] >> 4 ? (attributes[1] >> 4) * 4 : 16;
@@ -2125,11 +2108,6 @@ static int api_print(lua_State *lua) {
 /* A parameter past the end still reads as 0, then ends the print like \0. */
 #define PRINT_NEXT() (n + 1 < length ? text[++n] : (++n, terminated = 1, (uint8_t)0))
 #define PRINT_BG() ((uint8_t)(bg_color < 0 ? 0 : bg_color & 15))
-#define PRINT_DRAW(character, glyph_x, glyph_y, color, draw_mode, cell_width, \
-                   cell_height) \
-    draw_glyph(runtime, character, (glyph_x) + offset_x, (glyph_y) + offset_y, \
-               pal[(color) & 15], PRINT_BG(), draw_mode, force_width, \
-               force_height, cell_width, cell_height, padding)
 #define PRINT_SCALED_W(width) \
     ((mode & (PRINT_WIDE | PRINT_PINBALL)) ? (width) * 2 : (width))
 #define PRINT_LINE_H() \
@@ -2174,21 +2152,30 @@ static int api_print(lua_State *lua) {
             line_height = cell_height;
         prev_x = x;
         prev_y = y;
+        /* Glyphs are cut to their own advance, up to the eight stored columns. */
+        const uint8_t *rows = one_off ? one_off : (mode & PRINT_CUSTOM_FONT ?
+            runtime->ram + 0x5600 : p8p_pico8_font) + character * 8;
+        int render_width = advance / PRINT_SCALED_W(1);
+        int render_height = char_height;
+        if (render_width > 8) render_width = 8;
+        if (render_width < 0) render_width = 0;
+        if (render_height > 8) render_height = 8;
         auto draw = [&](int glyph_x, int glyph_y, int color, int draw_mode) {
             if (one_off)
-                draw_glyph_rows(runtime, one_off, glyph_x, glyph_y,
-                                pal[color & 15], PRINT_BG(), draw_mode, 8, 8,
-                                advance, cell_height, glyph_padding);
-            else
-                PRINT_DRAW(character, glyph_x, glyph_y, color, draw_mode,
-                           advance, line_height);
+                draw_glyph_rows(runtime, one_off, glyph_x + offset_x,
+                                glyph_y + offset_y, pal[color & 15], PRINT_BG(),
+                                draw_mode, 8, 8, advance, cell_height,
+                                glyph_padding);
+            else if (character > 0x0f)
+                draw_glyph_rows(runtime, rows, glyph_x + offset_x,
+                                glyph_y + offset_y, pal[color & 15], PRINT_BG(),
+                                draw_mode, render_width, render_height, advance,
+                                line_height, padding);
         };
         int glyph_mode = mode, draw_y = y - raised;
         if (outline_neighbours) {
             static const int8_t ox[8] = {-1, 0, 1, -1, 1, -1, 0, 1};
             static const int8_t oy[8] = {-1, -1, -1, 0, 0, 1, 1, 1};
-            const uint8_t *rows = one_off ? one_off : (mode & PRINT_CUSTOM_FONT ?
-                runtime->ram + 0x5600 : p8p_pico8_font) + character * 8;
             uint8_t interior[256];
             /* The background goes first so it cannot cover the outline. */
             if (mode & PRINT_SOLID_BG) {
@@ -2275,11 +2262,11 @@ static int api_print(lua_State *lua) {
                     runtime->screen_ram_dirty = 1;
                     x = y = 0;
                 } else if (command == 'x') {
-                    force_width = char_width = value;
+                    char_width = value;
                     wide_char_width = value +
                         ((mode & PRINT_CUSTOM_FONT) ? 0 : 4);
                 } else if (command == 'y') {
-                    force_height = char_height = value;
+                    char_height = value;
                 }
             } else if (command == 'g') {
                 x = home_x;

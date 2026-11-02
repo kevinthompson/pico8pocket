@@ -698,6 +698,9 @@ local x,y=print() eq(x,nil))"},
 print("\^j",10,20) eq(peek(0x5f26),0) eq(peek(0x5f27),0))"},
     {"decoration starts from the last character", R"(local x,y=print("\v5z",-10,-20) eq(x,-1) eq(y,-7)
 print("\v5z",10,20,7) px(11,13,0))"},
+    {"glyphs are cut to their advance", R"(poke(0x5f5a,1) print("\130",10,0,7) px(11,1,0) px(10,1,7) poke(0x5f5a,0)
+poke(0x5600,8,8,8) poke(0x5600+97*8,0x80) poke(0x5605,1) poke(0x5608+40,0x70) print("\014a",20,0,7) px(27,0,0))"},
+    {"default attributes skip custom fonts", R"(poke(0x5f59,5) poke(0x5600,6,9,7) eq(print("\014ab",0,0),12) poke(0x5f59,0))"},
     /* end of print cases */
 };
 
