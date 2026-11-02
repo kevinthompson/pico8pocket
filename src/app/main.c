@@ -604,7 +604,8 @@ int main(int argc, char **argv) {
         if (menu_open && (running || runtime_failed) &&
             !menu_opened_this_frame) {
             enum p8p_menu_action action =
-                p8p_menu_update(menu, runtime, physical, physical_pressed);
+                p8p_menu_update(menu, runtime, physical, physical_pressed,
+                                buttons);
             present_framebuffer = p8p_menu_framebuffer(menu);
             present_palette = NULL;
             if (action == P8P_MENU_CLOSE) {
@@ -690,6 +691,12 @@ int main(int argc, char **argv) {
                 runtime_failed = 1;
                 snprintf(runtime_error, sizeof(runtime_error), "%s",
                          p8p_runtime_error(runtime));
+            } else if (menu && p8p_runtime_take_pause_request(runtime)) {
+                p8p_runtime_flush_cartdata(runtime);
+                menu_open = 1;
+                menu_opened_this_frame = 1;
+                p8p_platform_audio_set_paused(1);
+                p8p_menu_open_pause(menu, runtime, physical, buttons);
             }
             uint32_t runtime_us = p8p_platform_time_us() - runtime_start_us;
             if (diagnostics_visible) {

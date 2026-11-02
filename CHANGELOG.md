@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Start opens a PICO-8 pause menu with Continue, the cart's `menuitem` entries
+  and Reset Cart. It uses the cart's mapped buttons, honours `0x5f30`
+  suppression, and also opens from `extcmd("pause")`. Select still opens the
+  system menu.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps

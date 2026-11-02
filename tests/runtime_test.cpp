@@ -1443,22 +1443,34 @@ int main(void) {
             p8p_settings_defaults(&menu_settings);
             p8p_menu_t *menu = p8p_menu_create(&menu_settings, &menu_hash, "P8");
             CHECK(menu != NULL);
+            /* Pause menu: down to the cart row, X keeps it open only when the
+             * callback returns true; Start closes it. */
+            p8p_menu_open_pause(menu, runtime, 0, 0);
+            CHECK(p8p_menu_update(menu, runtime, 0, 0, P8P_BTN_DOWN) == P8P_MENU_NONE);
+            CHECK(p8p_menu_update(menu, runtime, 0, 0, 0) == P8P_MENU_NONE);
+            CHECK(p8p_menu_update(menu, runtime, 0, 0, P8P_BTN_X) == P8P_MENU_CLOSE);
+            p8p_menu_open_pause(menu, runtime, 0, 0);
+            CHECK(p8p_menu_update(menu, runtime, 0, 0, P8P_BTN_PAUSE) == P8P_MENU_CLOSE);
+            p8p_menu_open_pause(menu, runtime, 0, 0);
+            CHECK(p8p_menu_update(menu, runtime, 0, 0, P8P_BTN_UP) == P8P_MENU_NONE);
+            CHECK(p8p_menu_update(menu, runtime, 0, 0, 0) == P8P_MENU_NONE);
+            CHECK(p8p_menu_update(menu, runtime, 0, 0, P8P_BTN_O) == P8P_MENU_RESTART);
             p8p_menu_open(menu, runtime, 0, 1);
-            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN) == P8P_MENU_NONE);
-            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_RIGHT) == P8P_MENU_NONE);
-            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_A) == P8P_MENU_CLOSE);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN, 0) == P8P_MENU_NONE);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_RIGHT, 0) == P8P_MENU_NONE);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_A, 0) == P8P_MENU_CLOSE);
             CHECK(p8p_runtime_step(runtime, 0) == 0);
             CHECK(p8p_runtime_framebuffer(runtime)[0] == 1);
             CHECK(p8p_runtime_framebuffer(runtime)[1] == 7);
             /* Entry 4 raises an error: two rows below entry 1. */
             p8p_menu_open(menu, runtime, 0, 1);
             for (int i = 0; i < 3; ++i)
-                p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN);
-            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_A) == P8P_MENU_CART_ERROR);
+                p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN, 0);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_A, 0) == P8P_MENU_CART_ERROR);
             /* After a runtime error the cart entries are hidden. */
             p8p_menu_open(menu, runtime, 0, 0);
-            p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN);
-            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_A) == P8P_MENU_NONE);
+            p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN, 0);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_A, 0) == P8P_MENU_NONE);
             p8p_menu_destroy(menu);
             p8p_cart_destroy(&menu_cart);
             unlink("save:0");

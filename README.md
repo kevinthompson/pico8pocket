@@ -58,7 +58,7 @@ started and how you can help improve it.
   synchronizes PICO-8's packed screen RAM for memory APIs. This removes the
   packed read-modify-write from the common sprite/pixel path and maps the
   display palette during the existing 2× presentation pass.
-- Default controls are `B = O`, `A = X`, `Start = Pause`; `Y` and `X` are
+- Default controls are `B = O`, `A = X`, `Start = PICO-8 pause menu`; `Y` and `X` are
   alternate `O` and `X` buttons. The in-core menu has a global profile plus a
   content-hash-keyed override for each cartridge; D-pad, A/B/X/Y, L/R and Start
   can all be reassigned while Select remains reserved for the system UI.
