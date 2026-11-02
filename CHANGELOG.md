@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Double the summed `sfx`/`music` voice level to match a PICO-8 export, which
+  measured about 6 dB louder. `serial()` PCM keeps its level and the mix still
+  saturates rather than wraps, so loud four-channel passages can now clip.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps

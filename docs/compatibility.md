@@ -123,7 +123,11 @@ Implemented and covered by host tests:
   big-map memory, draw-state aliases and 8/16/32-bit memory APIs;
 - persistent `cartdata`, `dget` and `dset` records in Pocket save storage;
 - four-channel `sfx`/`music` playback (synthesized at 24 kHz, output at 48 kHz) with built-in waveforms, loops,
-  music patterns, fades and the standard note effects;
+  music patterns, fades and the standard note effects. One full-volume square
+  voice peaks at +/-16384, calibrated against a single PICO-8 v0.2.7 `.wav` export
+  of one cart's music (median peak per second within about 1%). The gain follows the
+  per-channel reverb and dampen stages, the mix saturates at 16 bits, and
+  `serial()` PCM stays at +/-8192 because no export has measured it;
 - Eris-based Lua state persistence together with RAM, renderer, input, RNG and
   audio state, compressed per cartridge with state previews;
 - offline `load("#id", breadcrumb, parameters)`, `stat(6)` parameters,

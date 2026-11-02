@@ -312,6 +312,85 @@ static void audio_chunk_boundaries(void) {
     }
 }
 
+/* A looping square at C-2 with the given volume and filter byte. */
+static void set_square_sfx(uint8_t *ram, int sfx, unsigned volume, uint8_t filters) {
+    uint8_t *data = ram + 0x3200 + sfx * 68;
+    for (unsigned note = 0; note < 32; ++note) {
+        data[note * 2] = 24 | (3 << 6);
+        data[note * 2 + 1] = (uint8_t)(volume << 1);
+    }
+    data[64] = filters;
+    data[65] = 1;
+    data[67] = 32;
+}
+
+static void render_voices(uint8_t *ram, int voices, const uint8_t *pcm, int pcm_count,
+                          int16_t *stereo, size_t frames) {
+    p8p_audio_t *audio = p8p_audio_create(ram);
+    CHECK(audio != NULL);
+    if (!audio)
+        return;
+    for (int channel = 0; channel < voices; ++channel)
+        p8p_audio_sfx(audio, channel, channel, 0, 32);
+    CHECK(p8p_audio_pcm_push(audio, pcm, pcm_count) == pcm_count);
+    p8p_audio_render(audio, stereo, frames);
+    p8p_audio_destroy(audio);
+}
+
+static void left_range(const int16_t *stereo, size_t frames, int *low, int *high) {
+    *low = *high = stereo[0];
+    for (size_t frame = 1; frame < frames; ++frame) {
+        if (stereo[frame * 2] < *low) *low = stereo[frame * 2];
+        if (stereo[frame * 2] > *high) *high = stereo[frame * 2];
+    }
+}
+
+static void audio_mix_level(void) {
+    enum { FRAMES = 4800, PCM_FRAMES = 200, REVERB_SHORT = 398 };
+    static uint8_t ram[0x10000];
+    static int16_t solo[FRAMES * 2], quad[FRAMES * 2], reverb[FRAMES * 2];
+    uint8_t pcm_low[64];
+    int low, high;
+    memset(pcm_low, 0, sizeof(pcm_low));
+    memset(ram, 0, sizeof(ram));
+    for (int sfx = 0; sfx < 4; ++sfx)
+        set_square_sfx(ram, sfx, 7, 0);
+
+    /* One full-volume square at the level of a PICO-8 export. */
+    render_voices(ram, 1, NULL, 0, solo, FRAMES);
+    left_range(solo, FRAMES, &low, &high);
+    CHECK(low == -16384 && high == 16384);
+
+    /* Four in phase saturate instead of wrapping. */
+    render_voices(ram, 4, NULL, 0, quad, FRAMES);
+    left_range(quad, FRAMES, &low, &high);
+    CHECK(low == -32768 && high == 32767);
+    for (size_t frame = 0; frame < FRAMES; ++frame)
+        CHECK((quad[frame * 2] > 0) == (solo[frame * 2] > 0));
+
+    /* The gain is for voices only: serial() PCM stays at +/-8192. */
+    render_voices(ram, 0, pcm_low, sizeof(pcm_low), solo, PCM_FRAMES);
+    left_range(solo, PCM_FRAMES, &low, &high);
+    CHECK(low == -8192 && high == -4096);  /* the first output is a midpoint */
+    render_voices(ram, 1, pcm_low, sizeof(pcm_low), solo, PCM_FRAMES);
+    left_range(solo, PCM_FRAMES, &low, &high);
+    CHECK(low == -24576 && high == 8192);
+
+    /* Reverb still feeds back at one half.  Odd frames are the synthesized
+     * samples; each output is the dry voice plus half of the output one
+     * delay earlier, within the rounding of the unscaled delay line. */
+    set_square_sfx(ram, 0, 3, 0);
+    render_voices(ram, 1, NULL, 0, solo, FRAMES);
+    set_square_sfx(ram, 0, 3, 24);
+    render_voices(ram, 1, NULL, 0, reverb, FRAMES);
+    for (size_t sample = REVERB_SHORT; sample < FRAMES / 2; ++sample) {
+        int wet = reverb[(sample * 2 + 1) * 2];
+        int dry = solo[(sample * 2 + 1) * 2];
+        int delayed = reverb[((sample - REVERB_SHORT) * 2 + 1) * 2];
+        CHECK(abs(wet - dry - delayed / 2) <= 2);
+    }
+}
+
 static void draw_palette_transitions(void) {
     struct PaletteCase {
         const char *name;
@@ -559,6 +638,7 @@ int main(void) {
     palette_fast_path_semantics();
     draw_palette_transitions();
     audio_chunk_boundaries();
+    audio_mix_level();
     static const uint8_t source[] =
         "pico-8 cartridge // http://www.pico-8.com\n"
         "version 42\n"
