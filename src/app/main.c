@@ -613,6 +613,11 @@ int main(int argc, char **argv) {
                                  (uint16_t)~suppress_buttons;
         if ((physical | physical_pressed) & P8P_PHYS_SELECT)
             game_physical &= (uint16_t)~P8P_PHYS_X;
+        /* Released and pressed again inside one slow frame: show this step
+         * the release, so the next one sees a new press and not a held one. */
+        game_physical &= (uint16_t)~(physical_input.released &
+                                     physical_input.pressed & physical &
+                                     previous_physical);
         buttons = p8p_controls_map(controls, game_physical);
 
         if (menu_open && (running || runtime_failed) &&

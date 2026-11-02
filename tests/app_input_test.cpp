@@ -118,9 +118,26 @@ int main(void) {
         return 1;
     }
 
+    /* Release and press again between two steps of a 74 ms frame, at every
+     * phase.  Each gap is visible only to a poll made during the frame. */
+    audio_cost_us = present_cost_us = 37000;
+    press_count = 24;
+    for (unsigned i = 0; i < press_count; i += 2) {
+        uint32_t first_us = 100000u + i * 311000u;
+        presses[i] = (press_t){first_us, first_us + 200000u};
+        presses[i + 1] = (press_t){first_us + 240000u, first_us + 400000u};
+    }
+    run_until_us = presses[press_count - 1].end_us + 400000u;
+    int repeats = count_presses(cart_path);
+    if (repeats != (int)press_count) {
+        fprintf(stderr, "FAIL quick re-press: %d of %u reached btnp\n",
+                repeats, press_count);
+        return 1;
+    }
+
     assert(unlink(cart_path) == 0);
     assert(chdir("/") == 0);
     assert(rmdir(temporary) == 0);
-    puts("PASS short taps survive slow frames");
+    puts("PASS short taps and quick re-presses survive slow frames");
     return 0;
 }
