@@ -2044,7 +2044,7 @@ static int api_print(lua_State *lua) {
 
     int home_x = x, home_y = y;
     int prev_x = x, prev_y = y;
-    int right_x = x;
+    int right_x = x, bottom_y = y;
     int tab_width = 16;
     /* Unscaled metrics; wide and tall apply when they are used. */
     int char_width = 4, wide_char_width = 8, char_height = 6;
@@ -2351,6 +2351,8 @@ static int api_print(lua_State *lua) {
         }
         if (x > right_x)
             right_x = x;
+        if (y > bottom_y)
+            bottom_y = y;
     }
     if (line_height <= 0)
         line_height = cancel_wrap ? 0 : PRINT_LINE_H();
@@ -2371,7 +2373,8 @@ static int api_print(lua_State *lua) {
     if (converted)
         lua_pop(lua, 1);
     push_int(lua, right_x);
-    return 1;
+    push_int(lua, runtime->cursor_y > bottom_y ? runtime->cursor_y : bottom_y);
+    return 2;
 }
 
 static int api_sfx(lua_State *lua) {

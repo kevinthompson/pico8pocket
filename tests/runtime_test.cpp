@@ -663,6 +663,8 @@ poke(0x5608+40,0x80) print("\014a",10,40,7) px(10,39,7) px(10,40,0))"},
 print("\a12 ab",0,0,7) eq(stat(46),12) px(0,0,7))"},
     {"audio skips note data", R"(print("\accc ab",0,0,7) eq(stat(46),-1) px(0,0,7))"},
     {"underline can be disabled", R"(print("\^ua\^-ub",0,0,7) px(1,6,7) px(5,6,0))"},
+    {"second return is the lowest y", R"(local x,y=print("ab\ncd",10,20) eq(y,32)
+x,y=print("\|0a",10,20) eq(y,20) x,y=print("abc\0",10,20) eq(y,20))"},
     /* end of print cases */
 };
 
