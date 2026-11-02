@@ -2253,8 +2253,11 @@ static int api_print(lua_State *lua) {
                 } else if (command == 'r') {
                     wrap_x = value * 4;
                 } else if (command == 'c') {
-                    memset(runtime->framebuffer, value & 15,
-                           sizeof(runtime->framebuffer));
+                    for (int row = runtime->clip_y0; row < runtime->clip_y1; ++row)
+                        memset(runtime->framebuffer + row * 128 +
+                               runtime->clip_x0, value & 15,
+                               (size_t)(runtime->clip_x1 > runtime->clip_x0 ?
+                                        runtime->clip_x1 - runtime->clip_x0 : 0));
                     runtime->screen_ram_dirty = 1;
                     x = y = 0;
                 } else if (command == 'x') {
