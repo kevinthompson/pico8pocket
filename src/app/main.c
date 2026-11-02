@@ -290,6 +290,20 @@ static void input_latch_take(input_latch_t *latch,
     latch->pending.released = 0;
 }
 
+/* Slow frames spend most of their time outside Lua, so keep sampling through
+ * the wait as well: a tap that fits inside the sleep must still be latched. */
+static void sleep_while_polling(input_latch_t *latch, uint32_t duration_us) {
+    uint32_t deadline_us = p8p_platform_time_us() + duration_us;
+    int32_t remaining_us;
+
+    while ((remaining_us = (int32_t)(deadline_us -
+                                     p8p_platform_time_us())) > 0) {
+        p8p_platform_sleep_us(remaining_us < 4000 ?
+                              (uint32_t)remaining_us : 4000u);
+        input_latch_poll(latch, 1);
+    }
+}
+
 static uint8_t status_color(const p8p_cart_info_t *cart) {
     if (!cart->valid)
         return 8;
@@ -822,6 +836,7 @@ int main(int argc, char **argv) {
             p8p_platform_audio_pump(runtime);
             average_audio_us = smooth_time(
                 average_audio_us, p8p_platform_time_us() - audio_start_us);
+            input_latch_poll(&input_latch, 0);
         }
         if (present_required) {
             uint32_t present_start_us = p8p_platform_time_us();
@@ -829,6 +844,7 @@ int main(int argc, char **argv) {
             average_present_us = smooth_time(
                 average_present_us,
                 p8p_platform_time_us() - present_start_us);
+            input_latch_poll(&input_latch, 0);
         }
 
         /*
@@ -843,7 +859,7 @@ int main(int argc, char **argv) {
         next_frame_us += frame_period_us;
         int32_t remaining_us = (int32_t)(next_frame_us - now_us);
         if (remaining_us > 0)
-            p8p_platform_sleep_us((uint32_t)remaining_us);
+            sleep_while_polling(&input_latch, (uint32_t)remaining_us);
         else if (remaining_us < -(int32_t)(frame_period_us * 4u))
             /* Keep a bounded amount of lateness so cheap update-only frames
              * can repay one expensive rendered frame.  Resetting the deadline
