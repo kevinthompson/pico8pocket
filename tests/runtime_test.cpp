@@ -630,8 +630,9 @@ px(11,20,7) px(13,24,7) px(13,25,7))"},
     {"invert without padding", R"(print("\^-b\^ix",30,20,7) px(29,20,0) px(30,19,0) px(31,20,7) px(30,25,7))"},
     {"solid background without a colour", R"(rectfill(0,40,40,60,5) print("\^#x",10,45,7)
 px(9,44,0) px(11,45,0) px(10,45,7))"},
-    {"background ignores fill pattern", R"(fillp(0x5a5a) print("\#8  ",20,90) fillp()
-px(21,90,8) px(22,90,8) px(22,91,8))"},
+    {"background follows the fill pattern", R"(fillp(0x5a5a) print("\#8  ",20,90) fillp()
+px(21,90,0) px(20,90,8) px(21,91,8))"},
+    {"one-off cell keeps eight rows", R"(print("\#8\^;ff00000000000000",10,60,7) px(12,67,8) px(12,68,0))"},
     {"high character cell", R"(print("\#8\130",20,50,7) px(19,49,8) px(27,55,8) px(28,50,0))"},
     {"one-off ignores padding and height", R"(print("\#8\^:ff00000000000000",10,60,7)
 px(10,60,7) px(9,60,0) px(10,59,0) px(17,67,8) px(18,60,0)

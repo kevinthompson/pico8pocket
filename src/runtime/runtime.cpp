@@ -1928,12 +1928,22 @@ static void draw_glyph_rows(p8p_runtime_t *runtime, const uint8_t *rows,
     int stripey = (mode & PRINT_STRIPEY) != 0;
     int inverted = (mode & PRINT_INVERTED) != 0;
     int solid_bg = (mode & PRINT_SOLID_BG) != 0;
+    int out_w = width * w_factor;
+    int out_h = height * h_factor;
+    int left = 0, top = 0, right = out_w, bottom = out_h;
+    if (inverted || solid_bg) {
+        left = -padding * w_factor;
+        top = -padding * h_factor;
+        if (cell_width > right) right = cell_width;
+        if (cell_height > bottom) bottom = cell_height;
+    }
+    /* Backgrounds are ordinary spans, so the fill pattern applies to them. */
+    if (solid_bg)
+        for (int row = top; row < bottom; ++row)
+            draw_hspan(runtime, x + left, x + right - 1, y + row, bg);
     x -= runtime->camera_x;
     y -= runtime->camera_y;
     fg &= 15;
-    bg &= 15;
-    int out_w = width * w_factor;
-    int out_h = height * h_factor;
     if (w_factor == 1 && h_factor == 1 && !inverted && !solid_bg &&
         width <= 8 && height <= 8 &&
         x >= runtime->clip_x0 && x + out_w <= runtime->clip_x1 &&
@@ -1949,13 +1959,6 @@ static void draw_glyph_rows(p8p_runtime_t *runtime, const uint8_t *rows,
         }
         runtime->screen_ram_dirty = 1;
         return;
-    }
-    int left = 0, top = 0, right = out_w, bottom = out_h;
-    if (inverted || solid_bg) {
-        left = -padding * w_factor;
-        top = -padding * h_factor;
-        if (cell_width > right) right = cell_width;
-        if (cell_height > bottom) bottom = cell_height;
     }
     for (int dy = top; dy < bottom; ++dy) {
         for (int dx = left; dx < right; ++dx) {
@@ -1974,12 +1977,9 @@ static void draw_glyph_rows(p8p_runtime_t *runtime, const uint8_t *rows,
                 continue;
             if (inverted)
                 on = !on;
-            if (on)
-                runtime->framebuffer[py * 128 + px] = fg;
-            else if (solid_bg)
-                runtime->framebuffer[py * 128 + px] = bg;
-            else
+            if (!on)
                 continue;
+            runtime->framebuffer[py * 128 + px] = fg;
             runtime->screen_ram_dirty = 1;
         }
     }
@@ -2120,7 +2120,7 @@ static int api_print(lua_State *lua) {
     int console_scroll = arguments < 3 && !(runtime->ram[0x5f36] & 0x40);
     const uint8_t *pal = runtime->draw_palette;
 #define PRINT_NEXT() (n + 1 < length ? text[++n] : (++n, (uint8_t)0))
-#define PRINT_BG() ((uint8_t)(bg_color < 0 ? 0 : pal[bg_color & 15]))
+#define PRINT_BG() ((uint8_t)(bg_color < 0 ? 0 : bg_color & 15))
 #define PRINT_DRAW(character, glyph_x, glyph_y, color, draw_mode, cell_width, \
                    cell_height) \
     draw_glyph(runtime, character, (glyph_x) + offset_x, (glyph_y) + offset_y, \
@@ -2174,8 +2174,7 @@ static int api_print(lua_State *lua) {
             if (one_off)
                 draw_glyph_rows(runtime, one_off, glyph_x, glyph_y,
                                 pal[color & 15], PRINT_BG(), draw_mode, 8, 8,
-                                advance, cell_height + glyph_padding,
-                                glyph_padding);
+                                advance, cell_height, glyph_padding);
             else
                 PRINT_DRAW(character, glyph_x, glyph_y, color, draw_mode,
                            advance, line_height);
