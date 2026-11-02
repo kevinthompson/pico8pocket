@@ -8,6 +8,7 @@
 #include "../src/runtime/runtime_internal.h"
 #include <lauxlib.h>
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -312,16 +313,21 @@ static void audio_chunk_boundaries(void) {
     }
 }
 
-/* A looping square at C-2 with the given volume and filter byte. */
-static void set_square_sfx(uint8_t *ram, int sfx, unsigned volume, uint8_t filters) {
+/* A looping waveform at one key with the given volume and filter byte. */
+static void set_wave_sfx(uint8_t *ram, int sfx, unsigned waveform, unsigned key,
+                         unsigned volume, uint8_t filters) {
     uint8_t *data = ram + 0x3200 + sfx * 68;
     for (unsigned note = 0; note < 32; ++note) {
-        data[note * 2] = 24 | (3 << 6);
-        data[note * 2 + 1] = (uint8_t)(volume << 1);
+        data[note * 2] = (uint8_t)(key | (waveform << 6));
+        data[note * 2 + 1] = (uint8_t)((volume << 1) | (waveform >> 2));
     }
     data[64] = filters;
     data[65] = 1;
     data[67] = 32;
+}
+
+static void set_square_sfx(uint8_t *ram, int sfx, unsigned volume, uint8_t filters) {
+    set_wave_sfx(ram, sfx, 3, 24, volume, filters);
 }
 
 static void render_voices(uint8_t *ram, int voices, const uint8_t *pcm, int pcm_count,
@@ -345,6 +351,13 @@ static void left_range(const int16_t *stereo, size_t frames, int *low, int *high
     }
 }
 
+static double left_rms(const int16_t *stereo, size_t first, size_t frames) {
+    double sum = 0;
+    for (size_t frame = first; frame < first + frames; ++frame)
+        sum += (double)stereo[frame * 2] * stereo[frame * 2];
+    return sqrt(sum / (double)frames);
+}
+
 static void audio_mix_level(void) {
     enum { FRAMES = 4800, PCM_FRAMES = 200, REVERB_SHORT = 398 };
     static uint8_t ram[0x10000];
@@ -356,17 +369,40 @@ static void audio_mix_level(void) {
     for (int sfx = 0; sfx < 4; ++sfx)
         set_square_sfx(ram, sfx, 7, 0);
 
-    /* One full-volume square at the level of a PICO-8 export. */
+    /* Full-volume peaks measured from PICO-8 0.2.7 output at C-2.  The saw is
+     * the square's 0.653/0.5, and the organ's lobes reach 1/3 of full scale. */
+    static const struct {
+        unsigned waveform;
+        int low, high;
+    } peaks[] = {
+        {0, -16120, 16120}, {1, -16120, 16120}, {2, -10530, 10530},
+        {3, -8060, 8060}, {4, -8060, 8060}, {5, -10750, 10750},
+    };
+    for (size_t index = 0; index < sizeof(peaks) / sizeof(peaks[0]); ++index) {
+        set_wave_sfx(ram, 0, peaks[index].waveform, 24, 7, 0);
+        render_voices(ram, 1, NULL, 0, solo, FRAMES);
+        left_range(solo, FRAMES, &low, &high);
+        CHECK(abs(low - peaks[index].low) < 200);
+        CHECK(abs(high - peaks[index].high) < 200);
+    }
+
+    /* Volume is linear in steps of 1/7. */
+    set_wave_sfx(ram, 0, 0, 24, 1, 0);
     render_voices(ram, 1, NULL, 0, solo, FRAMES);
     left_range(solo, FRAMES, &low, &high);
-    CHECK(low == -16384 && high == 16384);
+    CHECK(abs(high - 16120 / 7) < 40);
 
-    /* Four in phase saturate instead of wrapping. */
+    /* Four triangles in phase saturate instead of wrapping. */
+    for (int sfx = 0; sfx < 4; ++sfx)
+        set_wave_sfx(ram, sfx, 0, 24, 7, 0);
+    render_voices(ram, 1, NULL, 0, solo, FRAMES);
     render_voices(ram, 4, NULL, 0, quad, FRAMES);
     left_range(quad, FRAMES, &low, &high);
     CHECK(low == -32768 && high == 32767);
     for (size_t frame = 0; frame < FRAMES; ++frame)
         CHECK((quad[frame * 2] > 0) == (solo[frame * 2] > 0));
+    for (int sfx = 0; sfx < 4; ++sfx)
+        set_square_sfx(ram, sfx, 7, 0);
 
     /* The gain is for voices only: serial() PCM stays at +/-8192. */
     render_voices(ram, 0, pcm_low, sizeof(pcm_low), solo, PCM_FRAMES);
@@ -374,7 +410,7 @@ static void audio_mix_level(void) {
     CHECK(low == -8192 && high == -4096);  /* the first output is a midpoint */
     render_voices(ram, 1, pcm_low, sizeof(pcm_low), solo, PCM_FRAMES);
     left_range(solo, PCM_FRAMES, &low, &high);
-    CHECK(low == -24576 && high == 8192);
+    CHECK(low == -16256 && high == -64);
 
     /* Reverb still feeds back at one half.  Odd frames are the synthesized
      * samples; each output is the dry voice plus half of the output one

@@ -20,10 +20,12 @@
 #define P8P_SFX_BASE 0x3200u
 #define P8P_MUSIC_BASE 0x3100u
 #define P8P_SFX_BYTES 68u
-/* A full-volume square is +/-8192 through the effects; PICO-8's output is
- * twice that.  Applied to the summed voices rather than to each voice so the
- * 16-bit reverb lines keep their headroom and nothing clips before the mix. */
-#define P8P_VOICE_GAIN 2
+/* Waveforms run at 16384 to PICO-8's unit amplitude, so a triangle is +/-8192
+ * and a square +/-4096 through the effects.  PICO-8's output is 63/32 of that
+ * (a full-volume triangle peaks at about 16120).  Applied to the summed voices
+ * rather than to each voice so the 16-bit reverb lines keep their headroom and
+ * nothing clips before the mix. */
+#define P8P_VOICE_GAIN_Q5 63
 
 typedef struct p8p_audio_channel {
     int sfx;
@@ -331,21 +333,25 @@ static int32_t triangle(uint32_t phase) {
 
 /* Stateless waveforms 0-5 and 7 (noise needs per-voice state). */
 static inline int32_t basic_waveform(int waveform, uint32_t phase) {
-    int32_t sample;
+    int32_t sample, position;
     switch (waveform) {
     case 0: /* triangle */
         return triangle(phase);
-    case 1: /* tilted saw (integer approximation) */
-        sample = (int32_t)(phase >> 16) - 32768;
-        return sample < 24576 ? sample >> 2 : (32767 - sample) >> 1;
-    case 2: /* saw */
-        return (int16_t)(phase >> 16) >> 2;
+    case 1: /* tilted saw: up for 7/8 of the period, then back down */
+        position = (int32_t)(phase >> 16);
+        return position < 57344 ? ((position * 18725) >> 16) - 8192 :
+                                  8192 - (position - 57344) * 2;
+    case 2: /* saw, peak 0.3265 */
+        return ((int16_t)(phase >> 16) * 10699) >> 16;
     case 3: /* square */
-        return (phase & 0x80000000u) ? -8192 : 8192;
+        return (phase & 0x80000000u) ? -4096 : 4096;
     case 4: /* pulse */
-        return (phase < 0x51000000u) ? 8192 : -8192;
-    case 5: /* organ */
-        return (triangle(phase) + triangle(phase * 2u) / 2) * 2 / 3;
+        return (phase < 0x51000000u) ? 4096 : -4096;
+    case 5: /* organ: two triangle lobes, peaks 1/3 and 1/9, in units of 1/36 */
+        position = (int32_t)(phase >> 16);
+        sample = position < 32768 ? 196608 - abs(position * 24 - 393216) :
+                                    65536 - abs(position * 16 - 786432);
+        return (sample * 3641) >> 17;
     case 7: /* phaser */
         return (triangle(phase) + triangle(phase - phase / 110u)) / 2;
     default:
@@ -378,17 +384,17 @@ static int32_t buzz_waveform(int waveform, uint32_t phase, int odd_period) {
         float advance = t + (odd_period ? 1.f : 0.f);
         ret = t < 0.5f ? t : t - 1.f;
         ret = ret * 0.83f - (fabsf(advance - 1.0f) < 0.5f ? 0.085f : 0.0f);
-        return (int32_t)(0.653f * ret * 25090.f);
+        return (int32_t)(0.653f * ret * 16384.f);
     }
     case 3:
-        return t < 0.4f ? 8192 : -8192;
+        return t < 0.4f ? 4096 : -4096;
     case 4:
-        return t < 0.255f ? 8192 : -8192;
+        return t < 0.255f ? 4096 : -4096;
     case 5:
         ret = t < 0.5f ? 3.f - fabsf(24.f * t - 6.f) : 1.f - fabsf(16.f * t - 12.f);
         ret = t < 0.5f ? ret * 2.0f + 3.0f : ret;
         ret = (t < 0.5f && ret > -1.875f) ? ret * 0.2f - 1.0f : ret + 0.5f;
-        return (int32_t)(ret / 9.f * 24576.f);
+        return (int32_t)(ret / 9.f * 16384.f);
     case 7: {
         float t2 = fmodf(t * 109.f / 110.f + (odd_period ? 109.f / 110.f : 0.f), 1.f);
         ret = 2.f - fabsf(8.f * t - 4.f);
@@ -820,7 +826,7 @@ static int32_t synthesize(p8p_audio_t *audio) {
         mix += value;
         voice_step(audio, channel);
     }
-    mix *= P8P_VOICE_GAIN;
+    mix = (mix * P8P_VOICE_GAIN_Q5) >> 5;
     if (audio->pcm_count) {
         /* 8-bit unsigned PCM, held for each 5512.5 Hz sample period. */
         mix += ((int32_t)audio->pcm[audio->pcm_read] - 128) * 64;

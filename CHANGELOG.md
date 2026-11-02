@@ -2,9 +2,11 @@
 
 ## Unreleased
 
-- Double the summed `sfx`/`music` voice level to match a PICO-8 export, which
-  measured about 6 dB louder. `serial()` PCM keeps its level and the mix still
-  saturates rather than wraps, so loud four-channel passages can now clip.
+- `sfx`/`music` voices match PICO-8's level and shape for each waveform. The
+  triangle and tilted saw were half as loud as PICO-8 and the square, pulse
+  and saw were too loud relative to them. `serial()` PCM keeps its level and
+  the mix still saturates rather than wraps, so loud four-channel passages can
+  clip.
 
 ## 0.0.35 — 2026-10-21
 
