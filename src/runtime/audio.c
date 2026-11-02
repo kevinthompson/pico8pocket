@@ -282,6 +282,12 @@ static void start_music_pattern(p8p_audio_t *audio, int pattern) {
     for (int channel = 0; channel < 4; ++channel)
         if (audio->channels[channel].is_music)
             stop_channel(&audio->channels[channel]);
+    /* A pattern with all four channels disabled ends the music. */
+    if (pattern >= 0 && pattern <= 63) {
+        song = audio->ram + P8P_MUSIC_BASE + (unsigned)pattern * 4u;
+        if (song[0] & song[1] & song[2] & song[3] & 0x40)
+            pattern = -1;
+    }
     if (pattern < 0 || pattern > 63) {
         audio->music_pattern = -1;
         audio->music_samples_remaining = 0;

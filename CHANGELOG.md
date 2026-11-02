@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Music stops at a pattern whose four channels are all disabled, as in
+  PICO-8, instead of playing through it.
 - Music loops return to the loop-start pattern. They previously resumed one
   pattern after it, which could reach an empty pattern and play sfx 0 on all
   four channels.
