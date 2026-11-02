@@ -1948,9 +1948,10 @@ static void draw_glyph_rows(p8p_runtime_t *runtime, const uint8_t *rows,
     }
     int left = 0, top = 0, right = out_w, bottom = out_h;
     if (inverted || solid_bg) {
-        left = top = -padding;
+        left = -padding * w_factor;
+        top = -padding * h_factor;
         if (cell_width > right) right = cell_width;
-        if (cell_height - padding > bottom) bottom = cell_height - padding;
+        if (cell_height > bottom) bottom = cell_height;
     }
     for (int dy = top; dy < bottom; ++dy) {
         for (int dx = left; dx < right; ++dx) {

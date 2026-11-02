@@ -619,19 +619,19 @@ print("\^wa\b\0",0,0) eq(peek(0x5f26),0))"},
 eq(print("a\tb",0,0),20))"},
     {"tabs relative to home", R"(poke(0x5600,4) poke(0x5606,10) eq(print("\014a\tb",3,0),14)
 poke(0x5605,2) eq(print("\014a\tb",3,0),17))"},
-    {"background covers the padded cell", R"(print("\#8 ",10,20) px(9,19,8) px(13,24,8) px(13,25,0)
+    {"background covers the padded cell", R"(print("\#8 ",10,20) px(9,19,8) px(13,24,8) px(13,25,8)
 print("\^-b\#9 ",30,20) px(29,20,0) px(30,19,0) px(30,20,9) px(33,25,9) px(34,20,0))"},
     {"attribute padding", R"(poke(0x5f58,1) print("\#a ",50,20) px(49,20,0) px(53,25,10)
 poke(0x5f58,3) print("\#a ",60,20) px(59,19,10) poke(0x5f58,0))"},
     {"padding switches back on", R"(print("\^-b\^b\#8 ",10,20) px(9,19,8))"},
     {"invert fills the padded cell", R"(print("\^ix",10,20,7) px(9,19,7) px(10,20,0)
-px(11,20,7) px(13,24,7) px(13,25,0))"},
+px(11,20,7) px(13,24,7) px(13,25,7))"},
     {"invert without padding", R"(print("\^-b\^ix",30,20,7) px(29,20,0) px(30,19,0) px(31,20,7) px(30,25,7))"},
     {"solid background without a colour", R"(rectfill(0,40,40,60,5) print("\^#x",10,45,7)
 px(9,44,0) px(11,45,0) px(10,45,7))"},
     {"background ignores fill pattern", R"(fillp(0x5a5a) print("\#8  ",20,90) fillp()
 px(21,90,8) px(22,90,8) px(22,91,8))"},
-    {"high character cell", R"(print("\#8\130",20,50,7) px(19,49,8) px(27,54,8) px(28,50,0))"},
+    {"high character cell", R"(print("\#8\130",20,50,7) px(19,49,8) px(27,55,8) px(28,50,0))"},
     {"one-off ignores padding and height", R"(print("\#8\^:ff00000000000000",10,60,7)
 px(10,60,7) px(9,60,0) px(10,59,0) px(17,67,8) px(18,60,0)
 print("\^y3\^:0000000000000001",30,60,7) px(30,67,7))"},
@@ -679,6 +679,8 @@ print("ab\0",30,40) print("c") eq(peek(0x5f26),30) cursor(9,0) eq(peek(0x5f24),9
 local x,y=print("ab\^!4300x",0,0) eq(x,8) eq(y,0))"},
     {"stripes follow height when tall and wide", R"(print("\^w\^t\^=l",0,0,7) px(0,0,7) px(1,0,7) px(0,1,0))"},
     {"pinball is its own state", R"(eq(print("\^p\^-wa",0,0),8) print("\^p\^-=l",0,0,7) px(0,0,0) px(1,0,7) px(1,1,0))"},
+    {"padded cells scale and reach the last row", R"(print("\#8 ",10,20) px(13,25,8) px(14,25,0)
+print("\^w\#9 ",30,20) px(28,19,9) px(27,19,0) print("\^t\#a ",50,40) px(49,38,10) px(49,37,0))"},
     /* end of print cases */
 };
 
