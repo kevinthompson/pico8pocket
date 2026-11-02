@@ -2152,7 +2152,10 @@ static int api_print(lua_State *lua) {
         }
         int advance = one_off ? PRINT_SCALED_W(8) :
                       PRINT_ADVANCE(character) + PRINT_SCALED_W(adjust);
-        if (wrap_x > 0 && x + advance > wrap_x)
+        prev_x = x;
+        prev_y = y;
+        if (wrap_x >= 0 && !decorating &&
+            x + advance / PRINT_SCALED_W(1) > wrap_x)
             line_feed();
         int cell_height = one_off ? ((mode & (PRINT_TALL | PRINT_PINBALL)) ? 16 : 8) :
                           PRINT_LINE_H();
@@ -2163,8 +2166,6 @@ static int api_print(lua_State *lua) {
         }
         if (cell_height > line_height)
             line_height = cell_height;
-        prev_x = x;
-        prev_y = y;
         /* Glyphs are cut to their own advance, up to the eight stored columns. */
         const uint8_t *rows = one_off ? one_off : (mode & PRINT_CUSTOM_FONT ?
             runtime->ram + 0x5600 : p8p_pico8_font) + character * 8;
@@ -2308,6 +2309,8 @@ static int api_print(lua_State *lua) {
             } else if (command == ':' || command == ';' ||
                        command == '.' || command == ',') {
                 /* One-off 8x8 glyph from hex (: ;) or raw bytes (. ,). */
+                if (n + 1 >= length)
+                    break;
                 uint8_t rows[8] = {0};
                 int glyph_padding = (command == ',' || command == ';') ?
                                     padding : 0;
@@ -2319,6 +2322,10 @@ static int api_print(lua_State *lua) {
                     }
                 }
                 n += (command == ':' || command == ';') ? 16 : 8;
+                if ((command == '.' || command == ',') && n >= length) {
+                    terminated = 1;
+                    break;
+                }
                 emit(0, rows, glyph_padding);
             } else if (command == '-') {
                 uint8_t off = PRINT_NEXT();
@@ -2350,12 +2357,14 @@ static int api_print(lua_State *lua) {
                 n = data + (size_t)count - 1;
             } else if (command == 'o') {
                 /* $ takes the current colour; ! also skips the interior. */
-                uint8_t color = PRINT_NEXT();
+                uint8_t color = n + 1 < length ? text[++n] : 0;
                 outline_color = color == '$' || color == '!' ? fg_color :
                                 print_param(color);
                 outline_hollow = color == '!';
                 outline_neighbours = print_hex(text, length, n + 1, 2);
                 n += 2;
+                if (n == length)
+                    terminated = 1;
             } else if (command == 'u') {
                 underline = 1;
             }
@@ -2365,11 +2374,11 @@ static int api_print(lua_State *lua) {
             for (; n + 1 < length && text[n + 1] >= '0' && text[n + 1] <= '9';
                  ++n, ++digits)
                 sfx_index = sfx_index * 10 + text[n + 1] - '0';
-            if (digits && (n + 1 >= length || text[n + 1] == ' '))
+            if (digits && (n + 1 >= length || text[n + 1] <= ' '))
                 p8p_audio_sfx(runtime->audio, sfx_index, -1, 0, 0);
-            while (n + 1 < length && text[n + 1] != ' ')
+            while (n + 1 < length && text[n + 1] > ' ')
                 ++n;
-            if (n + 1 < length)
+            if (n + 1 < length && text[n + 1] == ' ')
                 ++n;
         } else if (ch == 11) {                /* \v decorate */
             /* The next character lands here, then the cursor comes back. */
@@ -2431,6 +2440,8 @@ static int api_print(lua_State *lua) {
         y -= 6;
     }
     /* \0 omits the newline that otherwise ends a print. */
+    if (runtime->ram[0x5f36] & 4)
+        terminated = 1;
     runtime->cursor_x = terminated ? x : home_x;
     runtime->cursor_y = terminated ? y : y + line_height;
     cursor_to_ram(runtime);

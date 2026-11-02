@@ -708,6 +708,12 @@ poke(0x5600,8,8,8) poke(0x5600+97*8,0x80) poke(0x5605,1) poke(0x5608+40,0x70) pr
     {"underline stops at eight rows", R"(poke(0x5600,8,8,12) print("\014\^ua",0,0,7) px(1,8,7) px(1,12,0))"},
     {"underline follows offsets and raised", R"(poke(0x5f5b,0x10) print("\^ua",0,0,7) px(1,7,7) poke(0x5f5b,0))"},
     {"invert stops at eight rows", R"(print("\^y9\^ia",10,10,7) px(12,17,7) px(12,18,0))"},
+    {"wrap uses the unscaled width and never scrolls", R"(eq(print("\^r0ab",10,0),14) poke(0x5f36,0x80) local x=print("\^waa",116,0) eq(x,132) poke(0x5f36,0)
+cursor(0,118) print("\^r3a\tb",7) eq(peek(0x5f27),122))"},
+    {"decoration uses the position before a wrap", R"(print("\^r3a\v5z",10,20,7) px(11,13,7))"},
+    {"audio stops at control characters", R"(eq(print("\a12\nab",0,0),8))"},
+    {"truncated one-off and outline", R"(eq(print("\^:",0,0),0) eq(peek(0x5f27),6) print("\^.\1",0,0) eq(peek(0x5f27),0) print("\^o",0,0) eq(peek(0x5f27),6) print("\^o8f",0,0) eq(peek(0x5f27),0))"},
+    {"flag 4 keeps the cursor on the line", R"(poke(0x5f36,4) print("ab",10,20) eq(peek(0x5f26),18) eq(peek(0x5f27),20) poke(0x5f36,0))"},
     /* end of print cases */
 };
 
