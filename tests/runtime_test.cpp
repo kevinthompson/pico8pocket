@@ -1114,6 +1114,8 @@ int main(void) {
                 "function _draw() cls()\n"
                 "sfx(2) sfx() if stat(47)==-1 then pset(0,0,7) end sfx(-1)\n"
                 "sfx(2) sfx(3,nil) if stat(46)==3 and stat(47)==-1 then pset(1,0,7) end sfx(-1)\n"
+                "sfx(64) if stat(46)==63 then pset(2,0,7) end sfx(-1)\n"
+                "sfx(-3) if stat(46)==0 then pset(3,0,7) end sfx(-1)\n"
                 "end\n";
             p8p_cart_t arguments_cart = {};
             CHECK(p8p_cart_load_text_memory((const uint8_t *)arguments_source,
@@ -1122,7 +1124,7 @@ int main(void) {
             CHECK(p8p_runtime_load(runtime, &arguments_cart) == 0);
             CHECK(p8p_runtime_step(runtime, 0) == 0);
             const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
-            for (int x = 0; x < 2; ++x)
+            for (int x = 0; x < 4; ++x)
                 CHECK(pixels[x] == 7);
             p8p_cart_destroy(&arguments_cart);
         }

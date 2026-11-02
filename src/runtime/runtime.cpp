@@ -2291,8 +2291,12 @@ static int api_sfx(lua_State *lua) {
     /* A nil index is sfx 0, but sfx() with no arguments does nothing. */
     if (arg_count(lua) == 0)
         return 0;
-    int channel = p8p_audio_sfx(active_runtime->audio,
-                                arg_int(lua, 1, 0),
+    int index = arg_int(lua, 1, 0);
+    if (index > 63)
+        index = 63;
+    else if (index < -2)
+        index = 0;
+    int channel = p8p_audio_sfx(active_runtime->audio, index,
                                 /* Only a missing channel means any channel. */
                                 arg_count(lua) < 2 ? -1 : arg_int(lua, 2, 0),
                                 arg_int(lua, 3, 0), arg_int(lua, 4, 0));
