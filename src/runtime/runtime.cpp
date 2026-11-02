@@ -1576,7 +1576,7 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
     } else {
         int from = arg_int(lua, 1, 0) & 15;
         int screen = arg_int(lua, 3, 0) == 1;
-        int to = arg_int(lua, 2, from) & (screen ? 0x8f : 15);
+        int to = arg_int(lua, 2, 0) & (screen ? 0x8f : 15);
         int previous = screen ? runtime->screen_palette[from]
                               : runtime->draw_palette[from];
         if (previous != to) {
