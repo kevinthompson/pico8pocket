@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `sfx(nil)` plays sfx 0, matching Fake-08. It previously acted as `sfx(-1)` and
+  stopped every playing sound effect.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps

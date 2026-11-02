@@ -1106,6 +1106,8 @@ int main(void) {
 
         {
             int plain = audio_crossings_for(runtime, "sfx(2)");
+            /* A nil index means sfx 0, not the stop command sfx(-1). */
+            CHECK(audio_crossings_for(runtime, "sfx(2) sfx(nil)") > 0);
             uint32_t plain_hash = last_audio_hash;
             int custom = audio_crossings_for(runtime, "sfx(1)");
             int octave = audio_crossings_for(runtime, "sfx(4)");
