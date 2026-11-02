@@ -1281,6 +1281,32 @@ int main(void) {
         }
 
         {
+            /* palt() returns the previous state, as in PICO-8 0.2.7: a boolean
+             * for one colour, and otherwise the old bitfield. */
+            static const char source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _draw() cls() palt()\n"
+                "a=palt(5,true) b=palt(5,false)\n"
+                "if a==false and b==true then pset(0,0,7) end\n"
+                "palt(0,false) palt(5,true)\n"
+                "if palt(0x1234)==1024 then pset(1,0,7) end\n"
+                "palt(0,false) palt(5,true)\n"
+                "if palt()==5684 then pset(2,0,7) end\n"
+                "palt(0xffff)\n"
+                "if palt()==-1 then pset(3,0,7) end\n"
+                "palt() end\n";
+            p8p_cart_t cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                            sizeof(source) - 1, &cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            for (int x = 0; x < 4; ++x)
+                CHECK(pixels[x] == 7);
+            p8p_cart_destroy(&cart);
+        }
+
+        {
             /* An explicit nil colour maps to 0, as in PICO-8 0.2.7. */
             static const char source[] =
                 "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"

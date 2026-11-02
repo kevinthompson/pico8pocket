@@ -1593,12 +1593,23 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
     return 0;
 }
 
+static int transparency_bits(const p8p_runtime_t *runtime) {
+    int bits = 0;
+    for (int color = 0; color < 16; ++color)
+        bits |= (runtime->transparent[color] ? 1 : 0) << (15 - color);
+    return (int16_t)bits;
+}
+
 static int api_palt(lua_State *lua) {
     profile_api(P8P_API_DRAW_STATE);
     p8p_runtime_t *runtime = active_runtime;
-    if (arg_count(lua) == 0) {
-        reset_transparency(runtime);
-    } else if (arg_count(lua) == 1) {
+    int arguments = arg_count(lua);
+    if (arguments < 2) {
+        push_int(lua, transparency_bits(runtime));
+        if (arguments == 0) {
+            reset_transparency(runtime);
+            return 1;
+        }
         /* palt(bitfield): bit 15-i makes colour i transparent. */
         int bits = arg_int(lua, 1, 0) & 0xffff;
         for (int color = 0; color < 16; ++color) {
@@ -1608,18 +1619,18 @@ static int api_palt(lua_State *lua) {
                 (runtime->transparent[color] ? 0x10 : 0));
         }
         runtime->transparency_default = bits == 0x8000;
-    } else {
-        int color = arg_int(lua, 1, 0) & 15;
-        uint8_t transparent =
-            (uint8_t)(arg_count(lua) < 2 || lua_toboolean(lua, 2));
-        if (runtime->transparent[color] != transparent) {
-            runtime->transparent[color] = transparent;
-            runtime->transparency_default = 0;
-            runtime->ram[0x5f00 + color] = (uint8_t)(
-                runtime->draw_palette[color] | (transparent ? 0x10 : 0));
-        }
+        return 1;
     }
-    return 0;
+    int color = arg_int(lua, 1, 0) & 15;
+    uint8_t transparent = (uint8_t)lua_toboolean(lua, 2);
+    lua_pushboolean(lua, runtime->transparent[color]);
+    if (runtime->transparent[color] != transparent) {
+        runtime->transparent[color] = transparent;
+        runtime->transparency_default = 0;
+        runtime->ram[0x5f00 + color] = (uint8_t)(
+            runtime->draw_palette[color] | (transparent ? 0x10 : 0));
+    }
+    return 1;
 }
 
 static int api_btn(lua_State *lua) {
