@@ -1433,7 +1433,7 @@ int main(void) {
         }
 
         {
-            /* menuitem(): slots 1-5, removal, the button filter in bits 8-15,
+            /* menuitem(): slots 1-5, removal, an ignored button in bits 8-15,
              * O/X closing unless the callback returns true, and errors. */
             static const char menu_source[] =
                 "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
@@ -1471,6 +1471,41 @@ int main(void) {
             CHECK(p8p_runtime_framebuffer(runtime)[1] == 0);
             CHECK(p8p_runtime_menu_select(runtime, 4, 112) == -1);
             CHECK(strstr(p8p_runtime_error(runtime), "boom") != NULL);
+
+            {
+                /* Bits 8-15 name buttons to ignore: they are masked out of the
+                 * value, and nothing happens when no button remains. */
+                static const char filter_source[] =
+                    "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                    "last=0\n"
+                    "function _init() local f=function(b) last=b end\n"
+                    "menuitem(1|0x300,\"a\",f) menuitem(2|0x3000,\"b\",f)\n"
+                    "menuitem(3|0x7f00,\"c\",f) end\n"
+                    "function _draw() cls() pset(0,0,last&15) pset(1,0,last>>4) end\n";
+                p8p_cart_t filter_cart = {};
+                CHECK(p8p_cart_load_text_memory(
+                          (const uint8_t *)filter_source,
+                          sizeof(filter_source) - 1, &filter_cart) == 0);
+                CHECK(p8p_runtime_load(runtime, &filter_cart) == 0);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                CHECK(p8p_runtime_menu_select(runtime, 1, 1) == 1);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                CHECK(p8p_runtime_framebuffer(runtime)[0] == 0);
+                CHECK(p8p_runtime_menu_select(runtime, 1, 112) == 0);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                CHECK(p8p_runtime_framebuffer(runtime)[1] == 7);
+                CHECK(p8p_runtime_menu_select(runtime, 2, 112) == 0);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                CHECK(p8p_runtime_framebuffer(runtime)[1] == 4);
+                CHECK(p8p_runtime_menu_select(runtime, 2, 1) == 1);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                CHECK(p8p_runtime_framebuffer(runtime)[0] == 1);
+                CHECK(p8p_runtime_menu_select(runtime, 3, 2) == 1);
+                CHECK(p8p_runtime_menu_select(runtime, 3, 112) == 1);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                CHECK(p8p_runtime_framebuffer(runtime)[0] == 1);
+                p8p_cart_destroy(&filter_cart);
+            }
 
             /* The system menu lists cart entries after RESUME: right on
              * entry 1 keeps the menu open, A on it closes the menu. */

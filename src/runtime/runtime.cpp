@@ -3772,14 +3772,15 @@ extern "C" int p8p_runtime_menu_select(p8p_runtime_t *runtime, int slot,
                                         int buttons) {
     /* O/X select (PICO-8 passes 16|32|64 for them) and close the menu unless
      * the callback returns true; left/right only notify the callback. */
-    int choose = (buttons & 0x70) != 0;
-    int filter;
+    int choose = (buttons & 3) == 0;
     int keep_open;
     if (!p8p_runtime_menu_item(runtime, slot) || runtime->menu_ref == LUA_NOREF)
         return choose ? 0 : 1;
-    filter = runtime->menu_filters[slot - 1];
-    if (filter && !(filter & buttons))
-        return choose ? 0 : 1;
+    /* Bits 8-15 of the menuitem index name buttons to ignore. The callback
+     * gets what is left, and without any button left the press does nothing. */
+    buttons &= ~runtime->menu_filters[slot - 1];
+    if (!buttons)
+        return 1;
     active_runtime = runtime;
     lua_rawgeti(runtime->lua, LUA_REGISTRYINDEX, runtime->menu_ref);
     lua_rawgeti(runtime->lua, -1, slot);
