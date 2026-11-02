@@ -2050,11 +2050,22 @@ static int api_print(lua_State *lua) {
     int mode = runtime->ram[0x5f58];
     if (!(mode & PRINT_ON))
         mode = 0;
-    if (mode & PRINT_CUSTOM_FONT) {
-        char_width = runtime->ram[0x5600];
-        wide_char_width = runtime->ram[0x5601];
-        char_height = runtime->ram[0x5602];
-    }
+    /* 0x5f59-0x5f5b nibbles override the font; zero means not set. */
+    const uint8_t *attributes = runtime->ram + 0x5f59;
+    int offset_x = attributes[2] & 15, offset_y = attributes[2] >> 4;
+    auto select_font = [&]() {
+        int custom = (mode & PRINT_CUSTOM_FONT) != 0;
+        char_width = custom ? runtime->ram[0x5600] : 4;
+        wide_char_width = custom ? runtime->ram[0x5601] : 8;
+        char_height = custom ? runtime->ram[0x5602] : 6;
+        if (attributes[0] & 15)
+            force_width = char_width = attributes[0] & 15;
+        if (attributes[0] >> 4)
+            force_height = char_height = attributes[0] >> 4;
+        if (attributes[1] & 15)
+            wide_char_width = attributes[1] & 15;
+    };
+    select_font();
     /* Only a console print without coordinates scrolls; \0 suppresses it. */
     int last_width = (mode & PRINT_WIDE) ? char_width * 2 : char_width;
     int console_scroll = arguments < 3 && !(runtime->ram[0x5f36] & 0x40) &&
@@ -2062,6 +2073,9 @@ static int api_print(lua_State *lua) {
     const uint8_t *pal = runtime->draw_palette;
 #define PRINT_NEXT() (n + 1 < length ? text[++n] : (++n, (uint8_t)0))
 #define PRINT_BG() ((uint8_t)(bg_color < 0 ? 0 : pal[bg_color & 15]))
+#define PRINT_DRAW(character, glyph_x, glyph_y, color) \
+    draw_glyph(runtime, character, (glyph_x) + offset_x, (glyph_y) + offset_y, \
+               pal[(color) & 15], PRINT_BG(), mode, force_width, force_height)
 #define PRINT_SCALED_W(width) ((mode & PRINT_WIDE) ? (width) * 2 : (width))
 #define PRINT_LINE_H() ((mode & PRINT_TALL) ? char_height * 2 : char_height)
 #define PRINT_ADVANCE(character) \
@@ -2076,8 +2090,7 @@ static int api_print(lua_State *lua) {
             int times = print_param(PRINT_NEXT());
             uint8_t repeated = PRINT_NEXT();
             for (int i = 0; i < times; ++i) {
-                draw_glyph(runtime, repeated, x, y, pal[fg_color], PRINT_BG(),
-                           mode, force_width, force_height);
+                PRINT_DRAW(repeated, x, y, fg_color);
                 last_width = PRINT_ADVANCE(repeated);
                 x += last_width;
             }
@@ -2204,23 +2217,18 @@ static int api_print(lua_State *lua) {
         } else if (ch == 11) {                /* \v decorate */
             int offset = print_param(PRINT_NEXT());
             uint8_t decoration = PRINT_NEXT();
-            draw_glyph(runtime, decoration, prev_x + offset % 4 - 2,
-                       prev_y + offset / 4 - 8, pal[fg_color], PRINT_BG(),
-                       mode, force_width, force_height);
+            PRINT_DRAW(decoration, prev_x + offset % 4 - 2,
+                       prev_y + offset / 4 - 8, fg_color);
         } else if (ch == 12) {                /* \f foreground */
             fg_color = print_param(PRINT_NEXT()) & 15;
             runtime->draw_color = fg_color;
             runtime->ram[0x5f25] = (uint8_t)fg_color;
         } else if (ch == 14) {                /* custom font on */
             mode |= PRINT_CUSTOM_FONT;
-            char_width = runtime->ram[0x5600];
-            wide_char_width = runtime->ram[0x5601];
-            char_height = runtime->ram[0x5602];
+            select_font();
         } else if (ch == 15) {                /* custom font off */
             mode &= ~PRINT_CUSTOM_FONT;
-            char_width = 4;
-            wide_char_width = 8;
-            char_height = 6;
+            select_font();
         } else if (ch == '\n') {
             x = home_x;
             y += line_height > 0 ? line_height : PRINT_LINE_H();
@@ -2257,15 +2265,12 @@ static int api_print(lua_State *lua) {
                 static const int8_t oy[8] = {-1, -1, -1, 0, 0, 1, 1, 1};
                 for (int i = 0; i < 8; ++i)
                     if (outline_neighbours & (1 << i))
-                        draw_glyph(runtime, ch, x + ox[i], y + oy[i],
-                                   pal[outline_color & 15], PRINT_BG(), mode,
-                                   force_width, force_height);
+                        PRINT_DRAW(ch, x + ox[i], y + oy[i], outline_color);
             }
             if (underline)
                 draw_hspan(runtime, x - 1, x + advance - 1, y + line_height,
                            fg_color);
-            draw_glyph(runtime, ch, x, y, pal[fg_color], PRINT_BG(), mode,
-                       force_width, force_height);
+            PRINT_DRAW(ch, x, y, fg_color);
             int adjust = 0;
             if ((mode & PRINT_CUSTOM_FONT) && (runtime->ram[0x5605] & 1)) {
                 int nibble_index = ch - 16;
@@ -2292,6 +2297,7 @@ static int api_print(lua_State *lua) {
         line_height = cancel_wrap ? 0 : PRINT_LINE_H();
 #undef PRINT_NEXT
 #undef PRINT_BG
+#undef PRINT_DRAW
 #undef PRINT_SCALED_W
 #undef PRINT_LINE_H
 #undef PRINT_ADVANCE

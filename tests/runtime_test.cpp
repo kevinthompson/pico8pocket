@@ -601,6 +601,10 @@ poke(0x5f58,9) print("a",0,0) eq(peek(0x5f27),12) poke(0x5f58,0))"},
     {"backspace undoes last width", R"(print("\130\b\0",0,0) eq(peek(0x5f26),0)
 print("\^wa\b\0",0,0) eq(peek(0x5f26),0))"},
     {"blank print uses character height", R"(print("\^y8",0,0) eq(peek(0x5f27),8))"},
+    {"default width and height", R"(poke(0x5f59,0x85) eq(print("ab",0,0),10) eq(peek(0x5f27),8))"},
+    {"default high width", R"(poke(0x5f5a,0x06) eq(print("\130",0,0),6) eq(print("a",0,0),4))"},
+    {"zero nibbles are ignored", R"(poke(0x5f59,0x05) print("\na",0,0,7) px(0,6,7) eq(print("a",0,0),5))"},
+    {"default offsets", R"(poke(0x5f5b,0x21) print("a",0,0,7) px(1,2,7) px(0,0,0))"},
     /* end of print cases */
 };
 
