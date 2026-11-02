@@ -509,53 +509,124 @@ static void cartdata_hash(const char *id, p8p_cart_hash_t *hash) {
     write_u64(hash->bytes + 8, b);
 }
 
+/* Cartdata is saved while a cart plays, and the store lives in memory the CPU
+ * reads and writes word by word with interrupts off, so moving all 256 KB
+ * stops audio and input for longer than the audio queue lasts.  A stored
+ * (uncompressed) zlib stream has one size whatever the values are, which lets
+ * a later save replace the record where it stands. */
+#define CARTDATA_SIZE 0x100u
+#define CARTDATA_STREAM_SIZE (2u + 5u + CARTDATA_SIZE + 4u)
+#define CARTDATA_RECORD_SIZE (RECORD_HEADER_SIZE + CARTDATA_STREAM_SIZE)
+
+static void write_cartdata_record(uint8_t *record, const p8p_cart_hash_t *hash,
+                                  const uint8_t *data, uint64_t sequence) {
+    static const uint8_t stream_prefix[7] = {
+        0x78, 0x01,  /* zlib header */
+        0x01, 0x00, 0x01, 0xff, 0xfe  /* final stored block, 256 bytes */
+    };
+    uint8_t *stream = record + RECORD_HEADER_SIZE;
+    uint8_t *trailer = stream + sizeof(stream_prefix) + CARTDATA_SIZE;
+    uint32_t adler = (uint32_t)mz_adler32(MZ_ADLER32_INIT, data, CARTDATA_SIZE);
+
+    memset(record, 0, RECORD_HEADER_SIZE);
+    write_u32(record, RECORD_MAGIC);
+    write_u32(record + 4, CARTDATA_RECORD_SIZE);
+    write_u32(record + 8, CARTDATA_SIZE);
+    write_u32(record + 12, CARTDATA_STREAM_SIZE);
+    write_u32(record + 16, (uint32_t)mz_crc32(0, data, CARTDATA_SIZE));
+    write_u64(record + 20, sequence);
+    memcpy(record + 32, hash->bytes, sizeof(hash->bytes));
+    write_u32(record + 52, RECORD_TYPE_CARTDATA);
+    memcpy(stream, stream_prefix, sizeof(stream_prefix));
+    memcpy(stream + sizeof(stream_prefix), data, CARTDATA_SIZE);
+    trailer[0] = (uint8_t)(adler >> 24);
+    trailer[1] = (uint8_t)(adler >> 16);
+    trailer[2] = (uint8_t)(adler >> 8);
+    trailer[3] = (uint8_t)adler;
+}
+
+/* Walks the record headers on disk.  Returns 0 once the record is replaced;
+ * anything else leaves the save to the full rewrite below. */
+static int replace_cartdata_record(const char *path,
+                                   const p8p_cart_hash_t *hash,
+                                   const uint8_t *data) {
+    uint8_t store_header[STORE_HEADER_SIZE];
+    uint8_t record[CARTDATA_RECORD_SIZE];
+    uint8_t sequence_bytes[8];
+    uint64_t sequence;
+    uint32_t used;
+    uint32_t offset = STORE_DATA_OFFSET;
+    int result = -1;
+    FILE *file = fopen(path, "r+b");
+
+    if (!file)
+        return -1;
+    setvbuf(file, NULL, _IONBF, 0);
+    if (fread(store_header, 1, sizeof(store_header), file) !=
+            sizeof(store_header) || !valid_store_header(store_header))
+        goto done;
+    used = read_u32(store_header + 12);
+    while (offset < used) {
+        uint32_t size;
+        if (!header_fits(offset, used) ||
+            fseek(file, (long)offset, SEEK_SET) != 0 ||
+            fread(record, 1, RECORD_HEADER_SIZE, file) != RECORD_HEADER_SIZE ||
+            !valid_record_header(record, offset, used, &size))
+            goto done;
+        if (read_u32(record + 52) == RECORD_TYPE_CARTDATA &&
+            memcmp(record + 32, hash->bytes, sizeof(hash->bytes)) == 0) {
+            if (size != CARTDATA_RECORD_SIZE)
+                goto done;
+            sequence = read_u64(store_header + 16);
+            if (!sequence) sequence = 1;
+            write_cartdata_record(record, hash, data, sequence);
+            write_u64(sequence_bytes, sequence + 1);
+            if (fseek(file, (long)offset, SEEK_SET) == 0 &&
+                fwrite(record, 1, sizeof(record), file) == sizeof(record) &&
+                fseek(file, 16, SEEK_SET) == 0 &&
+                fwrite(sequence_bytes, 1, sizeof(sequence_bytes), file) ==
+                    sizeof(sequence_bytes))
+                result = 0;
+            goto done;
+        }
+        offset += size;
+    }
+done:
+    if (fclose(file) != 0)
+        result = -1;
+    return result;
+}
+
 int p8p_cartdata_save_file(const char *path, const char *id,
                            const uint8_t *data, size_t size) {
     uint8_t *store = NULL;
     p8p_cart_hash_t hash;
-    mz_ulong compressed_size;
     uint32_t offset;
     uint32_t old_size;
     uint32_t used;
-    uint32_t record_size;
     uint64_t sequence;
     int result;
-    if (!path || !id || !*id || strlen(id) > 64 || !data || size != 0x100)
+    if (!path || !id || !*id || strlen(id) > 64 || !data ||
+        size != CARTDATA_SIZE)
         return -1;
+    cartdata_hash(id, &hash);
+    if (replace_cartdata_record(path, &hash, data) == 0)
+        return 0;
     if (load_store(path, &store) != 0)
         return -2;
-    cartdata_hash(id, &hash);
     if (find_record(store, &hash, RECORD_TYPE_CARTDATA, &offset, &old_size))
         remove_record(store, offset, old_size);
-    compressed_size = mz_compressBound(size);
-    record_size = RECORD_HEADER_SIZE + (uint32_t)compressed_size;
-    while (read_u32(store + 12) > STORE_CAPACITY - record_size) {
+    while (read_u32(store + 12) > STORE_CAPACITY - CARTDATA_RECORD_SIZE) {
         if (evict_oldest(store) != 0) {
             free(store);
             return -3;
         }
     }
     used = read_u32(store + 12);
-    if (mz_compress2(store + used + RECORD_HEADER_SIZE, &compressed_size,
-                     data, size, MZ_BEST_SPEED) != MZ_OK) {
-        free(store);
-        return -4;
-    }
-    record_size = RECORD_HEADER_SIZE + (uint32_t)compressed_size;
     sequence = read_u64(store + 16);
     if (!sequence) sequence = 1;
-    memset(store + used, 0, RECORD_HEADER_SIZE);
-    write_u32(store + used, RECORD_MAGIC);
-    write_u32(store + used + 4, record_size);
-    write_u32(store + used + 8, (uint32_t)size);
-    write_u32(store + used + 12, (uint32_t)compressed_size);
-    write_u32(store + used + 16,
-              (uint32_t)mz_crc32(0, data, size));
-    write_u64(store + used + 20, sequence);
-    memcpy(store + used + 32, hash.bytes, sizeof(hash.bytes));
-    write_u32(store + used + 48, 0);
-    write_u32(store + used + 52, RECORD_TYPE_CARTDATA);
-    write_u32(store + 12, used + record_size);
+    write_cartdata_record(store + used, &hash, data, sequence);
+    write_u32(store + 12, used + CARTDATA_RECORD_SIZE);
     write_u64(store + 16, sequence + 1);
     result = save_store(path, store);
     free(store);
