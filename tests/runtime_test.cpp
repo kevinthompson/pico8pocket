@@ -358,6 +358,48 @@ static double left_rms(const int16_t *stereo, size_t first, size_t frames) {
     return sqrt(sum / (double)frames);
 }
 
+/* PICO-8 0.2.7 moves each channel to a new volume in a straight line over 64
+ * of its samples, about 2.9 ms, when a sound starts, changes level and ends.
+ * A low triangle starts at its lowest point, so without that ramp the first
+ * sample jumps by the full amplitude and the speaker plays a click. */
+static void audio_volume_ramps(void) {
+    enum { FRAMES = 30000 };
+    static uint8_t ram[0x10000];
+    static int16_t stereo[FRAMES * 2];
+    memset(ram, 0, sizeof(ram));
+    set_wave_sfx(ram, 0, 0, 0, 0, 0);
+    uint8_t *data = ram + 0x3200;
+    data[1] = 7 << 1;
+    data[3] = 2 << 1;
+    data[65] = 16;
+    data[67] = 0;
+    render_voices(ram, 1, NULL, 0, stereo, FRAMES);
+    int largest_step = 0, loudest = 0;
+    for (size_t frame = 1; frame < FRAMES; ++frame) {
+        int step = abs(stereo[frame * 2] - stereo[frame * 2 - 2]);
+        if (step > largest_step) largest_step = step;
+        if (abs(stereo[frame * 2]) > loudest) loudest = abs(stereo[frame * 2]);
+    }
+    CHECK(loudest > 15000);
+    CHECK(largest_step < 600);
+    CHECK(stereo[(FRAMES - 1) * 2] == 0);
+
+    /* A dropped triangle stops wherever its pitch reaches zero, and the
+     * tilted saw after it starts elsewhere in its own cycle. */
+    set_wave_sfx(ram, 0, 1, 0, 7, 0);
+    data[0] = 0;
+    data[1] = (uint8_t)((7 << 1) | (3 << 4));
+    data[65] = 16;
+    data[67] = 0;
+    render_voices(ram, 1, NULL, 0, stereo, FRAMES);
+    largest_step = 0;
+    for (size_t frame = 1; frame < FRAMES; ++frame) {
+        int step = abs(stereo[frame * 2] - stereo[frame * 2 - 2]);
+        if (step > largest_step) largest_step = step;
+    }
+    CHECK(largest_step < 600);
+}
+
 static void audio_mix_level(void) {
     enum { FRAMES = 4800, PCM_FRAMES = 200, REVERB_SHORT = 398 };
     static uint8_t ram[0x10000];
@@ -431,9 +473,12 @@ static void audio_mix_level(void) {
     render_voices(ram, 0, pcm_low, sizeof(pcm_low), solo, PCM_FRAMES);
     left_range(solo, PCM_FRAMES, &low, &high);
     CHECK(low == -32768 && high == -16384);  /* the first output is a midpoint */
+    /* A voice adds to it while the square's first half period is positive. */
     render_voices(ram, 1, pcm_low, sizeof(pcm_low), solo, PCM_FRAMES);
-    left_range(solo, PCM_FRAMES, &low, &high);
-    CHECK(low == -32768 && high == -12352);
+    render_voices(ram, 1, NULL, 0, quad, PCM_FRAMES);
+    for (size_t frame = 2; frame < 90; ++frame)
+        CHECK(abs(solo[frame * 2] - (quad[frame * 2] - 32768)) <= 1);
+    CHECK(quad[89 * 2] > 2000);
 
     /* Reverb still feeds back at one half.  Odd frames are the synthesized
      * samples; each output is the dry voice plus half of the output one
@@ -697,6 +742,7 @@ int main(void) {
     palette_fast_path_semantics();
     draw_palette_transitions();
     audio_chunk_boundaries();
+    audio_volume_ramps();
     audio_mix_level();
     static const uint8_t source[] =
         "pico-8 cartridge // http://www.pico-8.com\n"

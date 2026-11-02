@@ -82,6 +82,15 @@ typedef struct p8p_audio_extra {
     uint32_t detune_phase;
     uint32_t phaser_lag;             /* second phaser triangle falls behind */
     float noise_level;               /* noise low-pass state */
+    uint8_t tail_filters;            /* filters of the sound now ending */
+    int32_t applied_volume;          /* volume of the last sample played */
+    int32_t ramp_offset;             /* applied minus target, closing */
+    int32_t ramp_step;
+    uint32_t ramp_left;
+    int32_t last_value;              /* channel output of the last sample */
+    uint8_t last_waveform;
+    int32_t joint_from;              /* last output before a waveform change */
+    uint32_t joint_left;
     uint32_t reverb_index;
     int16_t reverb_short[P8P_REVERB_SHORT];
     int16_t reverb_long[P8P_REVERB_LONG];
@@ -164,11 +173,19 @@ static void configure_note(p8p_audio_t *audio, p8p_audio_channel_t *channel) {
     low = sfx[channel->note * 2];
     high = sfx[channel->note * 2 + 1];
     channel->key = low & 0x3f;
-    channel->waveform = (uint8_t)(((low >> 6) | ((high & 1) << 2)) & 7);
     channel->volume = (high >> 1) & 7;
     channel->effect = (high >> 4) & 7;
     channel->note_samples = samples_per_note(sfx[65]);
     channel->sample_in_note = 0;
+    if (!channel->volume) {
+        /* A silent note keeps the last waveform and pitch, so the fade out
+         * at its start finishes that sound instead of switching to another. */
+        channel->volume_q16 = 0;
+        channel->increment_step = 0;
+        channel->volume_step = 0;
+        return;
+    }
+    channel->waveform = (uint8_t)(((low >> 6) | ((high & 1) << 2)) & 7);
     target_increment = NOTE_INCREMENT(channel->key);
     target_volume = (int32_t)channel->volume << 16;
     channel->increment_step = 0;
@@ -784,6 +801,49 @@ static void advance_sequencer(p8p_audio_t *audio) {
     }
 }
 
+/*
+ * PICO-8 moves a channel to each new volume in a straight line over 64 of
+ * its 22050 Hz samples, about 2.9 ms, including the fall to silence when a
+ * sound ends.  Without it a note that starts away from its waveform's zero
+ * jumps there in one sample, which low notes make audible as a click.
+ */
+#define P8P_VOLUME_RAMP_SAMPLES 70
+
+static void start_volume_ramp(p8p_audio_extra_t *extra, int32_t target) {
+    extra->ramp_offset = extra->applied_volume - target;
+    extra->ramp_step = extra->ramp_offset / P8P_VOLUME_RAMP_SAMPLES;
+    extra->ramp_left = extra->ramp_offset ? P8P_VOLUME_RAMP_SAMPLES : 0;
+}
+
+static inline int32_t ramped_volume(p8p_audio_extra_t *extra, int32_t target) {
+    if (extra->ramp_left) {
+        target += extra->ramp_offset;
+        extra->ramp_offset -= extra->ramp_step;
+        if (!--extra->ramp_left)
+            extra->ramp_offset = 0;
+    }
+    extra->applied_volume = target;
+    return target;
+}
+
+/* A note that changes waveform can begin away from where the last one ended,
+ * so it crossfades from the last output over the same 2.9 ms.  The same
+ * waveform carries on from its phase, and its own edges stay sharp; volume
+ * changes are already continuous through the ramp above. */
+static inline int32_t joined_value(p8p_audio_extra_t *extra, int32_t value,
+                                   int waveform_changed) {
+    if (waveform_changed) {
+        extra->joint_from = extra->last_value;
+        extra->joint_left = P8P_VOLUME_RAMP_SAMPLES;
+    }
+    if (extra->joint_left) {
+        int32_t left = (int32_t)--extra->joint_left;
+        value += (extra->joint_from - value) * left / P8P_VOLUME_RAMP_SAMPLES;
+    }
+    extra->last_value = value;
+    return value;
+}
+
 /* x / 56 truncated toward zero, exact for every int32 x.  GCC keeps a
  * hardware divide for the constant, which the os20 CPU's radix-2 divider
  * runs for every active channel of every synthesized sample. */
@@ -802,14 +862,42 @@ static int32_t synthesize(p8p_audio_t *audio) {
         int32_t sample;
         int32_t volume;
         uint8_t filters;
-        if (channel->sfx < 0)
+        int note_started;
+        if (channel->sfx < 0) {
+            /* A sound that just ended fades out on its last waveform. */
+            if (extra->applied_volume && !extra->ramp_left)
+                start_volume_ramp(extra, 0);
+            if (!extra->ramp_left) {
+                extra->applied_volume = 0;
+                extra->last_value = 0;
+                extra->joint_left = 0;
+                continue;
+            }
+            if (extra->parent_custom && extra->instrument.sfx >= 0) {
+                p8p_audio_channel_t *voice = &extra->instrument;
+                int32_t scaled = (int32_t)(((int64_t)voice->increment *
+                                            extra->factor_q16) >> 16);
+                sample = voice_sample(extra, voice, scaled, extra->tail_filters);
+            } else {
+                sample = voice_sample(extra, channel, channel->increment,
+                                      extra->tail_filters);
+            }
+            volume = ramped_volume(extra, 0);
+            int32_t value = joined_value(
+                extra, divide_by_56(sample * ((volume + 4096) >> 13)), 0);
+            if (extra->tail_filters >= 24 || audio->ram[0x5f41] || audio->ram[0x5f43])
+                value = channel_effects(audio, index, value, extra->tail_filters);
+            mix += value;
             continue;
-        if (channel->sample_in_note == 0)
+        }
+        note_started = channel->sample_in_note == 0;
+        if (note_started)
             parent_note_started(audio, index);
         increment = voice_increment(audio, channel);
         if (extra->parent_custom) {
             p8p_audio_channel_t *voice = &extra->instrument;
             if (voice->sfx >= 0) {
+                note_started |= voice->sample_in_note == 0;
                 /* Transpose by the parent pitch relative to C-2:
                  * 2^40 / note_increment[24] = 46969 (Q24 reciprocal),
                  * one more shift for the doubled NOTE_INCREMENT. */
@@ -843,7 +931,16 @@ static int32_t synthesize(p8p_audio_t *audio) {
         }
         if (channel->is_music)
             volume = (volume >> 8) * (audio->music_volume_q24 >> 16);
-        int32_t value = divide_by_56(sample * ((volume + 4096) >> 13));
+        if (note_started)
+            start_volume_ramp(extra, volume);
+        volume = ramped_volume(extra, volume);
+        extra->tail_filters = filters;
+        uint8_t waveform = extra->parent_custom && extra->instrument.sfx >= 0 ?
+            (uint8_t)(extra->instrument.waveform | 8) : channel->waveform;
+        int32_t value = joined_value(
+            extra, divide_by_56(sample * ((volume + 4096) >> 13)),
+            note_started && waveform != extra->last_waveform);
+        extra->last_waveform = waveform;
         if (filters >= 24 || audio->ram[0x5f41] || audio->ram[0x5f43])
             value = channel_effects(audio, index, value, filters);
         mix += value;
@@ -973,6 +1070,14 @@ void p8p_audio_skip(p8p_audio_t *audio, size_t frames) {
     if (frames & 1u)
         audio->second_output ^= 1;
     audio->held_sample = 0;
+    /* Nothing is heard while skipping, so no ramp is left to finish. */
+    for (int channel = 0; channel < P8P_AUDIO_CHANNELS; ++channel) {
+        audio->extra[channel].applied_volume = 0;
+        audio->extra[channel].ramp_left = 0;
+        audio->extra[channel].ramp_offset = 0;
+        audio->extra[channel].last_value = 0;
+        audio->extra[channel].joint_left = 0;
+    }
     while (samples) {
         uint32_t part = samples > 0x40000000u ? 0x40000000u : (uint32_t)samples;
         advance_silently(audio, part);
