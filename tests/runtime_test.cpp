@@ -653,6 +653,7 @@ print("\^y3\^:0000000000000001",30,60,7) px(30,67,7))"},
     {"outline over a background", R"(print("\#9\^o8ff.",10,90,7) px(9,90,9) px(14,90,0) px(10,93,8) px(11,94,7))"},
     {"outline colour is taken when set", R"(print("\^o$ff\f8a",10,40,7) px(9,39,7) px(10,40,8))"},
     {"outline keeps invert", R"(print("\^i\^o8ffa",10,20,7) px(8,18,8) px(9,19,7))"},
+    {"underline width and start", R"(print("\^-b\^ua",10,0,7) px(9,6,0) px(14,6,7) print("\^w\^ua",20,20,7) px(18,26,7) px(22,26,7) px(23,26,0))"},
     {"outline stays one pixel thick", R"(print("\^w\^o8ffa",40,10,7) px(39,9,8) px(38,9,0))"},
     {"custom draw offsets", R"(poke(0x5600,8,8,8) poke(0x5600+97*8,1)
 poke(0x5603,2) poke(0x5604,3) print("\014a",10,10,7) px(12,13,7) px(10,10,0)

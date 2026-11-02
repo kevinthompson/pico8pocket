@@ -2206,8 +2206,13 @@ static int api_print(lua_State *lua) {
                                     draw_y + offset_y, mode, interior);
         }
         if (underline)
-            draw_hspan(runtime, x - 1, x + advance - 1, y + line_height,
-                       fg_color);
+        {
+            /* The bar keeps the unscaled width even in wide modes. */
+            int scale = PRINT_SCALED_W(1);
+            int start = x - glyph_padding * scale;
+            draw_hspan(runtime, start, start + advance / scale,
+                       y + line_height, fg_color);
+        }
         if (!outline_hollow || !outline_neighbours)
             draw(x, draw_y, fg_color, glyph_mode);
         last_width = advance;
