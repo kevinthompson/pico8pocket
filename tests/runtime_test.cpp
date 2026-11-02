@@ -642,6 +642,19 @@ print("\^y3\^:0000000000000001",30,60,7) px(30,67,7))"},
     {"outline without interior", R"(rectfill(10,60,30,80,5) print("\^o!ffa",12,62,7) px(11,61,7) px(12,62,5) px(13,63,7))"},
     {"outline over a background", R"(print("\#9\^o8ff.",10,90,7) px(9,90,9) px(10,93,8) px(11,94,7))"},
     {"outline stays one pixel thick", R"(print("\^w\^o8ffa",40,10,7) px(39,9,8) px(38,9,0))"},
+    {"custom draw offsets", R"(poke(0x5600,8,8,8) poke(0x5600+97*8,1)
+poke(0x5603,2) poke(0x5604,3) print("\014a",10,10,7) px(12,13,7) px(10,10,0)
+poke(0x5603,0xff) poke(0x5604,0xff) print("\014a",10,20,7) px(9,19,7))"},
+    {"custom high characters", R"(poke(0x5600,8,10,8) poke(0x5600+200*8,0x80)
+eq(print("\014\200",10,30,7),20) px(17,30,7))"},
+    {"custom width adjustments", R"(poke(0x5600,8,8,8) poke(0x5605,1)
+poke(0x5608+40,0x70) eq(print("\014a",0,0),7) poke(0x5608+40,0x40) eq(print("\014a",0,0),4)
+poke(0x5608+40,0x30) eq(print("\014a",0,0),11) poke(0x5608+41,0x02) eq(print("\014b",0,0),10)
+poke(0x5608,0x01) eq(print("\014\16",0,0),9) poke(0x5605,0) eq(print("\014a",0,0),8))"},
+    {"custom width adjust scales when wide", R"(poke(0x5600,8,8,8) poke(0x5605,1)
+poke(0x5608+40,0x70) eq(print("\014\^wa",0,0),14))"},
+    {"custom raised character", R"(poke(0x5600,8,8,8) poke(0x5600+97*8,1) poke(0x5605,1)
+poke(0x5608+40,0x80) print("\014a",10,40,7) px(10,39,7) px(10,40,0))"},
     /* end of print cases */
 };
 
