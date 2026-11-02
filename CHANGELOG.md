@@ -6,6 +6,8 @@
   and Reset Cart. It uses the cart's mapped buttons, honours `0x5f30`
   suppression, and also opens from `extcmd("pause")`. Select still opens the
   system menu.
+- Menu text uses the PICO-8 font data instead of a separate hand-drawn font, in
+  which letters such as `M` and `N` were hard to tell apart.
 
 ## 0.0.35 — 2026-10-21
 

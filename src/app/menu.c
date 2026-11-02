@@ -1,5 +1,6 @@
 #include "p8p/menu.h"
 
+#include "p8p/pico8_font.h"
 #include "p8p/platform.h"
 #include "p8p/state_store.h"
 
@@ -71,74 +72,20 @@ struct p8p_menu {
     char notice[32];
 };
 
-static uint16_t glyph_ascii(uint32_t character) {
-#define GLYPH(r0, r1, r2, r3, r4) \
-    ((uint16_t)((r0) << 12) | (uint16_t)((r1) << 9) | \
-     (uint16_t)((r2) << 6) | (uint16_t)((r3) << 3) | (uint16_t)(r4))
-    if (character >= 'a' && character <= 'z')
-        character -= 'a' - 'A';
-    switch (character) {
-    case '0': return GLYPH(2, 5, 5, 5, 2);
-    case '1': return GLYPH(2, 6, 2, 2, 7);
-    case '2': return GLYPH(6, 1, 2, 4, 7);
-    case '3': return GLYPH(6, 1, 2, 1, 6);
-    case '4': return GLYPH(5, 5, 7, 1, 1);
-    case '5': return GLYPH(7, 4, 6, 1, 6);
-    case '6': return GLYPH(3, 4, 6, 5, 2);
-    case '7': return GLYPH(7, 1, 2, 2, 2);
-    case '8': return GLYPH(2, 5, 2, 5, 2);
-    case '9': return GLYPH(2, 5, 3, 1, 6);
-    case 'A': return GLYPH(2, 5, 7, 5, 5);
-    case 'B': return GLYPH(6, 5, 6, 5, 6);
-    case 'C': return GLYPH(3, 4, 4, 4, 3);
-    case 'D': return GLYPH(6, 5, 5, 5, 6);
-    case 'E': return GLYPH(7, 4, 6, 4, 7);
-    case 'F': return GLYPH(7, 4, 6, 4, 4);
-    case 'G': return GLYPH(3, 4, 5, 5, 3);
-    case 'H': return GLYPH(5, 5, 7, 5, 5);
-    case 'I': return GLYPH(7, 2, 2, 2, 7);
-    case 'J': return GLYPH(1, 1, 1, 5, 2);
-    case 'K': return GLYPH(5, 5, 6, 5, 5);
-    case 'L': return GLYPH(4, 4, 4, 4, 7);
-    case 'M': return GLYPH(5, 7, 7, 5, 5);
-    case 'N': return GLYPH(5, 7, 7, 7, 5);
-    case 'O': return GLYPH(2, 5, 5, 5, 2);
-    case 'P': return GLYPH(6, 5, 6, 4, 4);
-    case 'Q': return GLYPH(2, 5, 5, 3, 1);
-    case 'R': return GLYPH(6, 5, 6, 5, 5);
-    case 'S': return GLYPH(3, 4, 2, 1, 6);
-    case 'T': return GLYPH(7, 2, 2, 2, 2);
-    case 'U': return GLYPH(5, 5, 5, 5, 7);
-    case 'V': return GLYPH(5, 5, 5, 5, 2);
-    case 'W': return GLYPH(5, 5, 7, 7, 5);
-    case 'X': return GLYPH(5, 5, 2, 5, 5);
-    case 'Y': return GLYPH(5, 5, 2, 2, 2);
-    case 'Z': return GLYPH(7, 1, 2, 4, 7);
-    case '!': return GLYPH(2, 2, 2, 0, 2);
-    case '?': return GLYPH(6, 1, 2, 0, 2);
-    case '.': return GLYPH(0, 0, 0, 0, 2);
-    case ',': return GLYPH(0, 0, 0, 2, 4);
-    case ':': return GLYPH(0, 2, 0, 2, 0);
-    case '-': return GLYPH(0, 0, 7, 0, 0);
-    case '+': return GLYPH(0, 2, 7, 2, 0);
-    case '/': return GLYPH(1, 1, 2, 4, 4);
-    case '<': return GLYPH(1, 2, 4, 2, 1);
-    case '>': return GLYPH(4, 2, 1, 2, 4);
-    case '=': return GLYPH(0, 7, 0, 7, 0);
-    case '_': return GLYPH(0, 0, 0, 0, 7);
-    case '(': return GLYPH(1, 2, 2, 2, 1);
-    case ')': return GLYPH(4, 2, 2, 2, 4);
-    case '[': return GLYPH(3, 2, 2, 2, 3);
-    case ']': return GLYPH(6, 2, 2, 2, 6);
-    case '\'': return GLYPH(2, 2, 0, 0, 0);
-    case '"': return GLYPH(5, 5, 0, 0, 0);
-    case '*': return GLYPH(0, 5, 2, 5, 0);
-    case '%': return GLYPH(5, 1, 2, 4, 5);
-    case '#': return GLYPH(5, 7, 5, 7, 5);
-    case '^': return GLYPH(2, 5, 0, 0, 0);
-    default: return 0;
-    }
-#undef GLYPH
+/* Letters are always shown in PICO-8's default style, which the font stores at
+ * the lowercase codes. */
+uint16_t p8p_menu_glyph(uint32_t character) {
+    uint16_t bits = 0;
+    if (character >= 'A' && character <= 'Z')
+        character += 'a' - 'A';
+    if (character >= 128)
+        return 0;
+    const uint8_t *rows = p8p_pico8_font + character * 8;
+    for (int row = 0; row < 5; ++row)
+        for (int column = 0; column < 3; ++column)
+            if (rows[row] & (1u << column))
+                bits |= (uint16_t)(1u << (14 - row * 3 - column));
+    return bits;
 }
 
 static uint16_t glyph_cyrillic(uint32_t c) {
@@ -218,7 +165,7 @@ static void fill(uint8_t *fb, int x, int y, int w, int h, uint8_t color) {
 static void text(uint8_t *fb, int x, int y, const char *value, uint8_t color) {
     while (value && *value && x <= MENU_WIDTH - 3) {
         uint32_t c = utf8_next(&value);
-        uint16_t bits = c < 128 ? glyph_ascii(c) : glyph_cyrillic(c);
+        uint16_t bits = c < 128 ? p8p_menu_glyph(c) : glyph_cyrillic(c);
         for (int row = 0; row < 5; ++row)
             for (int column = 0; column < 3; ++column)
                 if ((bits & (1u << (14 - row * 3 - column))) &&
