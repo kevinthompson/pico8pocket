@@ -852,7 +852,7 @@ static int32_t synthesize(p8p_audio_t *audio) {
     mix = (mix * P8P_VOICE_GAIN_Q5) >> 5;
     if (audio->pcm_count) {
         /* 8-bit unsigned PCM, held for each 5512.5 Hz sample period. */
-        mix += ((int32_t)audio->pcm[audio->pcm_read] - 128) * 64;
+        mix += ((int32_t)audio->pcm[audio->pcm_read] - 128) * 256;
         uint32_t next_phase = audio->pcm_phase + P8P_PCM_STEP;
         if (next_phase < audio->pcm_phase) {
             audio->pcm_read = (audio->pcm_read + 1) % P8P_PCM_CAPACITY;

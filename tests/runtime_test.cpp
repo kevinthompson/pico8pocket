@@ -427,13 +427,13 @@ static void audio_mix_level(void) {
     for (int sfx = 0; sfx < 4; ++sfx)
         set_square_sfx(ram, sfx, 7, 0);
 
-    /* The gain is for voices only: serial() PCM stays at +/-8192. */
+    /* serial() PCM is full scale, as in PICO-8: sample 0 is -32768. */
     render_voices(ram, 0, pcm_low, sizeof(pcm_low), solo, PCM_FRAMES);
     left_range(solo, PCM_FRAMES, &low, &high);
-    CHECK(low == -8192 && high == -4096);  /* the first output is a midpoint */
+    CHECK(low == -32768 && high == -16384);  /* the first output is a midpoint */
     render_voices(ram, 1, pcm_low, sizeof(pcm_low), solo, PCM_FRAMES);
     left_range(solo, PCM_FRAMES, &low, &high);
-    CHECK(low == -16256 && high == -64);
+    CHECK(low == -32768 && high == -12352);
 
     /* Reverb still feeds back at one half.  Odd frames are the synthesized
      * samples; each output is the dry voice plus half of the output one
