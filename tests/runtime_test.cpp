@@ -453,6 +453,16 @@ static void audio_mix_level(void) {
         CHECK(abs(high - peaks[index].high) < 200);
     }
 
+    /* The phaser's two triangles drift apart and back at about 2.4 Hz here,
+     * so its level falls by the time they are half a cycle apart. */
+    {
+        enum { PHASER_FRAMES = 12000 };
+        static int16_t phaser[PHASER_FRAMES * 2];
+        set_wave_sfx(ram, 0, 7, 24, 7, 0);
+        render_voices(ram, 1, NULL, 0, phaser, PHASER_FRAMES);
+        CHECK(left_rms(phaser, 0, 960) > left_rms(phaser, 10000, 960) * 2);
+    }
+
     /* Volume is linear in steps of 1/7. */
     set_wave_sfx(ram, 0, 0, 24, 1, 0);
     render_voices(ram, 1, NULL, 0, solo, FRAMES);

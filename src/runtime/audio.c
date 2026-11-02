@@ -80,6 +80,7 @@ typedef struct p8p_audio_extra {
     int32_t factor_increment;        /* parent pitch the cached factor is for */
     uint32_t factor_q16;
     uint32_t detune_phase;
+    uint32_t phaser_lag;             /* second phaser triangle falls behind */
     int32_t noise_sample;
     uint32_t reverb_index;
     int16_t reverb_short[P8P_REVERB_SHORT];
@@ -360,7 +361,7 @@ static inline int32_t basic_waveform(int waveform, uint32_t phase) {
                                     65536 - abs(position * 16 - 786432);
         return (sample * 3641) >> 17;
     case 7: /* phaser */
-        return (triangle(phase) + triangle(phase - phase / 110u)) / 2;
+        return (2 * triangle(phase) + triangle(phase)) / 3;
     default:
         return 0;
     }
@@ -456,6 +457,12 @@ static inline int32_t voice_sample(p8p_audio_extra_t *extra,
         sample = buzz_waveform(voice->waveform, phase, extra->odd_period);
         if (next_phase < phase)
             extra->odd_period ^= 1;
+    } else if (voice->waveform == 7) {
+        /* Twice one triangle, plus one running 109/110 as fast. */
+        uint32_t step = (uint32_t)(increment > 0 ? increment : 0);
+        voice->phase = phase + step;
+        sample = (2 * triangle(phase) + triangle(phase - extra->phaser_lag)) / 3;
+        extra->phaser_lag += step / 110u;
     } else {
         sample = waveform_sample(voice, increment);
         if (noiz && voice->waveform == 6) {
