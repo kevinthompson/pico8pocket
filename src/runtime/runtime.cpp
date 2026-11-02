@@ -1455,7 +1455,14 @@ static void reset_transparency(p8p_runtime_t *runtime) {
 extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
     profile_api(P8P_API_DRAW_STATE);
     p8p_runtime_t *runtime = active_runtime;
-    if (arg_count(lua) == 0) {
+    int reset_all = arg_count(lua) == 0;
+    int palette = 0;
+    if (arg_count(lua) == 1 && !lua_istable(lua, 1)) {
+        /* Anything but a number selects every palette, like -1. */
+        palette = lua_type(lua, 1) == LUA_TNUMBER ? arg_int(lua, 1, 0) : -1;
+        reset_all = palette == -1;
+    }
+    if (reset_all) {
         /* Like PICO-8, pal() also resets transparency to palt(). */
         if (!runtime->palettes_default) {
             for (int i = 0; i < 16; ++i) {
@@ -1487,7 +1494,6 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
     } else if (arg_count(lua) == 1) {
         /* pal(p) resets one palette, and pal(0) also resets transparency.
          * There is no secondary palette yet, so pal(2) changes nothing. */
-        int palette = arg_int(lua, 1, 0);
         if (palette == 0 || palette == 1) {
             uint8_t *entries = palette ? runtime->screen_palette
                                        : runtime->draw_palette;
