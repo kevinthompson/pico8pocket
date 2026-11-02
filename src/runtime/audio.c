@@ -312,7 +312,8 @@ static void advance_music(p8p_audio_t *audio) {
     }
     next = audio->music_pattern + 1;
     if (song[1] & 0x80) {
-        while (next > 0 && !(audio->ram[P8P_MUSIC_BASE + (unsigned)(next - 1) * 4u] & 0x80))
+        next = audio->music_pattern;
+        while (next > 0 && !(audio->ram[P8P_MUSIC_BASE + (unsigned)next * 4u] & 0x80))
             --next;
     }
     ++audio->music_count;
