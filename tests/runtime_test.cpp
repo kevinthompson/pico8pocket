@@ -1174,6 +1174,28 @@ int main(void) {
         CHECK(p8p_runtime_framebuffer(runtime)[1] == 7);
 
         {
+            /* Argument handling measured from PICO-8 0.2.7. Each check sets a
+             * pixel from what stat(46..49) reports straight after the call. */
+            static const char arguments_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "for n in all(split\"0,2,3,63\") do poke(0x3241+n*68,16)\n"
+                "poke2(0x3200+n*68,24+(1<<6)+(5<<9)) end\n"
+                "function _draw() cls()\n"
+                "sfx(2) sfx() if stat(47)==-1 then pset(0,0,7) end sfx(-1)\n"
+                "end\n";
+            p8p_cart_t arguments_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)arguments_source,
+                                            sizeof(arguments_source) - 1,
+                                            &arguments_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &arguments_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            for (int x = 0; x < 1; ++x)
+                CHECK(pixels[x] == 7);
+            p8p_cart_destroy(&arguments_cart);
+        }
+
+        {
             int plain = audio_crossings_for(runtime, "sfx(2)");
             /* A nil index means sfx 0, not the stop command sfx(-1). */
             CHECK(audio_crossings_for(runtime, "sfx(2) sfx(nil)") > 0);

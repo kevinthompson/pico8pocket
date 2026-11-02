@@ -2288,6 +2288,9 @@ static int api_print(lua_State *lua) {
 }
 
 static int api_sfx(lua_State *lua) {
+    /* A nil index is sfx 0, but sfx() with no arguments does nothing. */
+    if (arg_count(lua) == 0)
+        return 0;
     int channel = p8p_audio_sfx(active_runtime->audio,
                                 arg_int(lua, 1, 0), arg_int(lua, 2, -1),
                                 arg_int(lua, 3, 0), arg_int(lua, 4, 0));
