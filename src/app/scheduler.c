@@ -26,18 +26,20 @@ int p8p_render_divisor_for_load(int target_fps, uint32_t full_frame_us,
             return divisor;
     }
 
-    /* If the update itself is already too slow, destroying visible FPS only
-     * makes sense when skipped rendering buys a substantial speedup. BAS
-     * Escape, for example, spends almost all of its frame in _update and gains
-     * very little from rendering one frame in four. UFO is the opposite: its
-     * draw pass dominates, so the larger divisor still protects game speed. */
-    if (maximum_divisor > 1) {
-        uint32_t divisor_us = fixed_us +
-            (render_us + (uint32_t)maximum_divisor - 1u) /
-            (uint32_t)maximum_divisor;
-        uint32_t full_us = fixed_us + render_us;
-        if ((uint64_t)full_us * 100u >= (uint64_t)divisor_us * 125u)
-            return maximum_divisor;
+    /* Nothing fits, so the cart will run slow at any divisor.  Skipping more
+     * draws raises the logical rate less and less while it destroys the
+     * visible rate.  BAS Escape spends almost all of its frame in _update and
+     * gains very little from rendering one frame in four; UFO's draw pass
+     * dominates, so a larger divisor still protects game speed.  Take the
+     * lowest divisor within a fifth of the fastest achievable step. */
+    uint32_t fastest_us = fixed_us +
+        (render_us + (uint32_t)maximum_divisor - 1u) /
+        (uint32_t)maximum_divisor;
+    for (int divisor = 1; divisor < maximum_divisor; ++divisor) {
+        uint32_t estimated_us = fixed_us +
+            (render_us + (uint32_t)divisor - 1u) / (uint32_t)divisor;
+        if ((uint64_t)estimated_us * 100u <= (uint64_t)fastest_us * 120u)
+            return divisor;
     }
-    return 1;
+    return maximum_divisor;
 }

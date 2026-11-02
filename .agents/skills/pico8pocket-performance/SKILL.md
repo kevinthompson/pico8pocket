@@ -51,8 +51,9 @@ argument-hint: "[harness: path or host:path of a zenibako/pocket-harness checkou
   compared metric rosters matched. Other displayed timings retain millisecond
   rounding even if converted to microseconds.
 - **Scheduler** (`src/app/scheduler.c`): it keeps R1 while F + A + P fits the
-  budget, 32 ms at 30 FPS or 15 ms at 60 FPS. Update cost is only measured on
-  skipped frames. At R1 and over budget, one draw in 15 is skipped to
+  budget, 32 ms at 30 FPS or 15 ms at 60 FPS, and allows 16.5 ms per 60 FPS
+  frame once it skips draws. If no divisor fits, it takes the lowest one within
+  a fifth of the fastest step. Update cost is only measured on skipped frames. At R1 and over budget, one draw in 15 is skipped to
   re-measure it.
 - A screenshot showing R02 with U + D + A + P under budget means F is larger.
   Ask for F before optimizing anything.
