@@ -2183,14 +2183,14 @@ static int api_print(lua_State *lua) {
         if (outline_neighbours) {
             static const int8_t ox[8] = {-1, 0, 1, -1, 1, -1, 0, 1};
             static const int8_t oy[8] = {-1, -1, -1, 0, 0, 1, 1, 1};
-            static const uint8_t blank[8] = {0};
             const uint8_t *rows = one_off ? one_off : (mode & PRINT_CUSTOM_FONT ?
                 runtime->ram + 0x5600 : p8p_pico8_font) + character * 8;
             uint8_t interior[256];
-            /* Paint the background first so it cannot cover the outline. */
+            /* The background goes first so it cannot cover the outline. */
             if (mode & PRINT_SOLID_BG) {
-                draw_glyph_rows(runtime, blank, x + offset_x, draw_y + offset_y, 0,
-                                PRINT_BG(), PRINT_SOLID_BG, 8, 8, advance,
+                draw_glyph_rows(runtime, rows, x + offset_x, draw_y + offset_y, 0,
+                                PRINT_BG(), mode & (PRINT_SOLID_BG | PRINT_WIDE |
+                                PRINT_TALL | PRINT_PINBALL), 0, 0, advance,
                                 line_height, padding);
                 glyph_mode &= ~PRINT_SOLID_BG;
             }
@@ -2200,8 +2200,7 @@ static int api_print(lua_State *lua) {
             for (int i = 0; i < 8; ++i)
                 if (outline_neighbours & (1 << i))
                     draw(x + ox[i], draw_y + oy[i],
-                         outline_color < 0 ? fg_color : outline_color,
-                         mode & ~(PRINT_SOLID_BG | PRINT_INVERTED));
+                         outline_color, glyph_mode);
             if (outline_hollow)
                 swap_glyph_interior(runtime, rows, x + offset_x,
                                     draw_y + offset_y, mode, interior);
@@ -2334,9 +2333,9 @@ static int api_print(lua_State *lua) {
                 write_ram_bytes(runtime, address, text + data, count);
                 n = data + (size_t)count - 1;
             } else if (command == 'o') {
-                /* $ uses the current colour; ! also skips the interior. */
+                /* $ takes the current colour; ! also skips the interior. */
                 uint8_t color = PRINT_NEXT();
-                outline_color = color == '$' || color == '!' ? -1 :
+                outline_color = color == '$' || color == '!' ? fg_color :
                                 print_param(color);
                 outline_hollow = color == '!';
                 outline_neighbours = print_hex(text, length, n + 1, 2);
