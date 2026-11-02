@@ -20,6 +20,10 @@
 #define P8P_SFX_BASE 0x3200u
 #define P8P_MUSIC_BASE 0x3100u
 #define P8P_SFX_BYTES 68u
+/* A full-volume square is +/-8192 through the effects; PICO-8's output is
+ * twice that.  Applied to the summed voices rather than to each voice so the
+ * 16-bit reverb lines keep their headroom and nothing clips before the mix. */
+#define P8P_VOICE_GAIN 2
 
 typedef struct p8p_audio_channel {
     int sfx;
@@ -823,6 +827,7 @@ static int32_t synthesize(p8p_audio_t *audio) {
         mix += value;
         voice_step(audio, channel);
     }
+    mix *= P8P_VOICE_GAIN;
     if (audio->pcm_count) {
         /* 8-bit unsigned PCM, held for each 5512.5 Hz sample period. */
         mix += ((int32_t)audio->pcm[audio->pcm_read] - 128) * 64;
