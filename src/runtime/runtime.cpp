@@ -2292,7 +2292,9 @@ static int api_sfx(lua_State *lua) {
     if (arg_count(lua) == 0)
         return 0;
     int channel = p8p_audio_sfx(active_runtime->audio,
-                                arg_int(lua, 1, 0), arg_int(lua, 2, -1),
+                                arg_int(lua, 1, 0),
+                                /* Only a missing channel means any channel. */
+                                arg_count(lua) < 2 ? -1 : arg_int(lua, 2, 0),
                                 arg_int(lua, 3, 0), arg_int(lua, 4, 0));
     push_int(lua, channel < 0 ? 0 : channel);
     return 1;
