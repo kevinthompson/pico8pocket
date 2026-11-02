@@ -939,16 +939,27 @@ static int api_rect(lua_State *lua) {
 }
 
 /* Horizontal inset of a rounded corner ROW pixels from the top or bottom
- * edge.  It uses circfill's extents, so the manual's example holds: radius 2
- * leaves 3 pixels missing at each corner. */
+ * edge.  PICO-8 draws the corner as the midpoint circle of radius + 1, so
+ * this walks that circle's octant and reads the widest extent at the row. */
 static int rounded_corner_inset(int radius, int row) {
     if (row >= radius)
         return 0;
-    int offset_y = radius - row;
-    int extent = radius;
-    while (extent * extent + offset_y * offset_y > radius * radius)
-        --extent;
-    return radius - extent;
+    int circle_radius = radius + 1;
+    int offset_y = circle_radius - row;
+    int extent = 0;
+    int error = 1 - circle_radius;
+    for (int x = circle_radius, y = 0; y <= x;) {
+        if (y == offset_y && x > extent) extent = x;
+        if (x == offset_y && y > extent) extent = y;
+        ++y;
+        if (error < 0) {
+            error += 2 * y + 1;
+        } else {
+            --x;
+            error += 2 * (y - x) + 1;
+        }
+    }
+    return circle_radius - extent;
 }
 
 static void draw_rounded_rect(p8p_runtime_t *runtime, int x, int y,
@@ -956,9 +967,9 @@ static void draw_rounded_rect(p8p_runtime_t *runtime, int x, int y,
                               int filled) {
     if (width <= 0 || height <= 0)
         return;
-    int max_radius = (width < height ? width : height) / 2;
-    if (radius < 0) radius = 0;
+    int max_radius = (width < height ? width : height) / 2 - 1;
     if (radius > max_radius) radius = max_radius;
+    if (radius < 0) radius = 0;
     int x1 = x + width - 1;
     for (int row = 0; row < height; ++row) {
         int edge_row = row < height - 1 - row ? row : height - 1 - row;

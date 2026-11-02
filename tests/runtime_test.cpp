@@ -1204,6 +1204,52 @@ int main(void) {
         }
 
         {
+            /* Pixels measured from PICO-8 0.2.7: each corner follows PICO-8's
+             * own circ() of radius r + 1, and the radius is limited to half
+             * the shorter side minus one. */
+            static const char corner_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _draw() cls() rrectfill(0,0,24,12,4,7)\n"
+                "rrectfill(30,0,24,12,5,7) rrectfill(60,0,24,18,8,7)\n"
+                "rrectfill(90,0,4,10,5,7) rrectfill(100,0,10,3,1,7)\n"
+                "rrectfill(0,20,6,6,3,7) rrect(30,20,24,12,5,7) end\n";
+            p8p_cart_t corner_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)corner_source,
+                                            sizeof(corner_source) - 1,
+                                            &corner_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &corner_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            const auto first_lit = [&](int left, int top, int row) {
+                int inset = 0;
+                while (inset < 24 && !pixels[(top + row) * 128 + left + inset])
+                    ++inset;
+                return inset;
+            };
+            static const int radius_4[] = {3, 2, 1, 0};
+            for (int row = 0; row < 4; ++row)
+                CHECK(first_lit(0, 0, row) == radius_4[row]);
+            static const int radius_5[] = {4, 3, 2, 1, 0};
+            for (int row = 0; row < 5; ++row)
+                CHECK(first_lit(30, 0, row) == radius_5[row]);
+            static const int radius_8[] = {7, 5, 3, 2, 2, 1, 1, 0};
+            for (int row = 0; row < 8; ++row)
+                CHECK(first_lit(60, 0, row) == radius_8[row]);
+            /* Width 4 limits radius 5 to 1, and height 3 removes rounding. */
+            CHECK(first_lit(90, 0, 0) == 1);
+            CHECK(first_lit(90, 0, 1) == 0);
+            CHECK(first_lit(100, 0, 0) == 0);
+            static const int six_by_six[] = {2, 1, 0};
+            for (int row = 0; row < 3; ++row)
+                CHECK(first_lit(0, 20, row) == six_by_six[row]);
+            /* The outline keeps the one-pixel diagonal of radius 5. */
+            CHECK(pixels[21 * 128 + 33] == 7);
+            CHECK(pixels[21 * 128 + 34] == 0);
+            CHECK(pixels[21 * 128 + 35] == 0);
+            p8p_cart_destroy(&corner_cart);
+        }
+
+        {
             /* stat(26) counts 183/22050 s ticks into the music pattern:
              * 9600 samples at 48 kHz are 24 ticks. */
             audio_crossings_for(runtime,
