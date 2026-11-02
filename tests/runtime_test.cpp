@@ -1281,6 +1281,32 @@ int main(void) {
         }
 
         {
+            /* pal(-1), and pal() given one value that is not a number, reset
+             * both palettes and transparency, as PICO-8 0.2.7 does. */
+            static const char source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _draw() cls()\n"
+                "pal(8,9) pal(3,4,1) palt(5,true) pal(-1)\n"
+                "if peek(0x5f08)==8 then pset(0,0,7) end\n"
+                "if peek(0x5f13)==3 then pset(1,0,7) end\n"
+                "if peek(0x5f05)==5 then pset(2,0,7) end\n"
+                "pal(8,9) pal(3,4,1) pal(\"1\")\n"
+                "if peek(0x5f08)==8 and peek(0x5f13)==3 then pset(3,0,7) end\n"
+                "pal(8,9) pal(3,4,1) pal(-2)\n"
+                "if peek(0x5f08)==9 and peek(0x5f13)==4 then pset(4,0,7) end\n"
+                "pal() end\n";
+            p8p_cart_t cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                            sizeof(source) - 1, &cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            for (int x = 0; x < 5; ++x)
+                CHECK(pixels[x] == 7);
+            p8p_cart_destroy(&cart);
+        }
+
+        {
             /* stat(26) counts 183/22050 s ticks into the music pattern:
              * 9600 samples at 48 kHz are 24 ticks. */
             audio_crossings_for(runtime,
