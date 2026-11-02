@@ -587,7 +587,14 @@ px(5,10,9) eq(peek(0x5f27),126))"},
     {"scroll threshold", R"(cursor(0,114) pset(5,10,9) print("a",7) px(5,10,9) eq(peek(0x5f27),120))"},
     {"scroll can be disabled", R"(poke(0x5f36,0x40) cursor(0,120) pset(5,10,9) print("a",7)
 px(5,10,9) eq(peek(0x5f27),126) poke(0x5f36,0))"},
-    {"scroll inside a string", R"(cursor(0,114) print("a\nb\nc",7) eq(peek(0x5f27),122))"},
+    {"scroll inside a string", R"(cursor(0,114) print("a\nb\nc",7) eq(peek(0x5f27),120))"},
+    {"scroll twice for a line past the end", R"(cursor(0,117) pset(5,10,9) print("a\nb",7) eq(peek(0x5f27),117)
+px(0,105,7) px(0,111,7))"},
+    {"terminator only skips the final scroll", R"(cursor(0,120) print("a\0",7) eq(peek(0x5f27),120)
+cursor(0,126) print("a\0",7) eq(peek(0x5f27),122))"},
+    {"scroll stays inside the clip", R"(rectfill(0,0,127,127,5) pset(20,20,8) pset(5,30,8) clip(10,10,50,50) cursor(0,120) print("a",7) clip()
+px(20,14,8) px(5,30,8) px(5,24,5))"},
+    {"scroll threshold follows the camera", R"(camera(0,10) cursor(0,117) print("a",7) eq(peek(0x5f27),123))"},
     {"wide doubles the current width", R"(eq(print("\^wab",0,0),16) eq(print("\^x5\^wab",0,0),20)
 eq(print("\^w\^x5ab",0,0),20) eq(print("\^w\^-wa",0,0),4))"},
     {"high characters advance", R"(eq(print("\130",0,0),8) eq(print("\#8\130",0,0),8)

@@ -2012,9 +2012,15 @@ static void swap_glyph_interior(p8p_runtime_t *runtime, const uint8_t *rows,
 }
 
 static void scroll_console(p8p_runtime_t *runtime, int rows) {
-    memmove(runtime->framebuffer, runtime->framebuffer + rows * 128,
-            (size_t)(128 - rows) * 128);
-    memset(runtime->framebuffer + (128 - rows) * 128, 0, (size_t)rows * 128);
+    /* Only the clip rectangle moves, though it may read rows from below it. */
+    int left = runtime->clip_x0, width = runtime->clip_x1 - left;
+    for (int y = runtime->clip_y0; y < runtime->clip_y1 && width > 0; ++y) {
+        uint8_t *row = runtime->framebuffer + y * 128 + left;
+        if (y + rows < 128)
+            memcpy(row, row + rows * 128, (size_t)width);
+        else
+            memset(row, 0, (size_t)width);
+    }
     runtime->screen_ram_dirty = 1;
 }
 
@@ -2082,10 +2088,9 @@ static int api_print(lua_State *lua) {
             tab_width = runtime->ram[0x5606];
     };
     select_font();
-    /* Only a console print without coordinates scrolls; \0 suppresses it. */
+    /* Only a console print without coordinates scrolls. */
     int last_width = (mode & PRINT_WIDE) ? char_width * 2 : char_width;
-    int console_scroll = arguments < 3 && !(runtime->ram[0x5f36] & 0x40) &&
-                         !(length > 0 && text[length - 1] == 0);
+    int console_scroll = arguments < 3 && !(runtime->ram[0x5f36] & 0x40);
     const uint8_t *pal = runtime->draw_palette;
 #define PRINT_NEXT() (n + 1 < length ? text[++n] : (++n, (uint8_t)0))
 #define PRINT_BG() ((uint8_t)(bg_color < 0 ? 0 : pal[bg_color & 15]))
@@ -2103,6 +2108,10 @@ static int api_print(lua_State *lua) {
         x = home_x;
         y += line_height > 0 ? line_height : PRINT_LINE_H();
         line_height = 0;
+        if (console_scroll && y - runtime->camera_y > 122) {
+            scroll_console(runtime, 6);
+            y -= 6;
+        }
     };
     /* Every drawn character passes through here; one_off replaces the font. */
     auto emit = [&](uint8_t character, const uint8_t *one_off,
@@ -2122,8 +2131,8 @@ static int api_print(lua_State *lua) {
             newline();
         int cell_height = one_off ? ((mode & PRINT_TALL) ? 16 : 8) :
                           PRINT_LINE_H();
-        if (console_scroll && y + cell_height > 128) {
-            int rows = y + cell_height - 128;
+        if (console_scroll && y - runtime->camera_y + cell_height > 128) {
+            int rows = y - runtime->camera_y + cell_height - 128;
             scroll_console(runtime, rows < 128 ? rows : 128);
             y -= rows;
         }
@@ -2362,7 +2371,8 @@ static int api_print(lua_State *lua) {
 #undef PRINT_SCALED_W
 #undef PRINT_LINE_H
 #undef PRINT_ADVANCE
-    if (console_scroll && y + line_height > 122) {
+    if (console_scroll && !terminated &&
+        y - runtime->camera_y + line_height > 122) {
         scroll_console(runtime, 6);
         y -= 6;
     }
