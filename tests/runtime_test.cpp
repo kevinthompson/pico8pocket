@@ -1166,8 +1166,9 @@ int main(void) {
             CHECK(pixels[2] == 9);
             CHECK(pixels[3] == 7);
             CHECK(pixels[4] == 7);
-            /* pal(0) keeps transparency. */
-            CHECK(pixels[5] == 7);
+            /* pal(0) resets transparency along with the draw palette, which
+             * PICO-8 0.2.7 does although the manual does not mention it. */
+            CHECK(pixels[5] == 0);
             CHECK(p8p_runtime_screen_palette(runtime)[3] == 3);
             CHECK(p8p_runtime_screen_palette(runtime)[7] == 7);
             p8p_cart_destroy(&pal_reset_cart);

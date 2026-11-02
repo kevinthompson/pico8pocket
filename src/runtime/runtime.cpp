@@ -1485,7 +1485,7 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
             lua_pop(lua, 1);
         }
     } else if (arg_count(lua) == 1) {
-        /* pal(p) resets one palette, and the draw palette keeps transparency.
+        /* pal(p) resets one palette, and pal(0) also resets transparency.
          * There is no secondary palette yet, so pal(2) changes nothing. */
         int palette = arg_int(lua, 1, 0);
         if (palette == 0 || palette == 1) {
@@ -1497,6 +1497,8 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
                     palette_entry_to_ram(runtime, i);
                 }
             }
+            if (palette == 0)
+                reset_transparency(runtime);
         }
     } else {
         int from = arg_int(lua, 1, 0) & 15;
