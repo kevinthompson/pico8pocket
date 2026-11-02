@@ -588,6 +588,19 @@ px(5,10,9) eq(peek(0x5f27),126))"},
     {"scroll can be disabled", R"(poke(0x5f36,0x40) cursor(0,120) pset(5,10,9) print("a",7)
 px(5,10,9) eq(peek(0x5f27),126) poke(0x5f36,0))"},
     {"scroll inside a string", R"(cursor(0,114) print("a\nb\nc",7) eq(peek(0x5f27),122))"},
+    {"wide doubles the current width", R"(eq(print("\^wab",0,0),16) eq(print("\^x5\^wab",0,0),20)
+eq(print("\^w\^x5ab",0,0),20) eq(print("\^w\^-wa",0,0),4))"},
+    {"high characters advance", R"(eq(print("\130",0,0),8) eq(print("\#8\130",0,0),8)
+eq(print("\^i\130",0,0),8) eq(print("\^w\130",0,0),16) eq(print("\^x5\130",0,0),9))"},
+    {"custom widths survive modes", R"(poke(0x5600,6,10,8) eq(print("\014a\130",0,0),16)
+eq(print("\014\#9a\130",0,0),16) eq(print("\014\^wa",0,0),12)
+eq(print("\014\^w\^-wa",0,0),6) print("\014\^ta",0,0) eq(peek(0x5f27),16))"},
+    {"tall doubles the current height", R"(print("\^ta\nb",0,0,7) px(0,12,7) print("\^y4\^ta\nb",20,0,7) px(20,8,7))"},
+    {"default attribute modes set metrics", R"(poke(0x5f58,5) eq(print("ab",0,0),16)
+poke(0x5f58,9) print("a",0,0) eq(peek(0x5f27),12) poke(0x5f58,0))"},
+    {"backspace undoes last width", R"(print("\130\b\0",0,0) eq(peek(0x5f26),0)
+print("\^wa\b\0",0,0) eq(peek(0x5f26),0))"},
+    {"blank print uses character height", R"(print("\^y8",0,0) eq(peek(0x5f27),8))"},
     /* end of print cases */
 };
 
