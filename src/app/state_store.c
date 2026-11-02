@@ -60,6 +60,13 @@ static void initialize_store(uint8_t *store) {
     write_u64(store + 24, 0);
 }
 
+static int valid_store_header(const uint8_t *header) {
+    return memcmp(header, store_magic, sizeof(store_magic)) == 0 &&
+           read_u32(header + 8) == STORE_VERSION &&
+           read_u32(header + 12) >= STORE_DATA_OFFSET &&
+           read_u32(header + 12) <= STORE_CAPACITY;
+}
+
 static int load_store(const char *path, uint8_t **result) {
     uint8_t *store;
     FILE *file;
@@ -76,11 +83,7 @@ static int load_store(const char *path, uint8_t **result) {
         received = fread(store, 1, STORE_CAPACITY, file);
         fclose(file);
     }
-    if (received < STORE_HEADER_SIZE ||
-        memcmp(store, store_magic, sizeof(store_magic)) != 0 ||
-        read_u32(store + 8) != STORE_VERSION ||
-        read_u32(store + 12) < STORE_DATA_OFFSET ||
-        read_u32(store + 12) > STORE_CAPACITY)
+    if (received < STORE_HEADER_SIZE || !valid_store_header(store))
         initialize_store(store);
     *result = store;
     return 0;
@@ -103,18 +106,20 @@ static int save_store(const char *path, uint8_t *store) {
     return 0;
 }
 
-static int valid_record(const uint8_t *store, uint32_t offset,
-                        uint32_t used, uint32_t *total) {
+static int header_fits(uint32_t offset, uint32_t used) {
+    return offset <= used && used - offset >= RECORD_HEADER_SIZE;
+}
+
+static int valid_record_header(const uint8_t *header, uint32_t offset,
+                               uint32_t used, uint32_t *total) {
     uint32_t record_size;
     uint32_t compressed_size;
     uint32_t thumbnail_size;
-    if (offset > used || used - offset < RECORD_HEADER_SIZE)
+    if (read_u32(header) != RECORD_MAGIC)
         return 0;
-    if (read_u32(store + offset) != RECORD_MAGIC)
-        return 0;
-    record_size = read_u32(store + offset + 4);
-    compressed_size = read_u32(store + offset + 12);
-    thumbnail_size = read_u32(store + offset + 48);
+    record_size = read_u32(header + 4);
+    compressed_size = read_u32(header + 12);
+    thumbnail_size = read_u32(header + 48);
     if (thumbnail_size > P8P_STATE_THUMB_SIZE ||
         record_size < RECORD_HEADER_SIZE + thumbnail_size ||
         record_size != RECORD_HEADER_SIZE + thumbnail_size + compressed_size ||
@@ -123,6 +128,12 @@ static int valid_record(const uint8_t *store, uint32_t offset,
     if (total)
         *total = record_size;
     return 1;
+}
+
+static int valid_record(const uint8_t *store, uint32_t offset,
+                        uint32_t used, uint32_t *total) {
+    return header_fits(offset, used) &&
+           valid_record_header(store + offset, offset, used, total);
 }
 
 static int find_record(const uint8_t *store, const p8p_cart_hash_t *hash,
