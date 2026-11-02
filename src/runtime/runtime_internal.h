@@ -37,6 +37,8 @@ struct p8p_runtime {
     /* Buttons sampled at the start of the current frame; live updates
      * during the frame may only add to them. */
     uint8_t frame_buttons;
+    /* The physical pause button, which btn(6) reports as a one-frame pulse. */
+    uint8_t pause_button_held;
     uint16_t held_frames[7];
     uint32_t rng[2];
     int camera_x;

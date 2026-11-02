@@ -1185,6 +1185,32 @@ int main(void) {
         }
 
         {
+            /* PICO-8 0.2.7 shows the pause button to the cart for one frame
+             * per press, however long it is held, and never repeats btnp. */
+            static const char pulse_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "n=0 p=0 poke(0x5f30,1)\n"
+                "function _update() poke(0x5f30,1) if btn(6) then n+=1 end\n"
+                "if btnp(6) then p+=1 end end\n"
+                "function _draw() cls() pset(0,0,n) pset(1,0,p) end\n";
+            p8p_cart_t pulse_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)pulse_source,
+                                            sizeof(pulse_source) - 1,
+                                            &pulse_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &pulse_cart) == 0);
+            for (int frame = 0; frame < 40; ++frame)
+                CHECK(p8p_runtime_step(runtime, 1u << 6) == 0);
+            CHECK(p8p_runtime_framebuffer(runtime)[0] == 1);
+            CHECK(p8p_runtime_framebuffer(runtime)[1] == 1);
+            /* A later press after a release is a new pulse. */
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            CHECK(p8p_runtime_step(runtime, 1u << 6) == 0);
+            CHECK(p8p_runtime_framebuffer(runtime)[0] == 2);
+            CHECK(p8p_runtime_framebuffer(runtime)[1] == 2);
+            p8p_cart_destroy(&pulse_cart);
+        }
+
+        {
             static const char suppress_source[] =
                 "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
                 "n=0 function _update() n+=1\n"

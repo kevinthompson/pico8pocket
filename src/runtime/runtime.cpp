@@ -3421,7 +3421,8 @@ extern "C" void p8p_runtime_set_live_buttons(p8p_runtime_t *runtime,
      * the frame started with (a short tap would vanish before the cart read
      * it) and leave btnp() timing to the next frame boundary (a press seen
      * here after the cart's btnp() check would otherwise never register). */
-    runtime->buttons = (uint8_t)(runtime->frame_buttons | (buttons & 0x7f));
+    uint8_t visible = runtime->pause_button_held ? 0x3f : 0x7f;
+    runtime->buttons = (uint8_t)(runtime->frame_buttons | (buttons & visible));
 }
 
 static int step_frame(p8p_runtime_t *runtime, uint8_t buttons,
@@ -3432,7 +3433,13 @@ extern "C" int p8p_runtime_step_with_draw(p8p_runtime_t *runtime,
                                             int draw_frame) {
     if (!runtime || !runtime->lua)
         return -1;
-    int pause_pressed = (buttons & ~runtime->frame_buttons & 0x40) != 0;
+    /* The cart sees the pause button for one frame per press, however long
+     * it stays down, so btn(6) never holds and btnp(6) never repeats. */
+    int pause_held = (buttons & 0x40) != 0;
+    int pause_pressed = pause_held && !runtime->pause_button_held;
+    runtime->pause_button_held = pause_held;
+    if (!pause_pressed)
+        buttons &= (uint8_t)~0x40;
     int status = step_frame(runtime, buttons, draw_frame);
     /* The pause button opens the menu once the frame that saw it ends,
      * unless that frame poked 0x5f30 = 1 to keep the press for itself. */
