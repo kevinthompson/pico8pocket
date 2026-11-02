@@ -129,13 +129,28 @@ Implemented and covered by host tests:
 - offline `load("#id", breadcrumb, parameters)`, `stat(6)` parameters,
   `stat(100)` breadcrumb and `extcmd("go_back")`, including host-managed return
   history and Select-menu return; the shared catalog initially contains 36 carts;
+- P8SCII control codes, default attributes at `0x5f58`-`0x5f5b` and custom
+  fonts at `0x5600`, audited against manual Appendix A (see below);
 - 120 error-free headless frames of the official Celeste Classic cart.
+
+P8SCII limits. These are known differences from PICO-8:
+
+- `\^1`-`\^9` and `\^d` parse but do not wait. `print` runs as one C call with
+  its state in locals, while `flip()` yields a coroutine. Waiting would need a
+  resumable print state that survives Eris save states.
+- `\a` plays an existing sfx (`\a12`). The note language is skipped, because
+  its beep and default speed cannot be confirmed without PICO-8.
+- The manual leaves some details open, and PICO-8 is not available to settle
+  them: `\^c` keeps the home position, `0x5f5b` offsets apply as unsigned
+  values, `\^;` advances eight pixels, and the underline sits on the row after
+  the line. Scroll amounts, `\*` on a newline, a tab moving on from a stop and
+  `0x5f36` bit 7 follow zepto8. `\^s` follows the manual's pixels, where Fake-08
+  and zepto8 multiply by four.
 
 Not yet compatibility-complete:
 
 - exact custom-instrument, filter, reverb and hardware-audio behavior;
-- pause/menu callbacks, general P8SCII/custom font behavior beyond button
-  constants, and the remaining obscure draw-state/hardware aliases;
+- pause/menu callbacks and the remaining obscure draw-state/hardware aliases;
 - arbitrary local-path `load()`/`reload()` multicart behavior and physical
   Pocket verification of the new offline BBS loader;
 - ZIP extraction and the graphical indexed card browser;
