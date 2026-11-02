@@ -563,8 +563,8 @@ print("\+kga",8,8,7) px(12,8,7)
 print("ab\^hc\^gd\ne",0,20,7) eq(print("\^j24",0,0),8)
 print("ab\rx",0,30,7) px(0,30,7) px(1,31,0))"},
     {"modes toggle and stripe", R"(print("\^t\^=l",0,0,7) px(0,0,7) px(0,1,0) px(0,2,7)
-print("\^w\^=l",10,0,7) px(10,0,7) px(11,0,0) px(12,8,0)
-print("\^pl",20,0,7) px(20,0,7) px(21,0,0) px(20,1,0)
+print("\^w\^=l",10,0,7) px(10,0,0) px(11,0,7)
+print("\^pl",20,0,7) px(20,0,0) px(21,0,7) px(21,1,0)
 eq(print("\^p\^-pl",30,0),34))"},
     {"raw memory writes", R"(print("\^@43000002ABc") eq(peek(0x4300),65) eq(peek(0x4301),66)
 local y=peek(0x5f27) print("\^!4310XY") eq(peek(0x4311),89) eq(peek(0x5f27),y))"},
@@ -677,6 +677,8 @@ print("c") eq(peek(0x5f26),30)
 print("ab\0",30,40) print("c") eq(peek(0x5f26),30) cursor(9,0) eq(peek(0x5f24),9))"},
     {"poke command ends the print", R"(print("ab\^!4300x",30,40,7) eq(peek(0x5f26),38) eq(peek(0x5f27),40)
 local x,y=print("ab\^!4300x",0,0) eq(x,8) eq(y,0))"},
+    {"stripes follow height when tall and wide", R"(print("\^w\^t\^=l",0,0,7) px(0,0,7) px(1,0,7) px(0,1,0))"},
+    {"pinball is its own state", R"(eq(print("\^p\^-wa",0,0),8) print("\^p\^-=l",0,0,7) px(0,0,0) px(1,0,7) px(1,1,0))"},
     /* end of print cases */
 };
 

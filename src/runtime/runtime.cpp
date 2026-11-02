@@ -1869,7 +1869,9 @@ enum {
     PRINT_SOLID_BG = 0x10,
     PRINT_INVERTED = 0x20,
     PRINT_STRIPEY = 0x40,
-    PRINT_CUSTOM_FONT = 0x80
+    PRINT_CUSTOM_FONT = 0x80,
+    /* \^p is its own wide, tall, dotted state, not a set of the bits above. */
+    PRINT_PINBALL = 0x100
 };
 
 /* P8SCII parameter characters: 0-9 then a-z for 10-35. */
@@ -1916,8 +1918,9 @@ static void draw_glyph_rows(p8p_runtime_t *runtime, const uint8_t *rows,
                             int x, int y, uint8_t fg, uint8_t bg, int mode,
                             int width, int height, int cell_width,
                             int cell_height, int padding) {
-    int w_factor = (mode & PRINT_WIDE) ? 2 : 1;
-    int h_factor = (mode & PRINT_TALL) ? 2 : 1;
+    int w_factor = (mode & (PRINT_WIDE | PRINT_PINBALL)) ? 2 : 1;
+    int h_factor = (mode & (PRINT_TALL | PRINT_PINBALL)) ? 2 : 1;
+    int pinball = (mode & PRINT_PINBALL) != 0;
     int stripey = (mode & PRINT_STRIPEY) != 0;
     int inverted = (mode & PRINT_INVERTED) != 0;
     int solid_bg = (mode & PRINT_SOLID_BG) != 0;
@@ -1955,8 +1958,10 @@ static void draw_glyph_rows(p8p_runtime_t *runtime, const uint8_t *rows,
             if (dx >= 0 && dy >= 0 && dx < out_w && dy < out_h &&
                 dx / w_factor < 8 && dy / h_factor < 8) {
                 on = (rows[dy / h_factor] >> (dx / w_factor)) & 1;
-                if (stripey && h_factor > 1 && (dy & 1)) on = 0;
-                if (stripey && w_factor > 1 && (dx & 1)) on = 0;
+                if (pinball ? (dy & 1) || !(dx & 1) :
+                    stripey && (h_factor > 1 ? dy & 1 :
+                                w_factor > 1 && !(dx & 1)))
+                    on = 0;
             }
             int px = x + dx, py = y + dy;
             if (!in_clip(runtime, px, py) || (unsigned)px >= 128u ||
@@ -1998,8 +2003,8 @@ static void draw_glyph(p8p_runtime_t *runtime, uint8_t character, int x, int y,
  * outline can put back what its neighbour passes painted over them. */
 static void swap_glyph_interior(p8p_runtime_t *runtime, const uint8_t *rows,
                                 int x, int y, int mode, uint8_t *saved) {
-    int w_factor = (mode & PRINT_WIDE) ? 2 : 1;
-    int h_factor = (mode & PRINT_TALL) ? 2 : 1;
+    int w_factor = (mode & (PRINT_WIDE | PRINT_PINBALL)) ? 2 : 1;
+    int h_factor = (mode & (PRINT_TALL | PRINT_PINBALL)) ? 2 : 1;
     x -= runtime->camera_x;
     y -= runtime->camera_y;
     for (int dy = 0; dy < 8 * h_factor; ++dy)
@@ -2105,8 +2110,10 @@ static int api_print(lua_State *lua) {
     draw_glyph(runtime, character, (glyph_x) + offset_x, (glyph_y) + offset_y, \
                pal[(color) & 15], PRINT_BG(), draw_mode, force_width, \
                force_height, cell_width, cell_height, padding)
-#define PRINT_SCALED_W(width) ((mode & PRINT_WIDE) ? (width) * 2 : (width))
-#define PRINT_LINE_H() ((mode & PRINT_TALL) ? char_height * 2 : char_height)
+#define PRINT_SCALED_W(width) \
+    ((mode & (PRINT_WIDE | PRINT_PINBALL)) ? (width) * 2 : (width))
+#define PRINT_LINE_H() \
+    ((mode & (PRINT_TALL | PRINT_PINBALL)) ? char_height * 2 : char_height)
 #define PRINT_ADVANCE(character) \
     PRINT_SCALED_W((character) < 0x80 ? char_width : wide_char_width)
 
@@ -2135,7 +2142,7 @@ static int api_print(lua_State *lua) {
                       PRINT_ADVANCE(character) + PRINT_SCALED_W(adjust);
         if (wrap_x > 0 && x + advance > wrap_x)
             newline();
-        int cell_height = one_off ? ((mode & PRINT_TALL) ? 16 : 8) :
+        int cell_height = one_off ? ((mode & (PRINT_TALL | PRINT_PINBALL)) ? 16 : 8) :
                           PRINT_LINE_H();
         if (console_scroll && y - runtime->camera_y + cell_height > 128) {
             int rows = y - runtime->camera_y + cell_height - 128;
@@ -2258,7 +2265,7 @@ static int api_print(lua_State *lua) {
             } else if (command == '=') {
                 mode |= PRINT_ON | PRINT_STRIPEY;
             } else if (command == 'p') {
-                mode |= PRINT_ON | PRINT_WIDE | PRINT_TALL | PRINT_STRIPEY;
+                mode |= PRINT_ON | PRINT_PINBALL;
             } else if (command == 'i') {
                 mode |= PRINT_ON | PRINT_INVERTED;
             } else if (command == 'b') {
@@ -2285,8 +2292,7 @@ static int api_print(lua_State *lua) {
                 if (off == 'w') mode &= ~PRINT_WIDE;
                 else if (off == 't') mode &= ~PRINT_TALL;
                 else if (off == '=') mode &= ~PRINT_STRIPEY;
-                else if (off == 'p')
-                    mode &= ~(PRINT_WIDE | PRINT_TALL | PRINT_STRIPEY);
+                else if (off == 'p') mode &= ~PRINT_PINBALL;
                 else if (off == 'i') mode &= ~PRINT_INVERTED;
                 else if (off == 'b') padding = 0;
                 else if (off == 'u') underline = 0;
