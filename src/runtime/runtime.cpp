@@ -2520,6 +2520,10 @@ static int api_protected_call(lua_State *lua) {
 
 static int api_extcmd(lua_State *lua) {
     const char *command = lua_tostring(lua, 1);
+    if (command && strcmp(command, "pause") == 0) {
+        active_runtime->pause_requested = 1;
+        return 0;
+    }
     if (command && strcmp(command, "go_back") == 0 &&
         p8p_runtime_request_back(active_runtime) == 0)
         return lua_yield(lua, 0);
@@ -3220,6 +3224,7 @@ extern "C" int p8p_runtime_load_context(p8p_runtime_t *runtime,
     runtime->cart_thread_ref = LUA_NOREF;
     runtime->cart_thread_active = 0;
     memset(runtime->menu_labels, 0, sizeof(runtime->menu_labels));
+    runtime->pause_requested = 0;
     memset(runtime->menu_filters, 0, sizeof(runtime->menu_filters));
     runtime->menu_ref = LUA_NOREF;
     memset(runtime->ram, 0, sizeof(runtime->ram));
@@ -3419,11 +3424,37 @@ extern "C" void p8p_runtime_set_live_buttons(p8p_runtime_t *runtime,
     runtime->buttons = (uint8_t)(runtime->frame_buttons | (buttons & 0x7f));
 }
 
+static int step_frame(p8p_runtime_t *runtime, uint8_t buttons,
+                      int draw_frame);
+
 extern "C" int p8p_runtime_step_with_draw(p8p_runtime_t *runtime,
                                             uint8_t buttons,
                                             int draw_frame) {
     if (!runtime || !runtime->lua)
         return -1;
+    int pause_pressed = (buttons & ~runtime->frame_buttons & 0x40) != 0;
+    int status = step_frame(runtime, buttons, draw_frame);
+    /* The pause button opens the menu once the frame that saw it ends,
+     * unless that frame poked 0x5f30 = 1 to keep the press for itself. */
+    if (pause_pressed && status >= 0 && !runtime->cart_halted) {
+        if (runtime->ram[0x5f30] == 1)
+            runtime->ram[0x5f30] = 0;
+        else
+            runtime->pause_requested = 1;
+    }
+    return status;
+}
+
+extern "C" int p8p_runtime_take_pause_request(p8p_runtime_t *runtime) {
+    if (!runtime)
+        return 0;
+    int requested = runtime->pause_requested;
+    runtime->pause_requested = 0;
+    return requested;
+}
+
+static int step_frame(p8p_runtime_t *runtime, uint8_t buttons,
+                      int draw_frame) {
     if (runtime->cart_halted)
         return 0;
     if (runtime->restart_requested)

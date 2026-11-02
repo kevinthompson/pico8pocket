@@ -18,6 +18,8 @@ struct p8p_runtime {
      * aligned so fill patterns can write four pixels at a time. */
     alignas(4) uint8_t framebuffer[128 * 128];
     uint8_t screen_ram_dirty;
+    /* The cart asked for the pause menu; see p8p_runtime_take_pause_request. */
+    uint8_t pause_requested;
     /* RAM address the framebuffer mirrors: the screen at 0x6000 unless the
      * cart redirects drawing with 0x5f55 (e.g. into the sprite sheet). */
     uint16_t draw_target;

@@ -1144,6 +1144,54 @@ int main(void) {
         }
 
         {
+            /* The pause button asks for the menu once per press, 0x5f30
+             * suppresses one press, and extcmd("pause") asks directly. */
+            static const char pause_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _update() end\n";
+            p8p_cart_t pause_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)pause_source,
+                                            sizeof(pause_source) - 1,
+                                            &pause_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &pause_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            CHECK(p8p_runtime_take_pause_request(runtime) == 0);
+            CHECK(p8p_runtime_step(runtime, P8P_BTN_PAUSE) == 0);
+            CHECK(p8p_runtime_take_pause_request(runtime) == 1);
+            CHECK(p8p_runtime_take_pause_request(runtime) == 0);
+            /* Holding the button is one press. */
+            CHECK(p8p_runtime_step(runtime, P8P_BTN_PAUSE) == 0);
+            CHECK(p8p_runtime_take_pause_request(runtime) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            p8p_cart_destroy(&pause_cart);
+        }
+
+        {
+            static const char suppress_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "n=0 function _update() n+=1\n"
+                "if n==2 then poke(0x5f30,1) end\n"
+                "if n==6 then extcmd(\"pause\") end end\n";
+            p8p_cart_t suppress_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)suppress_source,
+                                            sizeof(suppress_source) - 1,
+                                            &suppress_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &suppress_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            CHECK(p8p_runtime_step(runtime, P8P_BTN_PAUSE) == 0);
+            CHECK(p8p_runtime_take_pause_request(runtime) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            /* The poke covered one press only. */
+            CHECK(p8p_runtime_step(runtime, P8P_BTN_PAUSE) == 0);
+            CHECK(p8p_runtime_take_pause_request(runtime) == 1);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            CHECK(p8p_runtime_take_pause_request(runtime) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            CHECK(p8p_runtime_take_pause_request(runtime) == 1);
+            p8p_cart_destroy(&suppress_cart);
+        }
+
+        {
             /* stat(26) counts 183/22050 s ticks into the music pattern:
              * 9600 samples at 48 kHz are 24 ticks. */
             audio_crossings_for(runtime,
