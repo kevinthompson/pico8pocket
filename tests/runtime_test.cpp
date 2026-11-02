@@ -1175,6 +1175,27 @@ int main(void) {
         }
 
         {
+            /* An explicit nil colour maps to 0, as in PICO-8 0.2.7. */
+            static const char source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _draw() cls()\n"
+                "pal(8,9) r=pal(8,nil)\n"
+                "if r==9 and peek(0x5f08)==0 then pset(0,0,7) end\n"
+                "pal() pal(8,9,1) pal(8,nil,1)\n"
+                "if peek(0x5f18)==0 then pset(1,0,7) end\n"
+                "pal() end\n";
+            p8p_cart_t cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                            sizeof(source) - 1, &cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            CHECK(pixels[0] == 7);
+            CHECK(pixels[1] == 7);
+            p8p_cart_destroy(&cart);
+        }
+
+        {
             /* pal(-1), and pal() given one value that is not a number, reset
              * both palettes and transparency, as PICO-8 0.2.7 does. */
             static const char source[] =
