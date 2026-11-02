@@ -629,6 +629,14 @@ px(21,90,8) px(22,90,8) px(22,91,8))"},
 px(10,60,7) px(9,60,0) px(10,59,0) px(17,67,8) px(18,60,0)
 print("\^y3\^:0000000000000001",30,60,7) px(30,67,7))"},
     {"one-off respects padding", R"(print("\#8\^;ff00000000000000",10,60,7) px(10,60,7) px(9,59,8) px(17,67,8))"},
+    {"repeat paints background", R"(print("\#8\*3x",10,10,7) px(21,10,8) px(20,10,7))"},
+    {"repeat sets line height", R"(print("\^y9\*2a\nb",0,0,7) px(0,9,7))"},
+    {"repeat newline", R"(print("\*3\nb",0,0,7) px(0,18,7))"},
+    {"decorate repeated character", R"(print("\*2a\v0b",0,20,7) px(2,12,7))"},
+    {"decorate one-off character", R"(print("\^:0000000000000000\v0b",10,20,7) px(8,12,7))"},
+    {"decoration restores cursor", R"(eq(print("a\v5zb",0,10),8))"},
+    {"repeat keeps outline", R"(print("\^o8ff\*2a",10,30,7) px(9,29,8) px(15,31,8))"},
+    {"one-off keeps outline", R"(print("\^o8ff\^:0100000000000000",10,50,7) px(10,50,7) px(9,49,8))"},
     /* end of print cases */
 };
 
