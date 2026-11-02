@@ -1124,20 +1124,21 @@ int main(void) {
         CHECK(p8p_runtime_framebuffer(runtime)[1] == 7);
 
         /* A 250 ms press at 60 fps stays one press: the delay of 10 means
-         * 20 frames, and repeats then come every 4 frames, not every 2. */
+         * 20 frames, and repeats then come every 4 frames, not every 2.  The
+         * first repeat falls on the delay itself, so 33 frames give 5 hits. */
         loaded = p8p_runtime_load(runtime, &repeat_60_cart);
         CHECK(loaded == 0);
         for (int frame = 0; frame < 15; ++frame)
             CHECK(p8p_runtime_step(runtime, 1u << 4) == 0);
         CHECK(p8p_runtime_framebuffer(runtime)[1] == 7);
-        for (int frame = 15; frame < 36; ++frame)
+        for (int frame = 15; frame < 33; ++frame)
             CHECK(p8p_runtime_step(runtime, 1u << 4) == 0);
         CHECK(p8p_runtime_framebuffer(runtime)[5] == 7);
 
         /* The same pokes in a 30 fps cart are taken as written. */
         loaded = p8p_runtime_load(runtime, &repeat_30_cart);
         CHECK(loaded == 0);
-        for (int frame = 0; frame < 18; ++frame)
+        for (int frame = 0; frame < 17; ++frame)
             CHECK(p8p_runtime_step(runtime, 1u << 4) == 0);
         CHECK(p8p_runtime_framebuffer(runtime)[5] == 7);
 

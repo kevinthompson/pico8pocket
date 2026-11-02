@@ -1560,7 +1560,7 @@ static int btnp_fires(const p8p_runtime_t *runtime, uint16_t held) {
     int frames_per_step = runtime->target_fps == 60 ? 2 : 1;
     delay *= frames_per_step;
     interval *= frames_per_step;
-    return held > delay && (held - delay) % interval == 0;
+    return held > delay && (held - 1 - delay) % interval == 0;
 }
 
 static int api_btnp(lua_State *lua) {
