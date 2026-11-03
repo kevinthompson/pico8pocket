@@ -343,6 +343,8 @@ static void memory_addresses_wrap_like_pico8(void) {
         " poke(0x9000,5,6,7,8) memcpy(0x9001,0x9000,3)\n"
         " is(@0x9000==5 and @0x9001==5 and @0x9002==6 and @0x9003==7)\n"
         " memset(0x9400,9,4) reload(0x9400,0,4) is(peek4(0x9400)==0)\n"
+        " is(serial(0x808,0xffc0,128)==128 and stat(108)==128)\n"
+        " is(serial(0x808,0x8000,64)==64 and stat(108)==192)\n"
         " cls() for i=1,#r do pset(i-1,0,r[i] and 11 or 8) end\n"
         "end\n";
     p8p_cart_t cart = {};
@@ -353,7 +355,7 @@ static void memory_addresses_wrap_like_pico8(void) {
     CHECK(p8p_runtime_load(runtime, &cart) == 0);
     CHECK(p8p_runtime_step(runtime, 0) == 0);
     const uint8_t *fb = p8p_runtime_framebuffer(runtime);
-    for (int index = 0; index < 16; ++index) {
+    for (int index = 0; index < 18; ++index) {
         if (fb[index] != 11)
             fprintf(stderr, "FAIL memory address case %d\n", index + 1);
         CHECK(fb[index] == 11);

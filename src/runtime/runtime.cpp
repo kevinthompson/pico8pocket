@@ -2622,15 +2622,24 @@ static int api_trace(lua_State *lua) {
 static int api_serial(lua_State *lua) {
     p8p_runtime_t *runtime = active_runtime;
     int channel = arg_int(lua, 1, 0);
-    int address = arg_int(lua, 2, 0);
-    int length = arg_int(lua, 3, 0);
+    int address = arg_int(lua, 2, 0) & 0xffff;
+    int length = ram_length(arg_int(lua, 3, 0));
     int processed = 0;
-    if (channel == 0x808 && address >= 0 && length > 0 &&
-        address + length <= 0x10000) {
+    if (channel == 0x808 && length > 0) {
         if (range_touches_screen(address, length))
             screen_to_ram(runtime);
-        processed = p8p_audio_pcm_push(runtime->audio, runtime->ram + address,
-                                       length);
+        /* The read wraps past 0xffff; stop when the queue fills. */
+        while (processed < length) {
+            int chunk = length - processed;
+            if (chunk > RAM_SIZE - address)
+                chunk = RAM_SIZE - address;
+            int queued = p8p_audio_pcm_push(runtime->audio,
+                                            runtime->ram + address, chunk);
+            processed += queued;
+            if (queued < chunk)
+                break;
+            address = 0;
+        }
     }
     push_int(lua, processed);
     return 1;

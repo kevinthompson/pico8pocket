@@ -7,6 +7,8 @@
   PICO-8 0.2.7. Those addresses are negative numbers in PICO-8, and the
   functions used to ignore them: reads gave 0 and writes did nothing. Carts
   that keep extra sprite sheets, maps or level data in upper memory lost it.
+  `serial(0x808, ...)` reads PCM samples from upper memory and wraps the same
+  way.
 
 ## 0.0.35 — 2026-10-21
 
