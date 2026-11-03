@@ -15,6 +15,9 @@
 - `spr()` honours fractional sizes, drawing `w*8` by `h*8` pixels. It previously
   truncated them to whole tiles, so a width below 1 drew nothing. As in PICO-8,
   a size left out or nil after `w` is passed counts as 0, not 1.
+- The runtime error screen and the performance overlay draw text with the
+  PICO-8 font instead of hand-drawn letters, so `M` and `N` are distinct and
+  messages look as they do in PICO-8.
 
 ## 0.0.35 — 2026-10-21
 

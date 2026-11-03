@@ -1,6 +1,7 @@
 /* Drive the real app loop with host platform hooks after an initial load
  * rejection. main.c is compiled separately as C with -Dmain=p8p_app_main. */
 #include "p8p/cart.h"
+#include "p8p/pico8_font.h"
 #include "p8p/runtime.h"
 extern "C" {
 #include "p8p/platform.h"
@@ -22,6 +23,22 @@ static unsigned pause_calls;
 static unsigned audio_calls;
 static uint32_t now_us;
 static jmp_buf app_exit;
+
+/* The error screen draws in PICO-8's font: letters use the font's lowercase
+ * codes, which hold the shapes PICO-8 prints by default. */
+static void check_pico8_text(const uint8_t *pixels, int x, int y,
+                             const char *text, uint8_t color) {
+    for (; *text; ++text, x += 4) {
+        unsigned code = (unsigned char)*text;
+        if (code >= 'A' && code <= 'Z')
+            code += 'a' - 'A';
+        for (int row = 0; row < 5; ++row)
+            for (int column = 0; column < 3; ++column) {
+                bool lit = (p8p_pico8_font[code * 8 + row] >> column) & 1;
+                assert((pixels[(y + row) * 128 + x + column] == color) == lit);
+            }
+    }
+}
 
 static void capture(const uint8_t *pixels, const char *name) {
     const char *directory = getenv("P8P_APP_CAPTURE_DIR");
@@ -54,6 +71,8 @@ void p8p_platform_present(const uint8_t *pixels, const uint8_t *palette) {
         for (size_t i = 0; i < sizeof screen; ++i)
             text_pixels += pixels[i] == 7;
         assert(text_pixels > 0);
+        check_pico8_text(pixels, 6, 6, "RUNTIME ERROR", 8);
+        check_pico8_text(pixels, 40, 117, "SELECT MENU", 6);
         memcpy(first_frame, pixels, sizeof first_frame);
         capture(pixels, "load-error");
     } else if (presents == 1) {
