@@ -450,6 +450,39 @@ static void screen_palette_keeps_raw_bytes(void) {
     p8p_cart_destroy(&cart);
 }
 
+static void set_fps_paces_top_level_flips(void) {
+    /* Measured in PICO-8 0.2.7: _set_fps(60) before the main loop makes each
+     * flip() advance time() by 1/60 s, _set_fps(30) by 1/30 s with time()
+     * continuing smoothly, and the main loop then picks the rate from
+     * _update60 again. */
+    static const char source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "_set_fps(60) for i=1,60 do flip() end t1=time() s1=stat(7)\n"
+        "_set_fps(30) for i=1,30 do flip() end t2=time() s2=stat(7)\n"
+        "function _update() end\n"
+        "function _draw() cls()\n"
+        " pset(0,0,(t1>0.98 and t1<1.05) and 11 or 8)\n"
+        " pset(1,0,(t2-t1>0.96 and t2-t1<1.04) and 11 or 8)\n"
+        " pset(2,0,(s1==60 and s2==30 and stat(7)==30) and 11 or 8)\n"
+        "end\n";
+    p8p_cart_t cart = {};
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                    sizeof(source) - 1, &cart) == 0);
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    for (int step = 0; step < 100; ++step)
+        CHECK(p8p_runtime_step(runtime, 0) == 0);
+    const uint8_t *fb = p8p_runtime_framebuffer(runtime);
+    for (int index = 0; index < 3; ++index) {
+        if (fb[index] != 11)
+            fprintf(stderr, "FAIL _set_fps case %d\n", index + 1);
+        CHECK(fb[index] == 11);
+    }
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+}
+
 static void draw_palette_transitions(void) {
     struct PaletteCase {
         const char *name;
@@ -696,6 +729,7 @@ int main(void) {
     palette_leaf_contracts();
     palette_fast_path_semantics();
     draw_palette_transitions();
+    set_fps_paces_top_level_flips();
     screen_palette_keeps_raw_bytes();
     btnp_repeat_bytes_start_at_zero();
     hidden_builtins_match_pico8();

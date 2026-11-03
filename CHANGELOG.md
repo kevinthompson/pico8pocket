@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `_set_fps(60)` in top-level code makes `flip()` loops there run at 60 fps,
+  as in PICO-8 0.2.7, and `time()` stays continuous when the rate changes.
+  Carts that run their title screen or whole game from top-level code used to
+  run at half speed after calling it.
+
 - `pal(c, v, 1)` keeps the low byte of `v` at `0x5f10 + c` and returns the
   byte it replaced, as PICO-8 0.2.7 does, instead of storing `v & 0x8f`. The
   display still uses the colour bits, so only peeks and return values change.

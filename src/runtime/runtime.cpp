@@ -2820,6 +2820,26 @@ static const luaL_Reg runtime_api[] = {
     {"foreach", api_foreach}, {NULL, NULL}
 };
 
+/*
+ * _set_fps(n) sets the frame rate for flip() loops in top-level code.  PICO-8
+ * steps time() by 1/30 s at 30 and by 1/60 s for any other rate, and its main
+ * loop picks the rate from _update60 again once it starts.  A later call in
+ * PICO-8 changes only how often frames are drawn, never the game speed, so
+ * from the main loop on it keeps the rate.  The frame count is rescaled so
+ * time() continues smoothly, as in PICO-8.
+ */
+static int api_set_fps(lua_State *lua) {
+    p8p_runtime_t *runtime = active_runtime;
+    int fps = arg_int(lua, 1, 0) == 30 ? 30 : 60;
+    if (runtime->cart_thread_kind == 0 && fps != runtime->target_fps) {
+        runtime->frame_count = (uint32_t)((uint64_t)runtime->frame_count *
+                                          (uint32_t)fps /
+                                          (uint32_t)runtime->target_fps);
+        runtime->target_fps = fps;
+    }
+    return 0;
+}
+
 /* _map_display(n) selects the display that drawing goes to.  The Pocket
  * has one, so as in PICO-8 with a single display, only n < 1 succeeds. */
 static int api_map_display(lua_State *lua) {
@@ -2836,12 +2856,9 @@ static const luaL_Reg late_runtime_api[] = {
     /* Not PICO-8 API, but Yarn calls exit() while drawing its score panel
      * once all levels are unlocked; a no-op lets it finish the frame. */
     {"exit", api_stub},
-    /* PICO-8 0.2.7 defines these undocumented functions.  Carts call
-     * _set_fps from their own main loops; PICO-8 resets the rate from
-     * _update60 when its loop starts, and a later change would only alter
-     * how often frames are drawn, so it is a no-op here like the frame and
-     * CPU hooks.  __trace matches trace. */
-    {"_set_fps", api_stub}, {"_update_buttons", api_stub},
+    /* PICO-8 0.2.7 defines these undocumented functions.  The frame and
+     * CPU hooks are no-ops here, and __trace matches trace. */
+    {"_set_fps", api_set_fps}, {"_update_buttons", api_stub},
     {"_get_menu_item_selected", api_stub}, {"_map_display", api_map_display},
     {"_mark_cpu", api_stub}, {"_startframe", api_stub},
     {"__trace", api_trace}, {"holdframe", api_stub},
@@ -3306,6 +3323,7 @@ extern "C" int p8p_runtime_load_context(p8p_runtime_t *runtime,
     p8p_audio_reset(runtime->audio, runtime->ram);
     runtime->error[0] = '\0';
     runtime->frame_count = 0;
+    runtime->target_fps = 30;  /* until _set_fps or the main loop */
     runtime->buttons = runtime->previous_buttons = runtime->frame_buttons = 0;
     memset(runtime->held_frames, 0, sizeof(runtime->held_frames));
     runtime->lua = lua_newstate(lua_pool_alloc, NULL);
@@ -3385,8 +3403,8 @@ extern "C" int p8p_runtime_load_context(p8p_runtime_t *runtime,
         return 0;
     }
     if (cart_status == LUA_YIELD) {
+        /* Top-level flip() loops run at 30 fps unless _set_fps changed it. */
         runtime->cart_thread_active = 1;
-        runtime->target_fps = 30;
     } else if (cart_status == LUA_OK) {
         release_cart_thread(runtime);
         if (finish_cart_load(runtime) != 0)
