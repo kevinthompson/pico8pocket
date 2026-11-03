@@ -1268,6 +1268,118 @@ static void set_fps_paces_top_level_flips(void) {
     p8p_cart_destroy(&cart);
 }
 
+/* __index chains through metatable classes give the same results as a
+ * plain walk while classes, metatables, __index values and globals change
+ * underneath cached lookups.  The cart's 39 checks all pass in PICO-8 0.2.7;
+ * each is marked in row 0: 11 passed, 8 failed. */
+static void index_chains_follow_changes(void) {
+    static const char source[] =
+        "pico-8 cartridge // http://www.pico-8.com\n"
+        "version 42\n"
+        "__lua__\n"
+        "r={} n=0\n"
+        "function is(v) n+=1 r[n]=v end\n"
+        "function class(parent)\n"
+        " local c={} c.__index=c\n"
+        " return setmetatable(c,{__index=parent})\n"
+        "end\n"
+        "function _draw()\n"
+        " cls()\n"
+        " local base=class(_ENV) base.x=1 base.f=function() return 10 end\n"
+        " local mid=class(base) local top=class(mid)\n"
+        " local o=setmetatable({},top)\n"
+        " -- 1-3 inherited field, method, missing field (twice, to hit the cache)\n"
+        " for k=1,2 do is(o.x==1) is(o.f()==10) is(o.nope==nil) end\n"
+        " -- overwrite an existing value in the holder\n"
+        " base.x=2 is(o.x==2)\n"
+        " -- a new key in an intermediate class shadows the holder\n"
+        " mid.x=3 is(o.x==3)\n"
+        " -- removing it falls back to the holder again\n"
+        " mid.x=nil is(o.x==2)\n"
+        " -- reviving a removed key (no new node) shadows again\n"
+        " mid.x=4 is(o.x==4) mid.x=nil is(o.x==2)\n"
+        " -- rawset into an intermediate class\n"
+        " rawset(top,\"x\",5) is(o.x==5) rawset(top,\"x\",nil) is(o.x==2)\n"
+        " -- the instance's own field\n"
+        " o.x=6 is(o.x==6) o.x=nil is(o.x==2)\n"
+        " -- a missing name becomes a global (the chain ends at _ENV)\n"
+        " is(o.later==nil) later=7 is(o.later==7) later=nil is(o.later==nil)\n"
+        " -- setmetatable on an intermediate class\n"
+        " local other=class(_ENV) other.x=8\n"
+        " local keep=getmetatable(mid) setmetatable(mid,{__index=other}) is(o.x==8)\n"
+        " setmetatable(mid,keep) is(o.x==2)\n"
+        " -- changing __index in a metatable\n"
+        " keep.__index=other is(o.x==8) keep.__index=base is(o.x==2)\n"
+        " -- an __index function in the chain\n"
+        " keep.__index=function(t,k) return k==\"x\" and 9 or nil end is(o.x==9) is(o.f==nil)\n"
+        " keep.__index=base is(o.x==2)\n"
+        " -- the instance's metatable changes\n"
+        " setmetatable(o,mid) is(o.x==2) setmetatable(o,other) is(o.x==8) setmetatable(o,top)\n"
+        " -- the holder grows (rehash) while cached\n"
+        " for i=1,40 do base[\"k\"..i]=i end is(o.x==2) is(o.k40==40)\n"
+        " -- dynamic string keys across garbage collection\n"
+        " for round=1,3 do\n"
+        "  for i=1,20 do base[\"d\"..i..round]=i end\n"
+        "  local ok=true\n"
+        "  for i=1,20 do if o[\"d\"..i..round]~=i then ok=false end end\n"
+        "  is(ok)\n"
+        "  for i=1,20 do base[\"d\"..i..round]=nil end\n"
+        "  for g=1,20000 do local s=\"g\"..g..round end\n"
+        " end\n"
+        " -- more classes and keys than cache entries\n"
+        " local ok=true local objs={}\n"
+        " for i=1,300 do local c=class(base) c[\"v\"..(i%7)]=i objs[i]=setmetatable({},class(c)) end\n"
+        " for pass=1,2 do for i=1,300 do\n"
+        "  if objs[i][\"v\"..(i%7)]~=i or objs[i].x~=2 or objs[i].none~=nil then ok=false end\n"
+        " end end\n"
+        " is(ok)\n"
+        " -- many keys through one class share its cache slots: odd keys come from\n"
+        " -- the bottom class, even keys are overridden one class up\n"
+        " local low=class(base) for i=1,200 do low[\"q\"..i]=i end\n"
+        " local high=class(low) for i=2,200,2 do high[\"q\"..i]=-i end\n"
+        " local mo=setmetatable({},class(high)) ok=true\n"
+        " for pass=1,2 do for i=1,200 do\n"
+        "  if mo[\"q\"..i]~=(i%2==0 and -i or i) then ok=false end\n"
+        " end end\n"
+        " is(ok)\n"
+        " -- a chain longer than the cache records\n"
+        " local c=base for i=1,12 do c=class(c) end\n"
+        " local deep=setmetatable({},c) is(deep.x==2) is(deep.nope==nil) base.x=3 is(deep.x==3) base.x=2\n"
+        " -- _ENV objects (methods called with self as _ENV)\n"
+        " local env=setmetatable({own=1},top)\n"
+        " local function m(_ENV) return own+x+f() end\n"
+        " is(m(env)==13) base.x=5 is(m(env)==16) base.x=2\n"
+        " for i=1,n do pset(i-1,0,r[i] and 11 or 8) end\n"
+        "end\n";
+    p8p_cart_t cart = {};
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                    sizeof(source) - 1, &cart) == 0);
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    const uint8_t *fb = p8p_runtime_framebuffer(runtime);
+    for (int index = 0; index < 39; ++index) {
+        if (fb[index] != 11)
+            fprintf(stderr, "FAIL index chain check %d\n", index + 1);
+        CHECK(fb[index] == 11);
+    }
+    p8p_cart_destroy(&cart);
+
+    /* An __index loop still stops with Lua's error. */
+    static const char loop_source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "a,b={},{} setmetatable(a,{__index=b}) setmetatable(b,{__index=a})\n"
+        "function _draw() q=a.q end\n";
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)loop_source,
+                                    sizeof(loop_source) - 1, &cart) == 0);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) != 0);
+    CHECK(strstr(p8p_runtime_error(runtime), "loop in gettable") != NULL);
+    p8p_cart_destroy(&cart);
+    p8p_runtime_destroy(runtime);
+}
+
 static void draw_palette_transitions(void) {
     struct PaletteCase {
         const char *name;
@@ -1770,6 +1882,7 @@ int main(void) {
     palette_leaf_contracts();
     palette_fast_path_semantics();
     draw_palette_transitions();
+    index_chains_follow_changes();
     set_fps_paces_top_level_flips();
     screen_palette_keeps_raw_bytes();
     btnp_repeat_bytes_start_at_zero();
