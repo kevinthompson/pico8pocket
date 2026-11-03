@@ -2801,6 +2801,24 @@ static const luaL_Reg runtime_api[] = {
     {"foreach", api_foreach}, {NULL, NULL}
 };
 
+/* reset() returns the draw state to its boot values, as PICO-8 does, but
+ * keeps the cursor and print's left margin.  The poke path then updates the
+ * draw fields and the draw target. */
+static int api_reset(lua_State *lua) {
+    (void)lua;
+    profile_api(P8P_API_DRAW_STATE);
+    p8p_runtime_t *runtime = active_runtime;
+    uint8_t *ram = runtime->ram;
+    uint8_t margin = ram[0x5f24], cursor_x = ram[0x5f26],
+            cursor_y = ram[0x5f27];
+    draw_state_defaults_to_ram(runtime);
+    ram[0x5f24] = margin;
+    ram[0x5f26] = cursor_x;
+    ram[0x5f27] = cursor_y;
+    draw_state_from_ram(runtime);
+    return 0;
+}
+
 /* Added after 0.0.33's first save-state format: numbered last by
  * eris.__p8p_init so existing permanent-object IDs do not move. Keep in
  * sync with the list in that function.  menuitem used to share api_stub,
@@ -2809,7 +2827,7 @@ static const luaL_Reg late_runtime_api[] = {
     {"cstore", api_stub}, {"trace", api_trace}, {"menuitem", api_menuitem},
     /* Not PICO-8 API, but Yarn calls exit() while drawing its score panel
      * once all levels are unlocked; a no-op lets it finish the frame. */
-    {"exit", api_stub},
+    {"exit", api_stub}, {"reset", api_reset},
     {NULL, NULL}
 };
 
@@ -2863,7 +2881,7 @@ static const char bootstrap_lua[] =
     "rawset(debug.getregistry(),'__PICO8_SANDBOX',_G)\n"
     "eris.__p8p_perm={} eris.__p8p_unperm={} eris.__p8p_original={}\n"
     "function eris.__p8p_init()\n"
-    " local late={'cstore','trace','menuitem','exit'} local skip={} for _,k in ipairs(late) do skip[k]=true end\n"
+    " local late={'cstore','trace','menuitem','exit','reset'} local skip={} for _,k in ipairs(late) do skip[k]=true end\n"
     " local keys={} for k in pairs(_G) do if not skip[k] then keys[#keys+1]=k end end table.sort(keys)\n"
     " local seen={} local n=0 local function permanent(v) local t=type(v)\n"
     "  if t~='table' and t~='function' and t~='userdata' and t~='thread' then return end\n"

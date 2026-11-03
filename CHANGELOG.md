@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add `reset()`, which returns the draw state at `0x5f00`-`0x5f7f` (palettes,
+  clip, camera, pen colour, fill pattern, screen mode and memory mapping) to
+  its boot values while keeping the cursor, as in PICO-8 0.2.7. Carts that
+  called it stopped at load with "attempt to call global 'reset'".
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps
