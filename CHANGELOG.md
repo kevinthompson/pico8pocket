@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add the secondary palette. `pal(c, v, 2)` and `pal(table, 2)` set its entries
+  at `0x5f60`-`0x5f6f` instead of changing the draw palette, `pal(2)`, `pal()`
+  and `pal(-1)` restore PICO-8's default pairs, and `fillp()` keeps its sprite
+  (`0x0.4`) and secondary-palette (`0x0.2`) bits in `0x5f33`. With the sprite
+  bit, `spr`, `sspr`, `map` and `tline` draw each pixel's secondary pair through
+  the fill pattern; with the secondary-palette bit, shapes do the same. Output
+  matches PICO-8 0.2.7 in 43 measured cases.
+
 - `stat(80)`-`stat(85)` and `stat(90)`-`stat(95)` report 1970-01-01 00:00:00
   instead of nil or 0, so carts that read the date at load no longer stop with
   an arithmetic error. The Pocket runtime exposes no wall clock; a year before

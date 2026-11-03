@@ -312,6 +312,97 @@ static void audio_chunk_boundaries(void) {
     }
 }
 
+/* The secondary palette and the sprite and global fill-pattern bits, as
+ * measured in PICO-8 0.2.7.  The cart checks 43 cases (pixels and memory)
+ * and marks each in row 127: 11 passed, 8 failed.  The same cart passes
+ * every case in PICO-8 itself. */
+static void secondary_palette_matches_pico8(void) {
+    static const char source[] =
+    "pico-8 cartridge // http://www.pico-8.com\n"
+    "version 42\n"
+    "__lua__\n"
+    "h=\"0123456789abcdef\" r={} n=0\n"
+    "function px(x,y) local c=pget(x,y) return sub(h,c+1,c+1) end\n"
+    "function rows(x,y,w,t)\n"
+    " n+=1 local ok=true\n"
+    " for j=1,#t do local s=\"\" for k=0,w-1 do s..=px(x+k,y+j-1) end\n"
+    "  if s~=t[j] then ok=false printh(\"case \"..n..\" row \"..j..\" got \"..s..\" want \"..t[j]) end end\n"
+    " r[n]=ok\n"
+    "end\n"
+    "function is(v) n+=1 r[n]=v if not v then printh(\"case \"..n..\" false\") end end\n"
+    "function sec() local s=\"\" for i=0,15 do local b=peek(0x5f60+i) s..=sub(h,b\\16+1,b\\16+1)..sub(h,b%16+1,b%16+1) end return s end\n"
+    "d=\"000112132415d66748499a3bdc5d8eef\"\n"
+    "P=0b0011001111001100\n"
+    "function _draw()\n"
+    "is(sec()==d)\n"
+    "cls() fillp(P+0b.01) spr(1,0,0) fillp() rows(0,0,8,{\"011145d6\",\"8993cd8e\"})\n"
+    "cls() pal(12,0x87,2) fillp(P+0b.01) spr(2,0,0) fillp() pal(2) rows(0,0,8,{\"77887788\",\"77887788\",\"88778877\",\"88778877\"})\n"
+    "cls(5) fillp(P+0b.11) spr(1,0,0) fillp() rows(0,0,8,{\"51554555\",\"8955cd55\"})\n"
+    "cls() pal(1,8) fillp(P+0b.01) spr(1,0,0) fillp() pal() rows(0,0,8,{\"081145d6\",\"8993cd8e\"})\n"
+    "cls(5) palt(0,false) fillp(P+0b.01) spr(1,0,0) fillp() palt() rows(0,0,8,{\"011145d6\",\"8993cd8e\"})\n"
+    "cls() fillp(P+0b.001) rectfill(0,0,7,3,12) fillp() rows(0,0,8,{\"ccddccdd\",\"ccddccdd\",\"ddccddcc\",\"ddccddcc\"})\n"
+    "cls() fillp(P+0b.001) rectfill(0,0,7,3,0x87) fillp() rows(0,0,8,{\"77667766\",\"77667766\",\"66776677\",\"66776677\"})\n"
+    "cls() fillp(P) rectfill(0,0,7,3,0x87) fillp() rows(0,0,8,{\"77887788\",\"77887788\",\"88778877\",\"88778877\"})\n"
+    "cls() mset(0,0,1) fillp(P+0b.01) map(0,0,0,0,1,1) fillp() mset(0,0,0) rows(0,0,8,{\"011145d6\",\"8993cd8e\"})\n"
+    "cls() fillp(P+0b.01) sspr(8,0,8,8,0,0,16,16) fillp() rows(0,0,16,{\"0000221144116666\",\"0000221144116666\",\"449999bbdddd88ff\",\"449999bbdddd88ff\"})\n"
+    "cls() pal(12,0x87,2) spr(2,0,0) pal(2) rows(0,0,8,{\"cccccccc\"})\n"
+    "cls() fillp(P+0b.01) for i=0,3 do pset(i,0,12) end fillp() rows(0,0,4,{\"cc00\"})\n"
+    "cls() camera(-2,-1) fillp(P+0b.01) spr(2,0,0) fillp() camera() rows(2,1,8,{\"ddccddcc\",\"ccddccdd\",\"ccddccdd\",\"ddccddcc\"})\n"
+    "cls() fillp(P+0b.001) line(0,0,7,0,12) pset(0,1,12) pset(1,1,12) fillp() rows(0,0,8,{\"ccddccdd\",\"cc000000\"})\n"
+    "cls() fillp(P+0b.001) spr(2,0,0) fillp() rows(0,0,8,{\"cccccccc\"})\n"
+    "cls() pal(12,0x87,2) fillp(0b.01) spr(2,0,0) fillp() pal(2) rows(0,0,8,{\"77777777\"})\n"
+    "cls() pal(12,0x87,2) fillp(0b.001) rectfill(0,0,7,0,12) fillp() pal(2) rows(0,0,8,{\"77777777\"})\n"
+    "cls() pal(12,3) fillp(P+0b.001) rectfill(0,0,7,1,12) fillp() pal() rows(0,0,8,{\"33113311\",\"33113311\"})\n"
+    "cls() fillp(P+0b.101) rectfill(0,0,7,1,12) fillp() rows(0,0,8,{\"cc00cc00\"})\n"
+    "cls() mset(0,0,2) fillp(P+0b.01) tline(0,0,7,0,0,0,1/8,0) fillp() mset(0,0,0) rows(0,0,8,{\"ccddccdd\"})\n"
+    "cls() poke(0x5f33,2) poke(0x5f31,0xcc) poke(0x5f32,0x33) pal(12,0x87,2) spr(2,0,0) fillp() pal(2) rows(0,0,8,{\"77887788\",\"77887788\"})\n"
+    "cls() fillp(P+0b.001) rect(0,0,7,3,12) fillp() rows(0,0,8,{\"ccddccdd\",\"c000000d\",\"d000000c\",\"ddccddcc\"})\n"
+    "cls() pal(2,4) fillp(P+0b.01) spr(1,0,0) fillp() pal() rows(0,0,8,{\"012145d6\"})\n"
+    "cls() pal(12,3) pal(1,8) fillp(P+0b.001) rectfill(0,0,7,0,12) fillp() pal() rows(0,0,8,{\"33113311\"})\n"
+    "cls() fillp(P+0b.01) spr(2,0,0,1,1,true) fillp() rows(0,0,8,{\"ccddccdd\"})\n"
+    "cls() fillp(P+0b.01) spr(1,1,1) fillp() rows(1,1,8,{\"001341d7\",\"49a3ddee\"})\n"
+    "pal(12,0x87,2) is(peek(0x5f0c)==12 and peek(0x5f6c)==0x87)\n"
+    "pal(3,5,2) is(peek(0x5f63)==5)\n"
+    "pal(2) is(sec()==d)\n"
+    "pal(12,0x87,2) pal() is(sec()==d)\n"
+    "pal(12,0x87,2) pal(0) is(peek(0x5f6c)==0x87)\n"
+    "pal(1) is(peek(0x5f6c)==0x87)\n"
+    "pal(-1) is(sec()==d)\n"
+    "pal({[1]=0x21,[2]=0x32},2) is(peek(0x5f61)==0x21 and peek(0x5f62)==0x32) pal(2)\n"
+    "fillp(P+0b.01) is(peek(0x5f33)==2) fillp(P+0b.11) is(peek(0x5f33)==3)\n"
+    "fillp(P+0b.001) is(peek(0x5f33)==4) fillp(P+0b.111) is(peek(0x5f33)==7)\n"
+    "is(fillp()==0x33cc.c)\n"
+    "fillp(P+0b.001) is(fillp()==0x33cc)\n"
+    "fillp(P+0b.01) is(fillp()==0x33cc.4)\n"
+    "fillp(P+0b.1) is(fillp()==0x33cc.8) fillp()\n"
+    "cls() local bad=0 for i=1,n do pset(i-1,127,r[i] and 11 or 8) if not r[i] then bad+=1 end end\n"
+    "end\n"
+    "__gfx__\n"
+    "0000000001234567cccccccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n"
+    "0000000089abcdefcccccccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n"
+    "0000000001234567cccccccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n"
+    "0000000089abcdefcccccccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n"
+    "0000000001234567cccccccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n"
+    "0000000089abcdefcccccccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n"
+    "0000000001234567cccccccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n"
+    "0000000089abcdefcccccccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n";
+    p8p_cart_t cart = {};
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                    sizeof(source) - 1, &cart) == 0);
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    const uint8_t *fb = p8p_runtime_framebuffer(runtime);
+    for (int index = 0; index < 43; ++index) {
+        if (fb[127 * 128 + index] != 11)
+            fprintf(stderr, "FAIL secondary palette case %d\n", index + 1);
+        CHECK(fb[127 * 128 + index] == 11);
+    }
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+}
+
 static void draw_palette_transitions(void) {
     struct PaletteCase {
         const char *name;
@@ -558,6 +649,7 @@ int main(void) {
     palette_leaf_contracts();
     palette_fast_path_semantics();
     draw_palette_transitions();
+    secondary_palette_matches_pico8();
     audio_chunk_boundaries();
     static const uint8_t source[] =
         "pico-8 cartridge // http://www.pico-8.com\n"
