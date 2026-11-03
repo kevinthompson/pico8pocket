@@ -637,13 +637,6 @@ int main(int argc, char **argv) {
                 menu_open = 0;
                 suppress_buttons = physical;
                 p8p_platform_audio_set_paused(0);
-            } else if (action == P8P_MENU_TOGGLE_DIAGNOSTICS) {
-                set_diagnostics(runtime, &diagnostics_visible,
-                                &runtime_profile, &average_instructions,
-                                !diagnostics_visible);
-                menu_open = 0;
-                suppress_buttons = physical;
-                p8p_platform_audio_set_paused(0);
             } else if (action == P8P_MENU_EXIT) {
                 p8p_platform_exit();
             } else if (action == P8P_MENU_CART_ERROR) {

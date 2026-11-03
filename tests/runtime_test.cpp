@@ -1411,6 +1411,22 @@ int main(void) {
             p8p_menu_open(menu, runtime, 0, 0);
             p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN);
             CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_A) == P8P_MENU_NONE);
+            /* X confirms like A, as both are PICO-8's X button in play:
+             * it resumes, opens STATES (B then leaves it, and B again
+             * closes the menu) and confirms a restart. */
+            p8p_menu_open(menu, runtime, 0, 0);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_X) == P8P_MENU_CLOSE);
+            p8p_menu_open(menu, runtime, 0, 0);
+            for (int i = 0; i < 3; ++i)
+                p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_X) == P8P_MENU_NONE);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_B) == P8P_MENU_NONE);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_B) == P8P_MENU_CLOSE);
+            p8p_menu_open(menu, runtime, 0, 0);
+            for (int i = 0; i < 4; ++i)
+                p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_X) == P8P_MENU_NONE);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_X) == P8P_MENU_RESTART);
             p8p_menu_destroy(menu);
             p8p_cart_destroy(&menu_cart);
             unlink("save:0");

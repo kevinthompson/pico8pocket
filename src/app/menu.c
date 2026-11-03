@@ -330,7 +330,7 @@ static void draw_main(p8p_menu_t *menu) {
         text(menu->framebuffer, 122, 2, "^", 6);
     if (menu->scroll + MAIN_VISIBLE_ROWS < count)
         text(menu->framebuffer, 122, 107, "V", 6);
-    text(menu->framebuffer, 97, 121, "X FPS", 6);
+    text(menu->framebuffer, 77, 121, "SELECT+X FPS", 6);
     if (menu->notice_frames > 0) {
         fill(menu->framebuffer, 0, 112, 128, 8, 1);
         text(menu->framebuffer, 3, 114, menu->notice, 10);
@@ -588,8 +588,6 @@ static enum p8p_menu_action update_main(p8p_menu_t *menu,
     int row = rows[menu->cursor < count ? menu->cursor : 0];
     if (pressed & P8P_PHYS_B)
         return P8P_MENU_CLOSE;
-    if (pressed & P8P_PHYS_X)
-        return P8P_MENU_TOGGLE_DIAGNOSTICS;
     if (row >= ROW_CART1 && row <= ROW_CART5) {
         /* PICO-8 passes 1/2 for left/right and 112 for O/X selection. */
         int buttons = (pressed & P8P_PHYS_A) ? 112 :
@@ -821,6 +819,13 @@ enum p8p_menu_action p8p_menu_update(p8p_menu_t *menu,
 
     if ((pressed & P8P_PHYS_SELECT) && menu->capture_action < 0)
         return P8P_MENU_CLOSE;
+
+    /* A and X are both PICO-8's X button in play, so X confirms here too.
+     * The save-state screen keeps X for Save, and a control capture takes
+     * X as the button to assign. */
+    if ((pressed & P8P_PHYS_X) && menu->screen != SCREEN_STATES &&
+        menu->capture_action < 0)
+        pressed |= P8P_PHYS_A;
 
     switch (menu->screen) {
     case SCREEN_MAIN: count = main_rows(menu, rows); break;
