@@ -2346,8 +2346,21 @@ static int api_stat(lua_State *lua) {
         lua_pushstring(lua, runtime->params);
         break;
     case 5:
-        push_int(lua, 42);
+        push_int(lua, 43);  /* PICO-8 0.2.7's version number */
         break;
+    case 9:
+        /* The display's refresh rate. */
+        push_int(lua, 60);
+        break;
+    case 11:
+        /* One display; _map_display() selects nothing else. */
+        push_int(lua, 1);
+        break;
+    /* The pause menu's rectangle, as PICO-8 reports it. */
+    case 12: push_int(lua, 23); break;
+    case 13: push_int(lua, 39); break;
+    case 14: push_int(lua, 104); break;
+    case 15: push_int(lua, 88); break;
     case 7:
     case 8:
         push_int(lua, runtime->target_fps);
@@ -2372,6 +2385,8 @@ static int api_stat(lua_State *lua) {
         break;
     case 28:
     case 30:
+    case 104:
+    case 110: /* frame-by-frame mode */
     case 120:
     case 121:
     case 122:
@@ -2403,8 +2418,19 @@ static int api_stat(lua_State *lua) {
         else
             lua_pushnil(lua);
         break;
+    case 64: case 65: case 66: case 67:
+    case 68: case 69: case 70: case 71:
     case 101:
         lua_pushnil(lua);
+        break;
+    case 109:
+    case 111:
+        /* PICO-8 reports 256 for both. */
+        push_int(lua, 256);
+        break;
+    case 124:
+        /* The current directory. */
+        lua_pushliteral(lua, "/");
         break;
     case 108:
         /* PCM samples still queued from serial(0x808). */
@@ -2417,7 +2443,8 @@ static int api_stat(lua_State *lua) {
         push_int(lua, p8p_audio_channel_note(runtime->audio, item - 50));
         break;
     default:
-        lua_pushnil(lua);
+        /* PICO-8 returns 0 for every other code, including unused ones. */
+        push_int(lua, 0);
         break;
     }
     return 1;

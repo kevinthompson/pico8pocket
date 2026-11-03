@@ -312,6 +312,44 @@ static void audio_chunk_boundaries(void) {
     }
 }
 
+static void stat_values_match_pico8(void) {
+    /* Each case was checked against PICO-8 0.2.7. */
+    static const char source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "r={}\n"
+        "function is(c) add(r,c) end\n"
+        "function zeros(a,b) for i=a,b do if stat(i)~=0 then return false end end return true end\n"
+        "function nils(a,b) for i=a,b do if stat(i)~=nil then return false end end return true end\n"
+        "function _draw()\n"
+        " is(stat(3)==0 and stat(5)==43 and stat(10)==0 and stat(11)==1)\n"
+        " is(stat(12)==23 and stat(13)==39 and stat(14)==104 and stat(15)==88)\n"
+        " is(zeros(40,45) and zeros(58,63) and zeros(72,79) and zeros(86,89) and zeros(96,98))\n"
+        " is(nils(64,71) and stat(64.5)==nil and stat(100)==nil and stat(101)==nil)\n"
+        " is(stat(104)==false and stat(110)==false and stat(105)==0 and stat(107)==0)\n"
+        " is(stat(109)==256 and stat(111)==256 and stat(124)==\"/\")\n"
+        " is(zeros(112,119) and stat(123)==0 and zeros(125,255))\n"
+        " is(stat(-1)==0 and stat(256)==0 and stat(1000)==0 and stat(27)==0 and stat(37)==0)\n"
+        " memset(0x4300,128,512) for i=0,7 do serial(0x808,0x4300+i*64,64) end is(stat(108)==512)\n"
+        " cls() for i=1,#r do pset(i-1,0,r[i] and 11 or 8) end\n"
+        "end\n"
+        ;
+    p8p_cart_t cart = {};
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                    sizeof(source) - 1, &cart) == 0);
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    const uint8_t *fb = p8p_runtime_framebuffer(runtime);
+    for (int index = 0; index < 9; ++index) {
+        if (fb[index] != 11)
+            fprintf(stderr, "FAIL stat case %d\n", index + 1);
+        CHECK(fb[index] == 11);
+    }
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+}
+
 static void draw_palette_transitions(void) {
     struct PaletteCase {
         const char *name;
@@ -558,6 +596,7 @@ int main(void) {
     palette_leaf_contracts();
     palette_fast_path_semantics();
     draw_palette_transitions();
+    stat_values_match_pico8();
     audio_chunk_boundaries();
     static const uint8_t source[] =
         "pico-8 cartridge // http://www.pico-8.com\n"

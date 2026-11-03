@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `stat()` returns 0 for codes the core does not model, as PICO-8 0.2.7 does,
+  instead of `nil`; codes 64-71, 100 and 101 still return `nil`. It also
+  reports PICO-8's values for `stat(5)` (43), `stat(11)`-`stat(15)`,
+  `stat(104)`, `stat(109)`-`stat(111)` and `stat(124)`. Carts that compared
+  `stat(108)` with `stat(109)` stopped with an arithmetic error.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps
