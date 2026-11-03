@@ -1144,6 +1144,274 @@ int main(void) {
         }
 
         {
+            /* With no wall clock, stat(80..85) and stat(90..95) still report a
+             * valid date: month-table lookups and date arithmetic at cart load
+             * must not hit nil or a zero month. */
+            static const char date_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "day=stat(80)%100*365+split\"0,31,59\"[stat(81)]+stat(82)\n"
+                "function _draw() cls()\n"
+                "if day==25551 and stat(90)==stat(80) and stat(91)==stat(81)\n"
+                "and stat(92)==stat(82) then pset(0,0,7) end\n"
+                "if stat(83)+stat(84)+stat(85)+stat(93)+stat(94)+stat(95)==0\n"
+                "then pset(1,0,7) end end\n";
+            p8p_cart_t date_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)date_source,
+                                            sizeof(date_source) - 1,
+                                            &date_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &date_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            CHECK(p8p_runtime_framebuffer(runtime)[0] == 7);
+            CHECK(p8p_runtime_framebuffer(runtime)[1] == 7);
+            p8p_cart_destroy(&date_cart);
+        }
+
+        {
+            static const char rrect_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _draw() cls() rrectfill(50,80,40,30,2,8)\n"
+                "rrect(2,2,10,10,2,9) rrectfill(0,40,0,5,1,7) end\n";
+            p8p_cart_t rrect_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)rrect_source,
+                                            sizeof(rrect_source) - 1,
+                                            &rrect_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &rrect_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            /* The manual's example: radius 2 leaves 3 pixels missing per corner. */
+            CHECK(pixels[80 * 128 + 50] == 0);
+            CHECK(pixels[80 * 128 + 51] == 0);
+            CHECK(pixels[80 * 128 + 52] == 8);
+            CHECK(pixels[81 * 128 + 50] == 0);
+            CHECK(pixels[81 * 128 + 51] == 8);
+            CHECK(pixels[82 * 128 + 50] == 8);
+            CHECK(pixels[95 * 128 + 70] == 8);
+            CHECK(pixels[109 * 128 + 89] == 0);
+            CHECK(pixels[109 * 128 + 87] == 8);
+            CHECK(pixels[110 * 128 + 70] == 0);
+            /* The outline follows the same corner shape and leaves the inside. */
+            CHECK(pixels[2 * 128 + 3] == 0);
+            CHECK(pixels[2 * 128 + 4] == 9);
+            CHECK(pixels[3 * 128 + 3] == 9);
+            CHECK(pixels[4 * 128 + 2] == 9);
+            CHECK(pixels[4 * 128 + 3] == 0);
+            CHECK(pixels[6 * 128 + 6] == 0);
+            CHECK(pixels[6 * 128 + 11] == 9);
+            CHECK(pixels[11 * 128 + 6] == 9);
+            /* Zero width draws nothing. */
+            CHECK(pixels[42 * 128 + 0] == 0);
+            p8p_cart_destroy(&rrect_cart);
+        }
+
+        {
+            /* Pixels measured from PICO-8 0.2.7: each corner follows PICO-8's
+             * own circ() of radius r + 1, and the radius is limited to half
+             * the shorter side minus one. */
+            static const char corner_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _draw() cls() rrectfill(0,0,24,12,4,7)\n"
+                "rrectfill(30,0,24,12,5,7) rrectfill(60,0,24,18,8,7)\n"
+                "rrectfill(90,0,4,10,5,7) rrectfill(100,0,10,3,1,7)\n"
+                "rrectfill(0,20,6,6,3,7) rrect(30,20,24,12,5,7) end\n";
+            p8p_cart_t corner_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)corner_source,
+                                            sizeof(corner_source) - 1,
+                                            &corner_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &corner_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            const auto first_lit = [&](int left, int top, int row) {
+                int inset = 0;
+                while (inset < 24 && !pixels[(top + row) * 128 + left + inset])
+                    ++inset;
+                return inset;
+            };
+            static const int radius_4[] = {3, 2, 1, 0};
+            for (int row = 0; row < 4; ++row)
+                CHECK(first_lit(0, 0, row) == radius_4[row]);
+            static const int radius_5[] = {4, 3, 2, 1, 0};
+            for (int row = 0; row < 5; ++row)
+                CHECK(first_lit(30, 0, row) == radius_5[row]);
+            static const int radius_8[] = {7, 5, 3, 2, 2, 1, 1, 0};
+            for (int row = 0; row < 8; ++row)
+                CHECK(first_lit(60, 0, row) == radius_8[row]);
+            /* Width 4 limits radius 5 to 1, and height 3 removes rounding. */
+            CHECK(first_lit(90, 0, 0) == 1);
+            CHECK(first_lit(90, 0, 1) == 0);
+            CHECK(first_lit(100, 0, 0) == 0);
+            static const int six_by_six[] = {2, 1, 0};
+            for (int row = 0; row < 3; ++row)
+                CHECK(first_lit(0, 20, row) == six_by_six[row]);
+            /* The outline keeps the one-pixel diagonal of radius 5. */
+            CHECK(pixels[21 * 128 + 33] == 7);
+            CHECK(pixels[21 * 128 + 34] == 0);
+            CHECK(pixels[21 * 128 + 35] == 0);
+            p8p_cart_destroy(&corner_cart);
+        }
+
+        {
+            /* pal(p) resets one palette and leaves the other two alone. */
+            static const char pal_reset_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _draw() cls() palt(5,true)\n"
+                "pal(8,9) pal(3,4,1) pal(0) pset(0,0,8) pset(1,0,5)\n"
+                "pal(7,6,1) pal(8,9) pal(1) pset(2,0,8)\n"
+                "if pget(0,0)==8 then pset(3,0,7) end\n"
+                "if peek(0x5f13)==3 then pset(4,0,7) end\n"
+                "if peek(0x5f05)&16==16 then pset(5,0,7) end\n"
+                "pal(0) end\n";
+            p8p_cart_t pal_reset_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)pal_reset_source,
+                                            sizeof(pal_reset_source) - 1,
+                                            &pal_reset_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &pal_reset_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            CHECK(pixels[0] == 8);
+            /* pal(1) kept the remapped draw palette. */
+            CHECK(pixels[2] == 9);
+            CHECK(pixels[3] == 7);
+            CHECK(pixels[4] == 7);
+            /* pal(0) resets transparency along with the draw palette, which
+             * PICO-8 0.2.7 does although the manual does not mention it. */
+            CHECK(pixels[5] == 0);
+            CHECK(p8p_runtime_screen_palette(runtime)[3] == 3);
+            CHECK(p8p_runtime_screen_palette(runtime)[7] == 7);
+            p8p_cart_destroy(&pal_reset_cart);
+        }
+
+        {
+            /* palt() returns the previous state, as in PICO-8 0.2.7: a boolean
+             * for one colour, and otherwise the old bitfield. */
+            static const char source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _draw() cls() palt()\n"
+                "a=palt(5,true) b=palt(5,false)\n"
+                "if a==false and b==true then pset(0,0,7) end\n"
+                "palt(0,false) palt(5,true)\n"
+                "if palt(0x1234)==1024 then pset(1,0,7) end\n"
+                "palt(0,false) palt(5,true)\n"
+                "if palt()==5684 then pset(2,0,7) end\n"
+                "palt(0xffff)\n"
+                "if palt()==-1 then pset(3,0,7) end\n"
+                "palt() end\n";
+            p8p_cart_t cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                            sizeof(source) - 1, &cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            for (int x = 0; x < 4; ++x)
+                CHECK(pixels[x] == 7);
+            p8p_cart_destroy(&cart);
+        }
+
+        {
+            /* An explicit nil colour maps to 0, as in PICO-8 0.2.7. */
+            static const char source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _draw() cls()\n"
+                "pal(8,9) r=pal(8,nil)\n"
+                "if r==9 and peek(0x5f08)==0 then pset(0,0,7) end\n"
+                "pal() pal(8,9,1) pal(8,nil,1)\n"
+                "if peek(0x5f18)==0 then pset(1,0,7) end\n"
+                "pal() end\n";
+            p8p_cart_t cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                            sizeof(source) - 1, &cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            CHECK(pixels[0] == 7);
+            CHECK(pixels[1] == 7);
+            p8p_cart_destroy(&cart);
+        }
+
+        {
+            /* pal(-1), and pal() given one value that is not a number, reset
+             * both palettes and transparency, as PICO-8 0.2.7 does. */
+            static const char source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _draw() cls()\n"
+                "pal(8,9) pal(3,4,1) palt(5,true) pal(-1)\n"
+                "if peek(0x5f08)==8 then pset(0,0,7) end\n"
+                "if peek(0x5f13)==3 then pset(1,0,7) end\n"
+                "if peek(0x5f05)==5 then pset(2,0,7) end\n"
+                "pal(8,9) pal(3,4,1) pal(\"1\")\n"
+                "if peek(0x5f08)==8 and peek(0x5f13)==3 then pset(3,0,7) end\n"
+                "pal(8,9) pal(3,4,1) pal(-2)\n"
+                "if peek(0x5f08)==9 and peek(0x5f13)==4 then pset(4,0,7) end\n"
+                "pal() end\n";
+            p8p_cart_t cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                            sizeof(source) - 1, &cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            for (int x = 0; x < 5; ++x)
+                CHECK(pixels[x] == 7);
+            p8p_cart_destroy(&cart);
+        }
+
+        {
+            /* spr() sizes are in tiles but may be fractional: w and h set
+             * the size in pixels as w*8 and h*8. */
+            static const char fractional_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _draw() cls()\n"
+                "for y=0,15 do for x=0,15 do sset(8+x,y,7) end end\n"
+                "sset(8,0,9)\n"
+                "spr(1,10,10,.875,1)\n"
+                "spr(1,30,10,.5,.5)\n"
+                "spr(1,50,10,.5,.5,true)\n"
+                "spr(1,70,10,1.5,1)\n"
+                "end\n";
+            p8p_cart_t fractional_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)fractional_source,
+                                            sizeof(fractional_source) - 1,
+                                            &fractional_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &fractional_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            CHECK(pixels[10 * 128 + 10] == 9);
+            CHECK(pixels[17 * 128 + 16] == 7);
+            CHECK(pixels[17 * 128 + 17] == 0);
+            CHECK(pixels[13 * 128 + 33] == 7);
+            CHECK(pixels[13 * 128 + 34] == 0);
+            CHECK(pixels[14 * 128 + 33] == 0);
+            /* Flipping mirrors within the fractional width. */
+            CHECK(pixels[10 * 128 + 50] == 7);
+            CHECK(pixels[10 * 128 + 53] == 9);
+            CHECK(pixels[17 * 128 + 81] == 7);
+            CHECK(pixels[17 * 128 + 82] == 0);
+            p8p_cart_destroy(&fractional_cart);
+        }
+
+        {
+            /* PICO-8 0.2.7 applies the 1x1 default only with three arguments
+             * or fewer: once w is passed, a missing or nil size is 0. */
+            static const char size_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _draw() cls() sset(8,0,7)\n"
+                "spr(1,0,0) spr(1,10,0,1) spr(1,20,0,nil,nil,true)\n"
+                "spr(1,30,0,1,nil) spr(1,40,0,nil,1) spr(1,50,0,1,1) end\n";
+            p8p_cart_t size_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)size_source,
+                                            sizeof(size_source) - 1,
+                                            &size_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &size_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            CHECK(pixels[0] == 7);
+            CHECK(pixels[10] == 0);
+            CHECK(pixels[27] == 0);
+            CHECK(pixels[30] == 0);
+            CHECK(pixels[40] == 0);
+            CHECK(pixels[50] == 7);
+            p8p_cart_destroy(&size_cart);
+        }
+
+        {
             /* stat(26) counts 183/22050 s ticks into the music pattern:
              * 9600 samples at 48 kHz are 24 ticks. */
             audio_crossings_for(runtime,

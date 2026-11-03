@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- `stat(80)`-`stat(85)` and `stat(90)`-`stat(95)` report 1970-01-01 00:00:00
+  instead of nil or 0, so carts that read the date at load no longer stop with
+  an arithmetic error. The Pocket runtime exposes no wall clock; a year before
+  2000 tells a cart that the date is not real.
+- Add `rrect` and `rrectfill`, which draw through the same clip, camera,
+  palette and fill-pattern path as `rectfill`.
+- `pal(p)` resets the draw or display palette, as the manual describes. It
+  previously mapped colour `p` to itself, so temporary palette changes
+  carried over into later drawing. `pal(0)` also resets transparency, as
+  PICO-8 does.
+- `spr()` honours fractional sizes, drawing `w*8` by `h*8` pixels. It previously
+  truncated them to whole tiles, so a width below 1 drew nothing. As in PICO-8,
+  a size left out or nil after `w` is passed counts as 0, not 1.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps
