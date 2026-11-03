@@ -455,6 +455,25 @@ static void camera_to_ram(p8p_runtime_t *runtime) {
 
 static void sync_draw_target(p8p_runtime_t *runtime);
 
+/* The draw state at 0x5f00-0x5f7f as a cartridge starts. */
+static void draw_state_defaults_to_ram(p8p_runtime_t *runtime) {
+    uint8_t *ram = runtime->ram;
+    memset(ram + 0x5f00, 0, 0x80);
+    for (int i = 0; i < 16; ++i) {
+        ram[0x5f00 + i] = (uint8_t)i;
+        ram[0x5f10 + i] = (uint8_t)i;
+    }
+    ram[0x5f00] |= 0x10;  /* colour 0 is transparent */
+    ram[0x5f22] = ram[0x5f23] = 128;
+    ram[0x5f25] = 6;
+    ram[0x5f55] = 0x60;
+    ram[0x5f56] = 0x20;
+    ram[0x5f57] = 128;
+    ram[0x5f5c] = 15;
+    ram[0x5f5d] = 4;
+    ram[0x5f5e] = 0xff;
+}
+
 static void draw_state_from_ram(p8p_runtime_t *runtime) {
     sync_draw_target(runtime);
     for (int i = 0; i < 16; ++i) {
@@ -3225,30 +3244,9 @@ extern "C" int p8p_runtime_load_context(p8p_runtime_t *runtime,
     memset(runtime->ram, 0, sizeof(runtime->ram));
     memcpy(runtime->cart_rom, cart->rom, sizeof(runtime->cart_rom));
     memcpy(runtime->ram, cart->rom, sizeof(runtime->cart_rom));
-    runtime->ram[0x5f54] = 0x00;
-    runtime->ram[0x5f55] = 0x60;
+    draw_state_defaults_to_ram(runtime);
     runtime->draw_target = 0x6000;
-    runtime->ram[0x5f56] = 0x20;
-    runtime->ram[0x5f57] = 128;
-    runtime->ram[0x5f5c] = 15;
-    runtime->ram[0x5f5d] = 4;
-    runtime->ram[0x5f5e] = 0xff;
-    for (int i = 0; i < 16; ++i) {
-        runtime->draw_palette[i] = (uint8_t)i;
-        runtime->screen_palette[i] = (uint8_t)i;
-    }
-    memset(runtime->transparent, 0, sizeof(runtime->transparent));
-    runtime->transparent[0] = 1;
-    runtime->palettes_default = 1;
-    runtime->transparency_default = 1;
-    runtime->camera_x = runtime->camera_y = 0;
-    runtime->clip_x0 = runtime->clip_y0 = 0;
-    runtime->clip_x1 = runtime->clip_y1 = 128;
-    runtime->draw_color = 6;
-    runtime->cursor_x = runtime->cursor_y = 0;
-    runtime->fill_pattern = 0;
-    runtime->fill_pattern_transparent = 0;
-    draw_state_to_ram(runtime);
+    draw_state_from_ram(runtime);
     ram_to_screen(runtime);
     p8p_audio_reset(runtime->audio, runtime->ram);
     runtime->error[0] = '\0';
