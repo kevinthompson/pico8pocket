@@ -159,6 +159,11 @@ static int32_t arg_int(lua_State *lua, int index, int32_t fallback) {
     return (int32_t)lua_tonumber(lua, index);
 }
 
+static void set_pen_color(p8p_runtime_t *runtime, int32_t color) {
+    runtime->draw_color = color & 255;
+    runtime->ram[0x5f25] = (uint8_t)runtime->draw_color;
+}
+
 /* A colour argument to a drawing call also becomes the pen colour, as in
  * PICO-8: rectfill(0, 0, 9, 9, 8) pset(20, 20) draws both in red. */
 static int32_t arg_pen(lua_State *lua, int index, p8p_runtime_t *runtime) {
@@ -167,8 +172,7 @@ static int32_t arg_pen(lua_State *lua, int index, p8p_runtime_t *runtime) {
         return runtime->draw_color;
     int32_t color = ttisnumber(value) ? (int32_t)nvalue(value) :
                                         (int32_t)lua_tonumber(lua, index);
-    runtime->draw_color = color & 255;
-    runtime->ram[0x5f25] = (uint8_t)runtime->draw_color;
+    set_pen_color(runtime, color);
     return color;
 }
 
@@ -845,9 +849,8 @@ static int api_sset(lua_State *lua) {
 static int api_color(lua_State *lua) {
     profile_api(P8P_API_DRAW_STATE);
     int previous = active_runtime->draw_color;
-    if (arg_count(lua) >= 1)
-        active_runtime->draw_color = arg_int(lua, 1, 6) & 255;
-    active_runtime->ram[0x5f25] = (uint8_t)active_runtime->draw_color;
+    set_pen_color(active_runtime,
+                  arg_count(lua) >= 1 ? arg_int(lua, 1, 6) : previous);
     push_int(lua, previous);
     return 1;
 }
