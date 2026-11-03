@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Music stops at a pattern whose four channels are all disabled, as in
+  PICO-8, instead of playing through it.
+- Music loops return to the loop-start pattern. They previously resumed one
+  pattern after it, which could reach an empty pattern and play sfx 0 on all
+  four channels.
+- `sfx(nil)` plays sfx 0, as PICO-8 does. It previously acted as `sfx(-1)` and
+  stopped every playing sound effect. `sfx()` with no arguments does nothing.
+- Notes no longer click when they start, change volume, change waveform or
+  end. As in PICO-8 0.2.7, each volume change ramps over about 2.9 ms, a sound
+  that ends fades out on its last waveform, and a new waveform crossfades from
+  the previous output. Low notes made the steps audible on the Pocket speaker.
+- `sfx`/`music` voices match PICO-8's level and shape for each waveform. The
+  triangle and tilted saw were half as loud as PICO-8 and the square, pulse
+  and saw were too loud relative to them. `serial()` PCM plays at full scale,
+  four times louder than before, as in PICO-8. The mix still saturates rather
+  than wraps, so loud four-channel passages can clip.
 - Add the secondary palette. `pal(c, v, 2)` and `pal(table, 2)` set its entries
   at `0x5f60`-`0x5f6f` instead of changing the draw palette, `pal(2)`, `pal()`
   and `pal(-1)` restore PICO-8's default pairs, and `fillp()` keeps its sprite

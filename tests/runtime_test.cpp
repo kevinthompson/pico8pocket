@@ -9,6 +9,7 @@
 #include "../src/runtime/runtime_internal.h"
 #include <lauxlib.h>
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -263,6 +264,73 @@ static void menu_glyphs_follow_pico8_font(void) {
         CHECK(p8p_menu_glyph(character) == expected);
     }
     CHECK(p8p_menu_glyph('N') != p8p_menu_glyph('M'));
+}
+
+/* A loop-back pattern returns to the nearest loop-start pattern at or before
+ * it, and that start pattern plays again. */
+static void audio_music_loop_start(void) {
+    static uint8_t ram[0x10000];
+    struct { uint8_t flags[4]; int expected[6]; } cases[] = {
+        {{1, 1, 0, 2}, {0, 1, 2, 3, 1, 2}},
+        {{3, 0, 0, 0}, {0, 0, 0, 0, 0, 0}},
+        {{0, 0, 2, 0}, {0, 1, 2, 0, 1, 2}},
+    };
+    for (auto &test_case : cases) {
+        memset(ram, 0, sizeof(ram));
+        ram[0x3200 + 65] = 1;
+        for (unsigned pattern = 0; pattern < 4; ++pattern) {
+            uint8_t *song = ram + 0x3100 + pattern * 4;
+            uint8_t flags = test_case.flags[pattern];
+            song[0] = (flags & 1) ? 0x80 : 0;
+            song[1] = (flags & 2) ? 0xc0 : 0x40;
+            song[2] = song[3] = 0x40;
+        }
+        p8p_audio_t *audio = p8p_audio_create(ram);
+        CHECK(audio != NULL);
+        if (!audio)
+            continue;
+        p8p_audio_music(audio, 0, 0, 0);
+        int seen[6] = {p8p_audio_music_pattern(audio)};
+        int played = 1, count = p8p_audio_music_count(audio);
+        for (int step = 0; step < 200000 && played < 6; ++step) {
+            p8p_audio_skip(audio, 16);
+            if (p8p_audio_music_count(audio) != count) {
+                count = p8p_audio_music_count(audio);
+                seen[played++] = p8p_audio_music_pattern(audio);
+            }
+        }
+        CHECK(memcmp(seen, test_case.expected, sizeof(seen)) == 0);
+        p8p_audio_destroy(audio);
+    }
+}
+
+/* PICO-8 0.2.7 stops music on reaching a pattern whose four channels are all
+ * disabled, and music(n) on such a pattern plays nothing. */
+static void audio_music_empty_pattern(void) {
+    static uint8_t ram[0x10000];
+    memset(ram, 0, sizeof(ram));
+    ram[0x3200 + 65] = 1;
+    for (unsigned pattern = 0; pattern < 4; ++pattern) {
+        uint8_t *song = ram + 0x3100 + pattern * 4;
+        song[0] = pattern < 2 ? 0 : 0x40;
+        song[1] = song[2] = song[3] = 0x40;
+    }
+    p8p_audio_t *audio = p8p_audio_create(ram);
+    CHECK(audio != NULL);
+    if (!audio)
+        return;
+    p8p_audio_music(audio, 0, 0, 0);
+    int highest = 0;
+    for (int step = 0; step < 200000 && p8p_audio_music_pattern(audio) >= 0; ++step) {
+        p8p_audio_skip(audio, 16);
+        if (p8p_audio_music_pattern(audio) > highest)
+            highest = p8p_audio_music_pattern(audio);
+    }
+    CHECK(p8p_audio_music_pattern(audio) == -1);
+    CHECK(highest == 1);
+    p8p_audio_music(audio, 2, 0, 0);
+    CHECK(p8p_audio_music_pattern(audio) == -1);
+    p8p_audio_destroy(audio);
 }
 
 static void audio_chunk_boundaries(void) {
@@ -613,6 +681,188 @@ static void state_restores_fill_pattern(void) {
     free(state);
     p8p_runtime_destroy(runtime);
     p8p_cart_destroy(&cart);
+}
+
+/* A looping waveform at one key with the given volume and filter byte. */
+static void set_wave_sfx(uint8_t *ram, int sfx, unsigned waveform, unsigned key,
+                         unsigned volume, uint8_t filters) {
+    uint8_t *data = ram + 0x3200 + sfx * 68;
+    for (unsigned note = 0; note < 32; ++note) {
+        data[note * 2] = (uint8_t)(key | (waveform << 6));
+        data[note * 2 + 1] = (uint8_t)((volume << 1) | (waveform >> 2));
+    }
+    data[64] = filters;
+    data[65] = 1;
+    data[67] = 32;
+}
+
+static void set_square_sfx(uint8_t *ram, int sfx, unsigned volume, uint8_t filters) {
+    set_wave_sfx(ram, sfx, 3, 24, volume, filters);
+}
+
+static void render_voices(uint8_t *ram, int voices, const uint8_t *pcm, int pcm_count,
+                          int16_t *stereo, size_t frames) {
+    p8p_audio_t *audio = p8p_audio_create(ram);
+    CHECK(audio != NULL);
+    if (!audio)
+        return;
+    for (int channel = 0; channel < voices; ++channel)
+        p8p_audio_sfx(audio, channel, channel, 0, 32);
+    CHECK(p8p_audio_pcm_push(audio, pcm, pcm_count) == pcm_count);
+    p8p_audio_render(audio, stereo, frames);
+    p8p_audio_destroy(audio);
+}
+
+static void left_range(const int16_t *stereo, size_t frames, int *low, int *high) {
+    *low = *high = stereo[0];
+    for (size_t frame = 1; frame < frames; ++frame) {
+        if (stereo[frame * 2] < *low) *low = stereo[frame * 2];
+        if (stereo[frame * 2] > *high) *high = stereo[frame * 2];
+    }
+}
+
+static double left_rms(const int16_t *stereo, size_t first, size_t frames) {
+    double sum = 0;
+    for (size_t frame = first; frame < first + frames; ++frame)
+        sum += (double)stereo[frame * 2] * stereo[frame * 2];
+    return sqrt(sum / (double)frames);
+}
+
+/* PICO-8 0.2.7 moves each channel to a new volume in a straight line over 64
+ * of its samples, about 2.9 ms, when a sound starts, changes level and ends.
+ * A low triangle starts at its lowest point, so without that ramp the first
+ * sample jumps by the full amplitude and the speaker plays a click. */
+static void audio_volume_ramps(void) {
+    enum { FRAMES = 30000 };
+    static uint8_t ram[0x10000];
+    static int16_t stereo[FRAMES * 2];
+    memset(ram, 0, sizeof(ram));
+    set_wave_sfx(ram, 0, 0, 0, 0, 0);
+    uint8_t *data = ram + 0x3200;
+    data[1] = 7 << 1;
+    data[3] = 2 << 1;
+    data[65] = 16;
+    data[67] = 0;
+    render_voices(ram, 1, NULL, 0, stereo, FRAMES);
+    int largest_step = 0, loudest = 0;
+    for (size_t frame = 1; frame < FRAMES; ++frame) {
+        int step = abs(stereo[frame * 2] - stereo[frame * 2 - 2]);
+        if (step > largest_step) largest_step = step;
+        if (abs(stereo[frame * 2]) > loudest) loudest = abs(stereo[frame * 2]);
+    }
+    CHECK(loudest > 15000);
+    CHECK(largest_step < 600);
+    CHECK(stereo[(FRAMES - 1) * 2] == 0);
+
+    /* A dropped triangle stops wherever its pitch reaches zero, and the
+     * tilted saw after it starts elsewhere in its own cycle. */
+    set_wave_sfx(ram, 0, 1, 0, 7, 0);
+    data[0] = 0;
+    data[1] = (uint8_t)((7 << 1) | (3 << 4));
+    data[65] = 16;
+    data[67] = 0;
+    render_voices(ram, 1, NULL, 0, stereo, FRAMES);
+    largest_step = 0;
+    for (size_t frame = 1; frame < FRAMES; ++frame) {
+        int step = abs(stereo[frame * 2] - stereo[frame * 2 - 2]);
+        if (step > largest_step) largest_step = step;
+    }
+    CHECK(largest_step < 600);
+}
+
+static void audio_mix_level(void) {
+    enum { FRAMES = 4800, PCM_FRAMES = 200, REVERB_SHORT = 398 };
+    static uint8_t ram[0x10000];
+    static int16_t solo[FRAMES * 2], quad[FRAMES * 2], reverb[FRAMES * 2];
+    uint8_t pcm_low[64];
+    int low, high;
+    memset(pcm_low, 0, sizeof(pcm_low));
+    memset(ram, 0, sizeof(ram));
+    for (int sfx = 0; sfx < 4; ++sfx)
+        set_square_sfx(ram, sfx, 7, 0);
+
+    /* Full-volume peaks measured from PICO-8 0.2.7 output at C-2.  The saw is
+     * the square's 0.653/0.5, and the organ's lobes reach 1/3 of full scale. */
+    static const struct {
+        unsigned waveform;
+        int low, high;
+    } peaks[] = {
+        {0, -16120, 16120}, {1, -16120, 16120}, {2, -10530, 10530},
+        {3, -8060, 8060}, {4, -8060, 8060}, {5, -10750, 10750},
+    };
+    for (size_t index = 0; index < sizeof(peaks) / sizeof(peaks[0]); ++index) {
+        set_wave_sfx(ram, 0, peaks[index].waveform, 24, 7, 0);
+        render_voices(ram, 1, NULL, 0, solo, FRAMES);
+        left_range(solo, FRAMES, &low, &high);
+        CHECK(abs(low - peaks[index].low) < 200);
+        CHECK(abs(high - peaks[index].high) < 200);
+    }
+
+    /* The phaser's two triangles drift apart and back at about 2.4 Hz here,
+     * so its level falls by the time they are half a cycle apart. */
+    {
+        enum { PHASER_FRAMES = 12000 };
+        static int16_t phaser[PHASER_FRAMES * 2];
+        set_wave_sfx(ram, 0, 7, 24, 7, 0);
+        render_voices(ram, 1, NULL, 0, phaser, PHASER_FRAMES);
+        CHECK(left_rms(phaser, 0, 960) > left_rms(phaser, 10000, 960) * 2);
+    }
+
+    /* Noise is brown and level-dependent on pitch: RMS from PICO-8 0.2.7. */
+    {
+        static const struct { unsigned key; double rms; } levels[] = {
+            {12, 6403}, {33, 7658}, {57, 13090},
+        };
+        for (size_t index = 0; index < 3; ++index) {
+            set_wave_sfx(ram, 0, 6, levels[index].key, 7, 0);
+            render_voices(ram, 1, NULL, 0, solo, FRAMES);
+            double rms = left_rms(solo, 0, FRAMES);
+            CHECK(rms > levels[index].rms * 0.75 && rms < levels[index].rms * 1.25);
+        }
+    }
+
+    /* Volume is linear in steps of 1/7. */
+    set_wave_sfx(ram, 0, 0, 24, 1, 0);
+    render_voices(ram, 1, NULL, 0, solo, FRAMES);
+    left_range(solo, FRAMES, &low, &high);
+    CHECK(abs(high - 16120 / 7) < 40);
+
+    /* Four triangles in phase saturate instead of wrapping. */
+    for (int sfx = 0; sfx < 4; ++sfx)
+        set_wave_sfx(ram, sfx, 0, 24, 7, 0);
+    render_voices(ram, 1, NULL, 0, solo, FRAMES);
+    render_voices(ram, 4, NULL, 0, quad, FRAMES);
+    left_range(quad, FRAMES, &low, &high);
+    CHECK(low == -32768 && high == 32767);
+    for (size_t frame = 0; frame < FRAMES; ++frame)
+        CHECK((quad[frame * 2] > 0) == (solo[frame * 2] > 0));
+    for (int sfx = 0; sfx < 4; ++sfx)
+        set_square_sfx(ram, sfx, 7, 0);
+
+    /* serial() PCM is full scale, as in PICO-8: sample 0 is -32768. */
+    render_voices(ram, 0, pcm_low, sizeof(pcm_low), solo, PCM_FRAMES);
+    left_range(solo, PCM_FRAMES, &low, &high);
+    CHECK(low == -32768 && high == -16384);  /* the first output is a midpoint */
+    /* A voice adds to it while the square's first half period is positive. */
+    render_voices(ram, 1, pcm_low, sizeof(pcm_low), solo, PCM_FRAMES);
+    render_voices(ram, 1, NULL, 0, quad, PCM_FRAMES);
+    for (size_t frame = 2; frame < 90; ++frame)
+        CHECK(abs(solo[frame * 2] - (quad[frame * 2] - 32768)) <= 1);
+    CHECK(quad[89 * 2] > 2000);
+
+    /* Reverb still feeds back at one half.  Odd frames are the synthesized
+     * samples; each output is the dry voice plus half of the output one
+     * delay earlier, within the rounding of the unscaled delay line. */
+    set_square_sfx(ram, 0, 3, 0);
+    render_voices(ram, 1, NULL, 0, solo, FRAMES);
+    set_square_sfx(ram, 0, 3, 24);
+    render_voices(ram, 1, NULL, 0, reverb, FRAMES);
+    for (size_t sample = REVERB_SHORT; sample < FRAMES / 2; ++sample) {
+        int wet = reverb[(sample * 2 + 1) * 2];
+        int dry = solo[(sample * 2 + 1) * 2];
+        int delayed = reverb[((sample - REVERB_SHORT) * 2 + 1) * 2];
+        CHECK(abs(wet - dry - delayed / 2) <= 2);
+    }
 }
 
 static void draw_palette_transitions(void) {
@@ -1124,6 +1374,10 @@ int main(void) {
     tile_blitter_matches_sspr();
     audio_chunk_boundaries();
     menu_glyphs_follow_pico8_font();
+    audio_music_loop_start();
+    audio_music_empty_pattern();
+    audio_volume_ramps();
+    audio_mix_level();
     static const uint8_t source[] =
         "pico-8 cartridge // http://www.pico-8.com\n"
         "version 42\n"
@@ -1712,7 +1966,35 @@ int main(void) {
         CHECK(p8p_runtime_framebuffer(runtime)[5] == 7);
 
         {
+            /* Argument handling measured from PICO-8 0.2.7. Each check sets a
+             * pixel from what stat(46..49) reports straight after the call. */
+            static const char arguments_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "for n in all(split\"0,2,3,63\") do poke(0x3241+n*68,16)\n"
+                "poke2(0x3200+n*68,24+(1<<6)+(5<<9)) end\n"
+                "function _draw() cls()\n"
+                "sfx(2) sfx() if stat(47)==-1 then pset(0,0,7) end sfx(-1)\n"
+                "sfx(2) sfx(3,nil) if stat(46)==3 and stat(47)==-1 then pset(1,0,7) end sfx(-1)\n"
+                "sfx(64) if stat(46)==63 then pset(2,0,7) end sfx(-1)\n"
+                "sfx(-3) if stat(46)==0 then pset(3,0,7) end sfx(-1)\n"
+                "if sfx(-1)==-1 then pset(4,0,7) end\n"
+                "end\n";
+            p8p_cart_t arguments_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)arguments_source,
+                                            sizeof(arguments_source) - 1,
+                                            &arguments_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &arguments_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *pixels = p8p_runtime_framebuffer(runtime);
+            for (int x = 0; x < 5; ++x)
+                CHECK(pixels[x] == 7);
+            p8p_cart_destroy(&arguments_cart);
+        }
+
+        {
             int plain = audio_crossings_for(runtime, "sfx(2)");
+            /* A nil index means sfx 0, not the stop command sfx(-1). */
+            CHECK(audio_crossings_for(runtime, "sfx(2) sfx(nil)") > 0);
             uint32_t plain_hash = last_audio_hash;
             int custom = audio_crossings_for(runtime, "sfx(1)");
             int octave = audio_crossings_for(runtime, "sfx(4)");
