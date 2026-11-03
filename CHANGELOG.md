@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `peek2`, `poke2`, `peek4`, `poke4`, `memset`, `memcpy` and `reload` reach
+  upper memory (`0x8000`-`0xffff`) and wrap past `0xffff` to `0x0000`, as in
+  PICO-8 0.2.7. Those addresses are negative numbers in PICO-8, and the
+  functions used to ignore them: reads gave 0 and writes did nothing. Carts
+  that keep extra sprite sheets, maps or level data in upper memory lost it.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps

@@ -482,15 +482,77 @@ static void draw_state_from_ram(p8p_runtime_t *runtime) {
     runtime->fill_pattern_transparent = runtime->ram[0x5f33] & 1;
 }
 
+/*
+ * PICO-8 addresses wrap modulo 0x10000: 0x8000-0xffff arrive as negative
+ * 16.16 numbers, and a range that passes 0xffff continues at 0x0000.
+ */
+#define RAM_SIZE 0x10000
+
 /* Bring the framebuffer, draw state and cartdata up to date after 'length'
- * RAM bytes from 'address' were written. */
+ * RAM bytes from 'address' were written; the range may wrap. */
 static void ram_written(p8p_runtime_t *runtime, int address, int length) {
-    if (range_touches_screen(address, length))
-        ram_to_screen_range(runtime, address, length);
-    if (range_touches_draw_state(address, length))
-        draw_state_from_ram(runtime);
-    if (range_touches_cartdata(address, length))
-        cartdata_mark_dirty(runtime);
+    address &= 0xffff;
+    while (length > 0) {
+        int chunk = length < RAM_SIZE - address ? length : RAM_SIZE - address;
+        if (range_touches_screen(address, chunk))
+            ram_to_screen_range(runtime, address, chunk);
+        if (range_touches_draw_state(address, chunk))
+            draw_state_from_ram(runtime);
+        if (range_touches_cartdata(address, chunk))
+            cartdata_mark_dirty(runtime);
+        length -= chunk;
+        address = 0;
+    }
+}
+
+static int ram_length(int length) {
+    return length < 0 ? 0 : length > RAM_SIZE ? RAM_SIZE : length;
+}
+
+static void ram_fill(p8p_runtime_t *runtime, int address, int value,
+                     int length) {
+    address &= 0xffff;
+    while (length > 0) {
+        int chunk = length < RAM_SIZE - address ? length : RAM_SIZE - address;
+        memset(runtime->ram + address, value, (size_t)chunk);
+        length -= chunk;
+        address = 0;
+    }
+}
+
+/* memmove() with wrapping ranges: a destination that starts inside the
+ * source copies from the end, so overlapping bytes are read before they are
+ * overwritten. */
+static void ram_move(p8p_runtime_t *runtime, int destination, int source,
+                     int length) {
+    destination &= 0xffff;
+    source &= 0xffff;
+    if (destination + length <= RAM_SIZE && source + length <= RAM_SIZE) {
+        memmove(runtime->ram + destination, runtime->ram + source,
+                (size_t)length);
+    } else if (((destination - source) & 0xffff) < length) {
+        for (int i = length - 1; i >= 0; --i)
+            runtime->ram[(destination + i) & 0xffff] =
+                runtime->ram[(source + i) & 0xffff];
+    } else {
+        for (int i = 0; i < length; ++i)
+            runtime->ram[(destination + i) & 0xffff] =
+                runtime->ram[(source + i) & 0xffff];
+    }
+}
+
+static uint32_t ram_read(const p8p_runtime_t *runtime, int address,
+                         int bytes) {
+    uint32_t value = 0;
+    for (int i = bytes - 1; i >= 0; --i)
+        value = (value << 8) | runtime->ram[(address + i) & 0xffff];
+    return value;
+}
+
+static void ram_write(p8p_runtime_t *runtime, int address, uint32_t value,
+                      int bytes) {
+    for (int i = 0; i < bytes; ++i, value >>= 8)
+        runtime->ram[(address + i) & 0xffff] = (uint8_t)value;
 }
 
 static uint8_t screen_get(const p8p_runtime_t *runtime, int x, int y) {
@@ -1623,57 +1685,37 @@ static int api_poke(lua_State *lua) {
 
 static int api_peek2(lua_State *lua) {
     profile_api(P8P_API_MEMORY);
-    int address = arg_int(lua, 1, 0);
-    if (address < 0 || address > 0xfffe) {
-        push_int(lua, 0);
-        return 1;
-    }
+    int address = arg_int(lua, 1, 0) & 0xffff;
     if (range_touches_screen(address, 2))
         screen_to_ram(active_runtime);
-    push_int(lua, active_runtime->ram[address] |
-                  ((int)active_runtime->ram[address + 1] << 8));
+    push_int(lua, (int)ram_read(active_runtime, address, 2));
     return 1;
 }
 
 static int api_poke2(lua_State *lua) {
     profile_api(P8P_API_MEMORY);
-    int address = arg_int(lua, 1, 0);
+    int address = arg_int(lua, 1, 0) & 0xffff;
     int value = arg_int(lua, 2, 0);
-    if (address < 0 || address > 0xfffe)
-        return 0;
-    active_runtime->ram[address] = (uint8_t)value;
-    active_runtime->ram[address + 1] = (uint8_t)(value >> 8);
+    ram_write(active_runtime, address, (uint32_t)value, 2);
     ram_written(active_runtime, address, 2);
     return 0;
 }
 
 static int api_peek4(lua_State *lua) {
     profile_api(P8P_API_MEMORY);
-    int address = arg_int(lua, 1, 0);
-    if (address < 0 || address > 0xfffc) {
-        lua_pushnumber(lua, fix32(0));
-        return 1;
-    }
+    int address = arg_int(lua, 1, 0) & 0xffff;
     if (range_touches_screen(address, 4))
         screen_to_ram(active_runtime);
-    uint32_t bits = (uint32_t)active_runtime->ram[address] |
-        ((uint32_t)active_runtime->ram[address + 1] << 8) |
-        ((uint32_t)active_runtime->ram[address + 2] << 16) |
-        ((uint32_t)active_runtime->ram[address + 3] << 24);
-    lua_pushnumber(lua, fix32::frombits((int32_t)bits));
+    lua_pushnumber(lua, fix32::frombits(
+        (int32_t)ram_read(active_runtime, address, 4)));
     return 1;
 }
 
 static int api_poke4(lua_State *lua) {
     profile_api(P8P_API_MEMORY);
-    int address = arg_int(lua, 1, 0);
-    if (address < 0 || address > 0xfffc)
-        return 0;
+    int address = arg_int(lua, 1, 0) & 0xffff;
     uint32_t bits = (uint32_t)arg_number(lua, 2, fix32(0)).bits();
-    active_runtime->ram[address] = (uint8_t)bits;
-    active_runtime->ram[address + 1] = (uint8_t)(bits >> 8);
-    active_runtime->ram[address + 2] = (uint8_t)(bits >> 16);
-    active_runtime->ram[address + 3] = (uint8_t)(bits >> 24);
+    ram_write(active_runtime, address, bits, 4);
     ram_written(active_runtime, address, 4);
     return 0;
 }
@@ -1682,11 +1724,9 @@ static int api_memset(lua_State *lua) {
     profile_api(P8P_API_MEMORY);
     int destination = arg_int(lua, 1, 0);
     int value = arg_int(lua, 2, 0);
-    int length = arg_int(lua, 3, 0);
-    if (destination >= 0 && length >= 0 && destination + length <= 0x10000) {
-        memset(active_runtime->ram + destination, value, (size_t)length);
-        ram_written(active_runtime, destination, length);
-    }
+    int length = ram_length(arg_int(lua, 3, 0));
+    ram_fill(active_runtime, destination, value, length);
+    ram_written(active_runtime, destination, length);
     return 0;
 }
 
@@ -1694,15 +1734,11 @@ static int api_memcpy(lua_State *lua) {
     profile_api(P8P_API_MEMORY);
     int destination = arg_int(lua, 1, 0);
     int source = arg_int(lua, 2, 0);
-    int length = arg_int(lua, 3, 0);
-    if (destination >= 0 && source >= 0 && length >= 0 &&
-        destination + length <= 0x10000 && source + length <= 0x10000) {
-        if (range_touches_screen(source, length))
-            screen_to_ram(active_runtime);
-        memmove(active_runtime->ram + destination, active_runtime->ram + source,
-                (size_t)length);
-        ram_written(active_runtime, destination, length);
-    }
+    int length = ram_length(arg_int(lua, 3, 0));
+    if (range_touches_screen(source, length))
+        screen_to_ram(active_runtime);
+    ram_move(active_runtime, destination, source, length);
+    ram_written(active_runtime, destination, length);
     return 0;
 }
 
@@ -1711,16 +1747,22 @@ static int api_reload(lua_State *lua) {
     int destination = arg_int(lua, 1, 0);
     int source = arg_int(lua, 2, 0);
     int length = arg_int(lua, 3, 0x4300);
-    if (destination >= 0 && source >= 0 && length >= 0 &&
-        destination + length <= 0x10000 &&
+    if (source >= 0 && length >= 0 &&
         source + length <= (int)P8P_CART_ROM_SIZE) {
-        int writes_screen = range_touches_screen(destination, length);
-        memcpy(active_runtime->ram + destination, active_runtime->cart_rom + source,
-               (size_t)length);
-        if (writes_screen)
-            ram_to_screen_range(active_runtime, destination, length);
-        if (range_touches_draw_state(destination, length))
-            draw_state_from_ram(active_runtime);
+        destination &= 0xffff;
+        while (length > 0) {
+            int chunk = length < RAM_SIZE - destination ? length
+                                                         : RAM_SIZE - destination;
+            memcpy(active_runtime->ram + destination,
+                   active_runtime->cart_rom + source, (size_t)chunk);
+            if (range_touches_screen(destination, chunk))
+                ram_to_screen_range(active_runtime, destination, chunk);
+            if (range_touches_draw_state(destination, chunk))
+                draw_state_from_ram(active_runtime);
+            source += chunk;
+            length -= chunk;
+            destination = 0;
+        }
     }
     return 0;
 }
