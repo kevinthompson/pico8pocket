@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `stat(57)` returns true while music plays, including during a fade-out, and
+  false otherwise, as in PICO-8 0.2.7. It previously returned nil.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps

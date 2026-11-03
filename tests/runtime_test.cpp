@@ -1155,6 +1155,38 @@ int main(void) {
         }
 
         {
+            /* stat(57) is a boolean: true while music plays, including a
+             * fade-out, and false once it stops (PICO-8 0.2.7). */
+            static const char music_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "r={} a={0,-1,0,-1} f={0,0,0,500}\n"
+                "function _update() add(r,stat(57)) local n=#r\n"
+                "if a[n] then music(a[n],f[n]) end end\n"
+                "function _draw() cls() for i,v in pairs(r) do\n"
+                "pset(i,0,v==true and 7 or v==false and 8 or 1) end end\n"
+                "__sfx__\n"
+                "00100000183501835018350183501835018350183501835018350183501835018350183501835018350"
+                "1835018350183501835018350183501835018350183501835018350183501835018350183501835018350\n"
+                "__music__\n"
+                "00 00424344\n";
+            p8p_cart_t music_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)music_source,
+                                            sizeof(music_source) - 1,
+                                            &music_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &music_cart) == 0);
+            for (int frame = 0; frame < 5; ++frame)
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+            const uint8_t *fb = p8p_runtime_framebuffer(runtime);
+            /* Stopped, playing, stopped, playing, fading out. */
+            CHECK(fb[1] == 8);
+            CHECK(fb[2] == 7);
+            CHECK(fb[3] == 8);
+            CHECK(fb[4] == 7);
+            CHECK(fb[5] == 7);
+            p8p_cart_destroy(&music_cart);
+        }
+
+        {
             /* Muted output skips synthesis but must keep time: 9600 skipped
              * frames advance the music by the same 24 ticks as rendering. */
             audio_crossings_for(runtime,

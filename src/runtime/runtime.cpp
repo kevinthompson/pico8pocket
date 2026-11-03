@@ -2370,6 +2370,10 @@ static int api_stat(lua_State *lua) {
     case 56:
         push_int(lua, p8p_audio_music_ticks(runtime->audio));
         break;
+    case 57:
+        /* Music stays playing until a fade-out completes. */
+        lua_pushboolean(lua, p8p_audio_music_pattern(runtime->audio) >= 0);
+        break;
     case 28:
     case 30:
     case 120:
