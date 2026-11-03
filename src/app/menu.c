@@ -1,5 +1,6 @@
 #include "p8p/menu.h"
 
+#include "p8p/pico8_font.h"
 #include "p8p/platform.h"
 #include "p8p/state_store.h"
 
@@ -17,7 +18,14 @@ enum menu_screen {
     SCREEN_DISPLAY,
     SCREEN_AUDIO,
     SCREEN_INFO,
-    SCREEN_MODAL
+    SCREEN_MODAL,
+    SCREEN_PAUSE
+};
+
+/* Pause-menu rows other than the cart's menuitem slots 1..5. */
+enum {
+    PAUSE_CONTINUE = 0,
+    PAUSE_RESET_CART = 6
 };
 
 /* Main-screen rows.  Cart rows (menuitem() slots 1-5) follow RESUME and
@@ -51,6 +59,9 @@ struct p8p_menu {
     uint8_t background[MENU_WIDTH * MENU_HEIGHT];
     p8p_state_meta_t states[P8P_STATE_SLOT_COUNT];
     uint16_t previous_buttons;
+    uint8_t previous_pico_buttons;
+    uint8_t pause_rows[7];
+    int pause_row_count;
     int screen;
     int cursor;
     int scroll;
@@ -61,74 +72,20 @@ struct p8p_menu {
     char notice[32];
 };
 
-static uint16_t glyph_ascii(uint32_t character) {
-#define GLYPH(r0, r1, r2, r3, r4) \
-    ((uint16_t)((r0) << 12) | (uint16_t)((r1) << 9) | \
-     (uint16_t)((r2) << 6) | (uint16_t)((r3) << 3) | (uint16_t)(r4))
-    if (character >= 'a' && character <= 'z')
-        character -= 'a' - 'A';
-    switch (character) {
-    case '0': return GLYPH(2, 5, 5, 5, 2);
-    case '1': return GLYPH(2, 6, 2, 2, 7);
-    case '2': return GLYPH(6, 1, 2, 4, 7);
-    case '3': return GLYPH(6, 1, 2, 1, 6);
-    case '4': return GLYPH(5, 5, 7, 1, 1);
-    case '5': return GLYPH(7, 4, 6, 1, 6);
-    case '6': return GLYPH(3, 4, 6, 5, 2);
-    case '7': return GLYPH(7, 1, 2, 2, 2);
-    case '8': return GLYPH(2, 5, 2, 5, 2);
-    case '9': return GLYPH(2, 5, 3, 1, 6);
-    case 'A': return GLYPH(2, 5, 7, 5, 5);
-    case 'B': return GLYPH(6, 5, 6, 5, 6);
-    case 'C': return GLYPH(3, 4, 4, 4, 3);
-    case 'D': return GLYPH(6, 5, 5, 5, 6);
-    case 'E': return GLYPH(7, 4, 6, 4, 7);
-    case 'F': return GLYPH(7, 4, 6, 4, 4);
-    case 'G': return GLYPH(3, 4, 5, 5, 3);
-    case 'H': return GLYPH(5, 5, 7, 5, 5);
-    case 'I': return GLYPH(7, 2, 2, 2, 7);
-    case 'J': return GLYPH(1, 1, 1, 5, 2);
-    case 'K': return GLYPH(5, 5, 6, 5, 5);
-    case 'L': return GLYPH(4, 4, 4, 4, 7);
-    case 'M': return GLYPH(5, 7, 7, 5, 5);
-    case 'N': return GLYPH(5, 7, 7, 7, 5);
-    case 'O': return GLYPH(2, 5, 5, 5, 2);
-    case 'P': return GLYPH(6, 5, 6, 4, 4);
-    case 'Q': return GLYPH(2, 5, 5, 3, 1);
-    case 'R': return GLYPH(6, 5, 6, 5, 5);
-    case 'S': return GLYPH(3, 4, 2, 1, 6);
-    case 'T': return GLYPH(7, 2, 2, 2, 2);
-    case 'U': return GLYPH(5, 5, 5, 5, 7);
-    case 'V': return GLYPH(5, 5, 5, 5, 2);
-    case 'W': return GLYPH(5, 5, 7, 7, 5);
-    case 'X': return GLYPH(5, 5, 2, 5, 5);
-    case 'Y': return GLYPH(5, 5, 2, 2, 2);
-    case 'Z': return GLYPH(7, 1, 2, 4, 7);
-    case '!': return GLYPH(2, 2, 2, 0, 2);
-    case '?': return GLYPH(6, 1, 2, 0, 2);
-    case '.': return GLYPH(0, 0, 0, 0, 2);
-    case ',': return GLYPH(0, 0, 0, 2, 4);
-    case ':': return GLYPH(0, 2, 0, 2, 0);
-    case '-': return GLYPH(0, 0, 7, 0, 0);
-    case '+': return GLYPH(0, 2, 7, 2, 0);
-    case '/': return GLYPH(1, 1, 2, 4, 4);
-    case '<': return GLYPH(1, 2, 4, 2, 1);
-    case '>': return GLYPH(4, 2, 1, 2, 4);
-    case '=': return GLYPH(0, 7, 0, 7, 0);
-    case '_': return GLYPH(0, 0, 0, 0, 7);
-    case '(': return GLYPH(1, 2, 2, 2, 1);
-    case ')': return GLYPH(4, 2, 2, 2, 4);
-    case '[': return GLYPH(3, 2, 2, 2, 3);
-    case ']': return GLYPH(6, 2, 2, 2, 6);
-    case '\'': return GLYPH(2, 2, 0, 0, 0);
-    case '"': return GLYPH(5, 5, 0, 0, 0);
-    case '*': return GLYPH(0, 5, 2, 5, 0);
-    case '%': return GLYPH(5, 1, 2, 4, 5);
-    case '#': return GLYPH(5, 7, 5, 7, 5);
-    case '^': return GLYPH(2, 5, 0, 0, 0);
-    default: return 0;
-    }
-#undef GLYPH
+/* Letters are always shown in PICO-8's default style, which the font stores at
+ * the lowercase codes. */
+uint16_t p8p_menu_glyph(uint32_t character) {
+    uint16_t bits = 0;
+    if (character >= 'A' && character <= 'Z')
+        character += 'a' - 'A';
+    if (character >= 128)
+        return 0;
+    const uint8_t *rows = p8p_pico8_font + character * 8;
+    for (int row = 0; row < 5; ++row)
+        for (int column = 0; column < 3; ++column)
+            if (rows[row] & (1u << column))
+                bits |= (uint16_t)(1u << (14 - row * 3 - column));
+    return bits;
 }
 
 static uint16_t glyph_cyrillic(uint32_t c) {
@@ -208,7 +165,7 @@ static void fill(uint8_t *fb, int x, int y, int w, int h, uint8_t color) {
 static void text(uint8_t *fb, int x, int y, const char *value, uint8_t color) {
     while (value && *value && x <= MENU_WIDTH - 3) {
         uint32_t c = utf8_next(&value);
-        uint16_t bits = c < 128 ? glyph_ascii(c) : glyph_cyrillic(c);
+        uint16_t bits = c < 128 ? p8p_menu_glyph(c) : glyph_cyrillic(c);
         for (int row = 0; row < 5; ++row)
             for (int column = 0; column < 3; ++column)
                 if ((bits & (1u << (14 - row * 3 - column))) &&
@@ -330,7 +287,7 @@ static void draw_main(p8p_menu_t *menu) {
         text(menu->framebuffer, 122, 2, "^", 6);
     if (menu->scroll + MAIN_VISIBLE_ROWS < count)
         text(menu->framebuffer, 122, 107, "V", 6);
-    text(menu->framebuffer, 97, 121, "X FPS", 6);
+    text(menu->framebuffer, 77, 121, "SELECT+X FPS", 6);
     if (menu->notice_frames > 0) {
         fill(menu->framebuffer, 0, 112, 128, 8, 1);
         text(menu->framebuffer, 3, 114, menu->notice, 10);
@@ -496,6 +453,47 @@ static void draw_modal(p8p_menu_t *menu) {
          tr(menu, "A YES   B NO", "A ДА   B НЕТ"), 10);
 }
 
+/* Continue, then the cart's menuitems in slot order, then reset cart. */
+static void refresh_pause_rows(p8p_menu_t *menu, p8p_runtime_t *runtime) {
+    menu->pause_row_count = 0;
+    menu->pause_rows[menu->pause_row_count++] = PAUSE_CONTINUE;
+    for (int slot = 1; slot <= 5; ++slot)
+        if (p8p_runtime_menu_item(runtime, slot))
+            menu->pause_rows[menu->pause_row_count++] = (uint8_t)slot;
+    menu->pause_rows[menu->pause_row_count++] = PAUSE_RESET_CART;
+    if (menu->cursor >= menu->pause_row_count)
+        menu->cursor = menu->pause_row_count - 1;
+}
+
+static void draw_pause(p8p_menu_t *menu, p8p_runtime_t *runtime) {
+    uint8_t *fb = menu->framebuffer;
+    int width = 84;
+    int height = menu->pause_row_count * 8 + 8;
+    int x = (MENU_WIDTH - width) / 2;
+    int y = (MENU_HEIGHT - height) / 2;
+    memcpy(fb, menu->background, sizeof(menu->framebuffer));
+    fill(fb, x, y, width, height, 0);
+    fill(fb, x + 1, y + 1, width - 2, 1, 7);
+    fill(fb, x + 1, y + height - 2, width - 2, 1, 7);
+    fill(fb, x + 1, y + 1, 1, height - 2, 7);
+    fill(fb, x + width - 2, y + 1, 1, height - 2, 7);
+    for (int row = 0; row < menu->pause_row_count; ++row) {
+        int text_x = x + 10;
+        int text_y = y + 5 + row * 8;
+        int slot = menu->pause_rows[row];
+        const char *label =
+            slot == PAUSE_CONTINUE ? tr(menu, "CONTINUE", "ПРОДОЛЖИТЬ") :
+            slot == PAUSE_RESET_CART ? tr(menu, "RESET CART", "ПЕРЕЗАПУСК") :
+            p8p_runtime_menu_item(runtime, slot);
+        text(fb, text_x, text_y, label ? label : "", 7);
+        if (row == menu->cursor) {
+            fill(fb, text_x - 5, text_y, 1, 5, 7);
+            fill(fb, text_x - 4, text_y + 1, 1, 3, 7);
+            fill(fb, text_x - 3, text_y + 2, 1, 1, 7);
+        }
+    }
+}
+
 static void draw_menu(p8p_menu_t *menu, p8p_runtime_t *runtime) {
     switch (menu->screen) {
     case SCREEN_MAIN: draw_main(menu); break;
@@ -505,6 +503,7 @@ static void draw_menu(p8p_menu_t *menu, p8p_runtime_t *runtime) {
     case SCREEN_AUDIO: draw_audio(menu); break;
     case SCREEN_INFO: draw_info(menu, runtime); break;
     case SCREEN_MODAL: draw_modal(menu); break;
+    case SCREEN_PAUSE: draw_pause(menu, runtime); break;
     }
     if (menu->notice_frames > 0)
         --menu->notice_frames;
@@ -531,13 +530,72 @@ void p8p_menu_destroy(p8p_menu_t *menu) {
     free(menu);
 }
 
+void p8p_menu_open_pause(p8p_menu_t *menu, p8p_runtime_t *runtime,
+                         uint16_t physical_buttons, uint8_t pico_buttons) {
+    const uint8_t *source;
+    const uint8_t *palette;
+    if (!menu || !runtime)
+        return;
+    source = p8p_runtime_display_framebuffer(runtime);
+    palette = p8p_runtime_screen_palette(runtime);
+    for (int i = 0; i < MENU_WIDTH * MENU_HEIGHT; ++i)
+        menu->background[i] = palette ? palette[source[i] & 15] : source[i];
+    menu->runtime = runtime;
+    menu->cart_running = 1;
+    menu->previous_buttons = physical_buttons;
+    menu->previous_pico_buttons = pico_buttons;
+    menu->screen = SCREEN_PAUSE;
+    menu->cursor = 0;
+    menu->modal = MODAL_NONE;
+    menu->capture_action = -1;
+    refresh_pause_rows(menu, runtime);
+    draw_menu(menu, runtime);
+}
+
+static enum p8p_menu_action update_pause(p8p_menu_t *menu,
+                                         p8p_runtime_t *runtime,
+                                         uint8_t pressed) {
+    const uint8_t confirm = P8P_BTN_O | P8P_BTN_X;
+    const uint8_t sideways = P8P_BTN_LEFT | P8P_BTN_RIGHT;
+    int slot;
+    int result;
+    if (pressed & P8P_BTN_PAUSE)
+        return P8P_MENU_CLOSE;
+    if (pressed & P8P_BTN_UP)
+        menu->cursor = menu->cursor == 0 ? menu->pause_row_count - 1 :
+                                           menu->cursor - 1;
+    if (pressed & P8P_BTN_DOWN)
+        menu->cursor = (menu->cursor + 1) % menu->pause_row_count;
+    if (!(pressed & (confirm | sideways)))
+        return P8P_MENU_NONE;
+    slot = menu->pause_rows[menu->cursor];
+    if (slot == PAUSE_CONTINUE || slot == PAUSE_RESET_CART) {
+        if (!(pressed & confirm))
+            return P8P_MENU_NONE;
+        return slot == PAUSE_CONTINUE ? P8P_MENU_CLOSE : P8P_MENU_RESTART;
+    }
+    /* PICO-8 passes 1/2 for left/right and 112 for O/X selection. */
+    result = p8p_runtime_menu_select(runtime, slot,
+                                     (pressed & confirm) ? 112 :
+                                     pressed & sideways);
+    if (result < 0)
+        return P8P_MENU_CART_ERROR;
+    refresh_pause_rows(menu, runtime);
+    /* The callback can add or remove items; keep the cursor on its row. */
+    menu->cursor = 0;
+    for (int row = 0; row < menu->pause_row_count; ++row)
+        if (menu->pause_rows[row] == slot)
+            menu->cursor = row;
+    return result == 0 ? P8P_MENU_CLOSE : P8P_MENU_NONE;
+}
+
 void p8p_menu_open(p8p_menu_t *menu, p8p_runtime_t *runtime,
                    uint16_t physical_buttons, int cart_running) {
     const uint8_t *source;
     const uint8_t *palette;
     if (!menu || !runtime)
         return;
-    source = p8p_runtime_framebuffer(runtime);
+    source = p8p_runtime_display_framebuffer(runtime);
     palette = p8p_runtime_screen_palette(runtime);
     for (int i = 0; i < MENU_WIDTH * MENU_HEIGHT; ++i) {
         uint8_t color = palette ? palette[source[i] & 15] : source[i];
@@ -588,8 +646,6 @@ static enum p8p_menu_action update_main(p8p_menu_t *menu,
     int row = rows[menu->cursor < count ? menu->cursor : 0];
     if (pressed & P8P_PHYS_B)
         return P8P_MENU_CLOSE;
-    if (pressed & P8P_PHYS_X)
-        return P8P_MENU_TOGGLE_DIAGNOSTICS;
     if (row >= ROW_CART1 && row <= ROW_CART5) {
         /* PICO-8 passes 1/2 for left/right and 112 for O/X selection. */
         int buttons = (pressed & P8P_PHYS_A) ? 112 :
@@ -807,7 +863,8 @@ static enum p8p_menu_action update_modal(p8p_menu_t *menu,
 enum p8p_menu_action p8p_menu_update(p8p_menu_t *menu,
                                      p8p_runtime_t *runtime,
                                      uint16_t physical_buttons,
-                                     uint16_t pressed_buttons) {
+                                     uint16_t pressed_buttons,
+                                     uint8_t pico_buttons) {
     uint16_t pressed;
     enum p8p_menu_action action = P8P_MENU_NONE;
     int count = 0;
@@ -821,6 +878,22 @@ enum p8p_menu_action p8p_menu_update(p8p_menu_t *menu,
 
     if ((pressed & P8P_PHYS_SELECT) && menu->capture_action < 0)
         return P8P_MENU_CLOSE;
+
+    if (menu->screen == SCREEN_PAUSE) {
+        uint8_t pico_pressed =
+            pico_buttons & (uint8_t)~menu->previous_pico_buttons;
+        menu->previous_pico_buttons = pico_buttons;
+        action = update_pause(menu, runtime, pico_pressed);
+        draw_menu(menu, runtime);
+        return action;
+    }
+
+    /* A and X are both PICO-8's X button in play, so X confirms here too.
+     * The save-state screen keeps X for Save, and a control capture takes
+     * X as the button to assign. */
+    if ((pressed & P8P_PHYS_X) && menu->screen != SCREEN_STATES &&
+        menu->capture_action < 0)
+        pressed |= P8P_PHYS_A;
 
     switch (menu->screen) {
     case SCREEN_MAIN: count = main_rows(menu, rows); break;

@@ -18,11 +18,15 @@ struct p8p_runtime {
      * aligned so fill patterns can write four pixels at a time. */
     alignas(4) uint8_t framebuffer[128 * 128];
     uint8_t screen_ram_dirty;
+    /* The cart asked for the pause menu; see p8p_runtime_take_pause_request. */
+    uint8_t pause_requested;
     /* RAM address the framebuffer mirrors: the screen at 0x6000 unless the
      * cart redirects drawing with 0x5f55 (e.g. into the sprite sheet). */
     uint16_t draw_target;
     /* Unpacked screen RAM for presentation while drawing is redirected. */
     uint8_t display[128 * 128];
+    /* The screen after the 0x5f2c transformation, when one is selected. */
+    uint8_t transformed[128 * 128];
     uint8_t draw_palette[16];
     uint8_t screen_palette[16];
     uint8_t transparent[16];
@@ -35,6 +39,8 @@ struct p8p_runtime {
     /* Buttons sampled at the start of the current frame; live updates
      * during the frame may only add to them. */
     uint8_t frame_buttons;
+    /* The physical pause button, which btn(6) reports as a one-frame pulse. */
+    uint8_t pause_button_held;
     uint16_t held_frames[7];
     uint32_t rng[2];
     int camera_x;
@@ -46,6 +52,11 @@ struct p8p_runtime {
     int draw_color;
     uint16_t fill_pattern;
     uint8_t fill_pattern_transparent;
+    /* The fill-pattern bits at 0x5f33 (P8P_FILL_*), and whether shapes take
+     * the patterned path: a pattern is set, or the secondary palette applies
+     * to them, which it does even with an empty pattern. */
+    uint8_t fill_pattern_flags;
+    uint8_t fill_pattern_active;
     int cursor_x;
     int cursor_y;
     int target_fps;

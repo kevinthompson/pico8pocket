@@ -9,6 +9,85 @@
   that keep extra sprite sheets, maps or level data in upper memory lost it.
   `serial(0x808, ...)` reads PCM samples from upper memory and wraps the same
   way.
+- Music stops at a pattern whose four channels are all disabled, as in
+  PICO-8, instead of playing through it.
+- Music loops return to the loop-start pattern. They previously resumed one
+  pattern after it, which could reach an empty pattern and play sfx 0 on all
+  four channels.
+- `sfx(nil)` plays sfx 0, as PICO-8 does. It previously acted as `sfx(-1)` and
+  stopped every playing sound effect. `sfx()` with no arguments does nothing.
+- Notes no longer click when they start, change volume, change waveform or
+  end. As in PICO-8 0.2.7, each volume change ramps over about 2.9 ms, a sound
+  that ends fades out on its last waveform, and a new waveform crossfades from
+  the previous output. Low notes made the steps audible on the Pocket speaker.
+- `sfx`/`music` voices match PICO-8's level and shape for each waveform. The
+  triangle and tilted saw were half as loud as PICO-8 and the square, pulse
+  and saw were too loud relative to them. `serial()` PCM plays at full scale,
+  four times louder than before, as in PICO-8. The mix still saturates rather
+  than wraps, so loud four-channel passages can clip.
+- Add the secondary palette. `pal(c, v, 2)` and `pal(table, 2)` set its entries
+  at `0x5f60`-`0x5f6f` instead of changing the draw palette, `pal(2)`, `pal()`
+  and `pal(-1)` restore PICO-8's default pairs, and `fillp()` keeps its sprite
+  (`0x0.4`) and secondary-palette (`0x0.2`) bits in `0x5f33`. With the sprite
+  bit, `spr`, `sspr`, `map` and `tline` draw each pixel's secondary pair through
+  the fill pattern; with the secondary-palette bit, shapes do the same. Output
+  matches PICO-8 0.2.7 in 43 measured cases.
+
+- `stat(80)`-`stat(85)` and `stat(90)`-`stat(95)` report 1970-01-01 00:00:00
+  instead of nil or 0, so carts that read the date at load no longer stop with
+  an arithmetic error. The Pocket runtime exposes no wall clock; a year before
+  2000 tells a cart that the date is not real.
+- Add `rrect` and `rrectfill`, which draw through the same clip, camera,
+  palette and fill-pattern path as `rectfill`.
+- `pal(p)` resets the draw or display palette, as the manual describes. It
+  previously mapped colour `p` to itself, so temporary palette changes
+  carried over into later drawing. `pal(0)` also resets transparency, as
+  PICO-8 does.
+- `spr()` honours fractional sizes, drawing `w*8` by `h*8` pixels. It previously
+  truncated them to whole tiles, so a width below 1 drew nothing. As in PICO-8,
+  a size left out or nil after `w` is passed counts as 0, not 1.
+- The runtime error screen and the performance overlay draw text with the
+  PICO-8 font instead of hand-drawn letters, so `M` and `N` are distinct and
+  messages look as they do in PICO-8.
+- X confirms in the Select system menu, as A does. Both are PICO-8's X button
+  in play, but X used to toggle the profiler and close the menu, so choosing a
+  row with it appeared to do nothing. The save-state screen keeps X for Save.
+  Select+X still toggles the profiler, with the menu open or closed.
+- `stat(57)` returns true while music plays, including during a fade-out, and
+  false otherwise, as in PICO-8 0.2.7. It previously returned nil.
+- Carts that set `_update60` inside `_init` now run at 60 fps, as in PICO-8
+  0.2.7. The frame rate was chosen before `_init`, so those carts ran at 30 fps
+  and called an `_update` that did not exist: the screen drew but the game never
+  advanced. A 30 fps cart that replaces `_update` with `_update60` while running
+  now gets two `_update60` calls per frame, as in PICO-8, instead of none.
+- `print` and P8SCII now match PICO-8 0.2.7 in a pixel-exact comparison of 5,383
+  cases, apart from the limits in `docs/compatibility.md`. `print` returns the
+  lowest y as a second value, and `0x5f24` holds the print margin. Console
+  scrolling, tabs, wrapping, blank lines, padded cells, backgrounds, invert,
+  stripes, pinball mode, outlines, underlines, `\*`, `\v`, one-off characters,
+  default attributes and custom fonts all follow the measured behaviour.
+- `\^c` homes the cursor, `\0` omits the newline, `\f` keeps the pen and `\a12`
+  plays an existing sfx. `cls()` resets the clip and ignores the draw palette,
+  and `cursor()` with no arguments returns to 0,0. Frame delays and the `\a`
+  note language remain unimplemented.
+- Choosing another cart in Core Settings → Cartridge now switches to it while
+  the core keeps running. The cart slot used to restart the core, and
+  openfpgaOS stalled on "Loading app" after that restart. The app now checks
+  the slot once a second and loads a new cart in place, with its own save
+  states and cartdata.
+- Start opens a PICO-8 pause menu with Continue, the cart's `menuitem` entries
+  and Reset Cart. It uses the cart's mapped buttons, honours `0x5f30`
+  suppression, and also opens from `extcmd("pause")`. Select still opens the
+  system menu. As in PICO-8, `btn(6)` is true for one frame per press and
+  `btnp(6)` does not repeat.
+- Menu text uses the PICO-8 font data instead of a separate hand-drawn font, in
+  which letters such as `M` and `N` were hard to tell apart.
+- `circfill` draws the same shape as PICO-8 0.2.7: each row is filled out to
+  the outline `circ` draws. Rows near the top and bottom of a circle were
+  previously too narrow, so small filled circles looked pinched.
+- Support every `0x5f2c` screen mode: 64x128, 128x64 and 64x64 stretches,
+  mirroring, flips and quarter-turn rotations. Pause menus and save-state
+  previews show the transformed image.
 
 ## 0.0.35 — 2026-10-21
 

@@ -1,6 +1,7 @@
 #include "p8p/cart.h"
 #include "p8p/menu.h"
 #include "p8p/multicart.h"
+#include "p8p/pico8_font.h"
 #include "p8p/platform.h"
 #include "p8p/runtime.h"
 #include "p8p/scheduler.h"
@@ -91,59 +92,20 @@ static void draw_profile(uint8_t *fb, unsigned logical_fps,
     }
 }
 
+/* Error and overlay text use PICO-8's own 3x5 letter shapes.  Letters map
+ * to the font's lowercase codes, which hold the shapes PICO-8 prints by
+ * default; anything outside printable ASCII is blank. */
 static uint16_t error_glyph(unsigned char character) {
-#define GLYPH(r0, r1, r2, r3, r4) \
-    ((uint16_t)((r0) << 12) | (uint16_t)((r1) << 9) | \
-     (uint16_t)((r2) << 6) | (uint16_t)((r3) << 3) | (uint16_t)(r4))
-    if (character >= 'a' && character <= 'z')
-        character = (unsigned char)(character - ('a' - 'A'));
-    switch (character) {
-    case '0': return GLYPH(2, 5, 5, 5, 2);
-    case '1': return GLYPH(2, 6, 2, 2, 7);
-    case '2': return GLYPH(6, 1, 2, 4, 7);
-    case '3': return GLYPH(6, 1, 2, 1, 6);
-    case '4': return GLYPH(5, 5, 7, 1, 1);
-    case '5': return GLYPH(7, 4, 6, 1, 6);
-    case '6': return GLYPH(3, 4, 6, 5, 2);
-    case '7': return GLYPH(7, 1, 2, 2, 2);
-    case '8': return GLYPH(2, 5, 2, 5, 2);
-    case '9': return GLYPH(2, 5, 3, 1, 6);
-    case 'A': return GLYPH(2, 5, 7, 5, 5);
-    case 'B': return GLYPH(6, 5, 6, 5, 6);
-    case 'C': return GLYPH(3, 4, 4, 4, 3);
-    case 'D': return GLYPH(6, 5, 5, 5, 6);
-    case 'E': return GLYPH(7, 4, 6, 4, 7);
-    case 'F': return GLYPH(7, 4, 6, 4, 4);
-    case 'G': return GLYPH(3, 4, 5, 5, 3);
-    case 'H': return GLYPH(5, 5, 7, 5, 5);
-    case 'I': return GLYPH(7, 2, 2, 2, 7);
-    case 'J': return GLYPH(1, 1, 1, 5, 2);
-    case 'K': return GLYPH(5, 5, 6, 5, 5);
-    case 'L': return GLYPH(4, 4, 4, 4, 7);
-    case 'M': return GLYPH(5, 7, 7, 5, 5);
-    case 'N': return GLYPH(5, 7, 7, 7, 5);
-    case 'O': return GLYPH(2, 5, 5, 5, 2);
-    case 'P': return GLYPH(6, 5, 6, 4, 4);
-    case 'Q': return GLYPH(2, 5, 5, 3, 1);
-    case 'R': return GLYPH(6, 5, 6, 5, 5);
-    case 'S': return GLYPH(3, 4, 2, 1, 6);
-    case 'T': return GLYPH(7, 2, 2, 2, 2);
-    case 'U': return GLYPH(5, 5, 5, 5, 7);
-    case 'V': return GLYPH(5, 5, 5, 5, 2);
-    case 'W': return GLYPH(5, 5, 7, 7, 5);
-    case 'X': return GLYPH(5, 5, 2, 5, 5);
-    case 'Y': return GLYPH(5, 5, 2, 2, 2);
-    case 'Z': return GLYPH(7, 1, 2, 4, 7);
-    case '!': return GLYPH(2, 2, 2, 0, 2);
-    case '?': return GLYPH(6, 1, 2, 0, 2);
-    case '.': return GLYPH(0, 0, 0, 0, 2);
-    case ':': return GLYPH(0, 2, 0, 2, 0);
-    case '-': return GLYPH(0, 0, 7, 0, 0);
-    case '/': return GLYPH(1, 1, 2, 4, 4);
-    case '_': return GLYPH(0, 0, 0, 0, 7);
-    default: return 0;
-    }
-#undef GLYPH
+    uint16_t bits = 0;
+    if (character < 32 || character > 126)
+        return 0;
+    if (character >= 'A' && character <= 'Z')
+        character = (unsigned char)(character + ('a' - 'A'));
+    for (int row = 0; row < 5; ++row)
+        for (int column = 0; column < 3; ++column)
+            if ((p8p_pico8_font[character * 8 + row] >> column) & 1)
+                bits |= (uint16_t)(1u << (14 - row * 3 - column));
+    return bits;
 }
 
 static void draw_error_text(uint8_t *fb, int x, int y, const char *value,
@@ -248,15 +210,16 @@ typedef struct input_latch {
     uint32_t instruction_hooks;
 } input_latch_t;
 
-static void input_latch_poll(input_latch_t *latch, int force) {
+/* Returns whether it sampled, which is at most once per 4 ms unless forced. */
+static int input_latch_poll(input_latch_t *latch, int force) {
     p8p_physical_input_t sample;
     uint32_t now_us;
 
     if (!latch)
-        return;
+        return 0;
     now_us = p8p_platform_time_us();
     if (!force && now_us - latch->last_poll_us < 4000u)
-        return;
+        return 0;
     p8p_platform_poll_input(&sample);
     sample.pressed |= sample.held & (uint16_t)~latch->previous_held;
     sample.released |= latch->previous_held & (uint16_t)~sample.held;
@@ -265,13 +228,22 @@ static void input_latch_poll(input_latch_t *latch, int force) {
     latch->pending.released |= sample.released;
     latch->previous_held = sample.held;
     latch->last_poll_us = now_us;
+    return 1;
 }
+
+/* The loop refills audio once per pass, and the queue is kept short because
+ * sound effects share it, so one step longer than the queue would silence
+ * the music.  16 ms of audio left is below what a frame that merely runs late
+ * reaches, and leaves time to render the refill before the queue empties. */
+#define AUDIO_REFILL_MID_STEP_FRAMES 768
 
 static void input_latch_service(void *userdata) {
     input_latch_t *latch = (input_latch_t *)userdata;
     if (latch)
         ++latch->instruction_hooks;
-    input_latch_poll(latch, 0);
+    if (input_latch_poll(latch, 0) && latch->runtime &&
+        p8p_platform_audio_queued_frames() < AUDIO_REFILL_MID_STEP_FRAMES)
+        p8p_platform_audio_pump(latch->runtime);
     if (latch && latch->runtime && latch->controls) {
         uint16_t physical = latch->pending.held &
                             (uint16_t)~latch->suppressed;
@@ -288,6 +260,20 @@ static void input_latch_take(input_latch_t *latch,
     *input = latch->pending;
     latch->pending.pressed = 0;
     latch->pending.released = 0;
+}
+
+/* Slow frames spend most of their time outside Lua, so keep sampling through
+ * the wait as well: a tap that fits inside the sleep must still be latched. */
+static void sleep_while_polling(input_latch_t *latch, uint32_t duration_us) {
+    uint32_t deadline_us = p8p_platform_time_us() + duration_us;
+    int32_t remaining_us;
+
+    while ((remaining_us = (int32_t)(deadline_us -
+                                     p8p_platform_time_us())) > 0) {
+        p8p_platform_sleep_us(remaining_us < 4000 ?
+                              (uint32_t)remaining_us : 4000u);
+        input_latch_poll(latch, 1);
+    }
 }
 
 static uint8_t status_color(const p8p_cart_info_t *cart) {
@@ -396,6 +382,98 @@ static int service_savestate(p8p_runtime_t *runtime, int running,
     return result == 0;
 }
 
+/*
+ * The cart slot is user-reloadable without a core restart: picking another
+ * cart in Core Settings swaps the file behind the slot while the app runs.
+ * Nothing announces the change, so the app compares the slot's size and the
+ * hash of its last bytes once a second.  Text and PNG carts share their
+ * opening bytes, so the tail is the part that tells two carts apart.
+ */
+#define CART_SLOT_CHECK_US 1000000u
+#define CART_SIGNATURE_TAIL 512
+
+typedef struct cart_signature {
+    long size;
+    uint32_t tail_hash;
+} cart_signature_t;
+
+#define CART_SLOT_ID 4u
+
+/*
+ * After the host swaps the file, openfpgaOS's stdio reads of the slot are
+ * unreliable.  On a Pocket, with a 77,497-byte cart replacing a 3,988-byte
+ * one, 64-byte fread()s at offsets 0 and 70000 succeeded while 3900, 3988
+ * and 4096 failed, and a whole-file read returned nothing.  ftell() still
+ * reports the new size, and the OS's direct DMA read returns the new file
+ * from start to end, so slot contents are read that way on the Pocket.
+ */
+static int read_slot_bytes(const char *path, long offset, void *dest,
+                           size_t length) {
+#ifdef OF_PC
+    FILE *file = fopen(path, "rb");
+    size_t count;
+    if (!file)
+        return -1;
+    if (fseek(file, offset, SEEK_SET) != 0) {
+        fclose(file);
+        return -1;
+    }
+    count = fread(dest, 1, length, file);
+    fclose(file);
+    return count == length ? 0 : -1;
+#else
+    (void)path;
+    return p8p_platform_read_slot(CART_SLOT_ID, (uint32_t)offset, dest,
+                                  (uint32_t)length);
+#endif
+}
+
+static long slot_size(const char *path) {
+    FILE *file = fopen(path, "rb");
+    long size = -1;
+    if (!file)
+        return -1;
+    if (fseek(file, 0, SEEK_END) == 0)
+        size = ftell(file);
+    fclose(file);
+    return size;
+}
+
+static int read_cart_signature(const char *path, cart_signature_t *out) {
+    unsigned char tail[CART_SIGNATURE_TAIL];
+    long start;
+    size_t count;
+    if ((out->size = slot_size(path)) < 0)
+        return -1;
+    start = out->size > CART_SIGNATURE_TAIL ? out->size - CART_SIGNATURE_TAIL : 0;
+    count = (size_t)(out->size - start);
+    if (count && read_slot_bytes(path, start, tail, count) != 0)
+        return -1;
+    out->tail_hash = 2166136261u;
+    for (size_t index = 0; index < count; ++index)
+        out->tail_hash = (out->tail_hash ^ tail[index]) * 16777619u;
+    return 0;
+}
+
+static int load_slot_cart(const char *path, p8p_cart_info_t *info,
+                          p8p_cart_t *cart) {
+    long size = slot_size(path);
+    uint8_t *data;
+    int result = -1;
+    if (size <= 0 || !(data = (uint8_t *)malloc((size_t)size)))
+        return -1;
+    if (read_slot_bytes(path, 0, data, (size_t)size) == 0 &&
+        p8p_cart_probe_memory(data, (size_t)size, (uint64_t)size, info) == 0 &&
+        info->valid) {
+        if (info->kind == P8P_CART_TEXT)
+            result = p8p_cart_load_text_memory(data, (size_t)size, cart);
+        else if (info->kind == P8P_CART_PNG)
+            result = p8p_cart_load_png_memory(data, (size_t)size, cart);
+    }
+    free(data);
+    return result;
+}
+
 int main(int argc, char **argv) {
     /* Slot 0 is the APF instance descriptor used to launch openfpgaOS. */
     const char *cart_path = "slot:4";
@@ -432,6 +510,9 @@ int main(int argc, char **argv) {
     uint32_t average_present_us = 0;
     uint32_t average_instructions = 0;
     runtime_profile_t runtime_profile = {0};
+    cart_signature_t cart_signature = {-1, 0};
+    uint32_t cart_checked_us;
+    const char *pack_path = "slot:20";
 
 #ifdef OF_PC
     if (argc > 1)
@@ -449,6 +530,8 @@ int main(int argc, char **argv) {
     settings.scale = (uint8_t)p8p_platform_set_scale(settings.scale);
     p8p_platform_audio_set_volume(settings.muted ? 0 : settings.volume);
 
+    if (read_cart_signature(cart_path, &cart_signature) != 0)
+        cart_signature.size = -1;
     if (p8p_cart_probe_file(cart_path, &cart) != 0)
         memset(&cart, 0, sizeof(cart));
 
@@ -460,7 +543,6 @@ int main(int argc, char **argv) {
         p8p_cart_load_file(cart_path, &loaded_cart) == 0) {
         runtime = p8p_runtime_create();
         if (runtime) {
-            const char *pack_path = "slot:20";
 #ifdef OF_PC
             pack_path = getenv("P8P_BBS_PACK");
             if (!pack_path)
@@ -504,6 +586,7 @@ int main(int argc, char **argv) {
     framebuffer = p8p_platform_framebuffer();
     next_frame_us = p8p_platform_time_us();
     previous_frame_us = next_frame_us;
+    cart_checked_us = next_frame_us;
     for (;;) {
         const uint8_t *present_framebuffer = framebuffer;
         const uint8_t *present_palette = NULL;
@@ -558,6 +641,71 @@ int main(int argc, char **argv) {
             p8p_platform_audio_set_paused(0);
         }
 
+        cart_signature_t current_signature;
+        if (runtime && frame_start_us - cart_checked_us >= CART_SLOT_CHECK_US) {
+            cart_checked_us = frame_start_us;
+            if (read_cart_signature(cart_path, &current_signature) == 0 &&
+                (current_signature.size != cart_signature.size ||
+                 current_signature.tail_hash != cart_signature.tail_hash)) {
+                p8p_cart_info_t next_info = {0};
+                p8p_cart_t next_cart = {0};
+                cart_signature = current_signature;
+                p8p_platform_audio_set_paused(1);
+                if (running)
+                    p8p_runtime_flush_cartdata(runtime);
+                printf("pico8pocket: cart slot changed, %ld bytes\n",
+                       cart_signature.size);
+                if (load_slot_cart(cart_path, &next_info, &next_cart) != 0) {
+                    p8p_cart_destroy(&next_cart);
+                    /* Retry on the next check: the slot may still be
+                     * mid-write. */
+                    cart_signature.size = -1;
+                    running = 0;
+                    runtime_failed = 1;
+                    snprintf(runtime_error, sizeof(runtime_error),
+                             "The selected cartridge could not be read.");
+                } else {
+                    /* The session points at the active cart, so it goes
+                     * first, along with any parents of a multicart. */
+                    p8p_multicart_destroy(multicart);
+                    p8p_cart_destroy(&loaded_cart);
+                    loaded_cart = next_cart;
+                    cart = next_info;
+                    multicart = p8p_multicart_create(runtime, &loaded_cart,
+                                                     pack_path);
+                    p8p_cart_content_hash(&loaded_cart, &cart_hash);
+                    p8p_menu_destroy(menu);
+                    menu = p8p_menu_create(&settings, &cart_hash,
+                                           p8p_cart_kind_name(cart.kind));
+                    if (p8p_runtime_load(runtime, &loaded_cart) == 0) {
+                        running = 1;
+                        runtime_failed = 0;
+                        runtime_error[0] = '\0';
+                        p8p_platform_savestate_set_id(cart_hash.bytes,
+                                                      sizeof(cart_hash.bytes));
+                        p8p_platform_savestate_enable(P8P_STATE_BLOB_MAX);
+                        p8p_runtime_set_service_hook(runtime, input_latch_service,
+                                                     &input_latch);
+                    } else {
+                        running = 0;
+                        runtime_failed = 1;
+                        snprintf(runtime_error, sizeof(runtime_error), "%s",
+                                 p8p_runtime_error(runtime));
+                    }
+                }
+                render_divisor = 1;
+                render_phase = probe_frames = overload_frames = recovery_frames = 0;
+                average_period_us = average_draw_runtime_us = average_update_runtime_us = 0;
+                average_audio_us = average_present_us = average_instructions = 0;
+                memset(&runtime_profile, 0, sizeof(runtime_profile));
+                memset(&input_latch.pending, 0, sizeof(input_latch.pending));
+                menu_open = 0;
+                suppress_buttons |= previous_physical;
+                next_frame_us = previous_frame_us = p8p_platform_time_us();
+                p8p_platform_audio_set_paused(0);
+            }
+        }
+
         if (service_savestate(runtime, running, &cart_hash) && menu_open) {
             menu_open = 0;
             suppress_buttons = previous_physical;
@@ -599,12 +747,18 @@ int main(int argc, char **argv) {
                                  (uint16_t)~suppress_buttons;
         if ((physical | physical_pressed) & P8P_PHYS_SELECT)
             game_physical &= (uint16_t)~P8P_PHYS_X;
+        /* Released and pressed again inside one slow frame: show this step
+         * the release, so the next one sees a new press and not a held one. */
+        game_physical &= (uint16_t)~(physical_input.released &
+                                     physical_input.pressed & physical &
+                                     previous_physical);
         buttons = p8p_controls_map(controls, game_physical);
 
         if (menu_open && (running || runtime_failed) &&
             !menu_opened_this_frame) {
             enum p8p_menu_action action =
-                p8p_menu_update(menu, runtime, physical, physical_pressed);
+                p8p_menu_update(menu, runtime, physical, physical_pressed,
+                                buttons);
             present_framebuffer = p8p_menu_framebuffer(menu);
             present_palette = NULL;
             if (action == P8P_MENU_CLOSE) {
@@ -634,13 +788,6 @@ int main(int argc, char **argv) {
                     memset(&runtime_profile, 0, sizeof(runtime_profile));
                     average_instructions = 0;
                 }
-                menu_open = 0;
-                suppress_buttons = physical;
-                p8p_platform_audio_set_paused(0);
-            } else if (action == P8P_MENU_TOGGLE_DIAGNOSTICS) {
-                set_diagnostics(runtime, &diagnostics_visible,
-                                &runtime_profile, &average_instructions,
-                                !diagnostics_visible);
                 menu_open = 0;
                 suppress_buttons = physical;
                 p8p_platform_audio_set_paused(0);
@@ -690,6 +837,12 @@ int main(int argc, char **argv) {
                 runtime_failed = 1;
                 snprintf(runtime_error, sizeof(runtime_error), "%s",
                          p8p_runtime_error(runtime));
+            } else if (menu && p8p_runtime_take_pause_request(runtime)) {
+                p8p_runtime_flush_cartdata(runtime);
+                menu_open = 1;
+                menu_opened_this_frame = 1;
+                p8p_platform_audio_set_paused(1);
+                p8p_menu_open_pause(menu, runtime, physical, buttons);
             }
             uint32_t runtime_us = p8p_platform_time_us() - runtime_start_us;
             if (diagnostics_visible) {
@@ -710,7 +863,11 @@ int main(int argc, char **argv) {
                 average_update_runtime_us = smooth_time(
                     average_update_runtime_us, runtime_us);
             if (running) {
-                present_framebuffer = p8p_runtime_framebuffer(runtime);
+                /* An update-only frame shows nothing unless a state
+                 * notice is up, so skip the screen-mode transform. */
+                if (drew_game_frame || g_state_notice)
+                    present_framebuffer =
+                        p8p_runtime_display_framebuffer(runtime);
                 present_palette = p8p_runtime_screen_palette(runtime);
                 if (drew_game_frame && average_draw_runtime_us) {
                     int desired = p8p_render_divisor_for_load(
@@ -822,6 +979,7 @@ int main(int argc, char **argv) {
             p8p_platform_audio_pump(runtime);
             average_audio_us = smooth_time(
                 average_audio_us, p8p_platform_time_us() - audio_start_us);
+            input_latch_poll(&input_latch, 0);
         }
         if (present_required) {
             uint32_t present_start_us = p8p_platform_time_us();
@@ -829,6 +987,7 @@ int main(int argc, char **argv) {
             average_present_us = smooth_time(
                 average_present_us,
                 p8p_platform_time_us() - present_start_us);
+            input_latch_poll(&input_latch, 0);
         }
 
         /*
@@ -843,7 +1002,7 @@ int main(int argc, char **argv) {
         next_frame_us += frame_period_us;
         int32_t remaining_us = (int32_t)(next_frame_us - now_us);
         if (remaining_us > 0)
-            p8p_platform_sleep_us((uint32_t)remaining_us);
+            sleep_while_polling(&input_latch, (uint32_t)remaining_us);
         else if (remaining_us < -(int32_t)(frame_period_us * 4u))
             /* Keep a bounded amount of lateness so cheap update-only frames
              * can repay one expensive rendered frame.  Resetting the deadline
