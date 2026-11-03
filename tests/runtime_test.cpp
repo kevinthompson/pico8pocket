@@ -312,6 +312,54 @@ static void audio_chunk_boundaries(void) {
     }
 }
 
+static void line_pen_matches_pico8(void) {
+    /* Each case was checked against PICO-8 0.2.7. */
+    static const char source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "r={}\n"
+        "function is(c) add(r,c) end\n"
+        "function pen(x,y) return peek2(0x5f3c)==x and peek2(0x5f3e)==y end\n"
+        "function _draw()\n"
+        " cls() line(1,2,3,4,8) is(@0x5f35==0 and pen(3,4))\n"
+        " line() is(@0x5f35==1 and pen(3,4))\n"
+        " cls() line() line(5,5) is(pget(5,5)==0 and @0x5f35==0 and pen(5,5))\n"
+        " cls() line() line(5,5,9) is(pget(5,5)==0 and @0x5f25==9)\n"
+        " cls() line(1,1,3,3,8) line(6,3) is(pget(4,3)==8 and pget(6,3)==8 and pen(6,3))\n"
+        " cls() line(1,1,3,3,8) line(6,3,11) is(pget(3,3)==11 and pget(6,3)==11 and @0x5f25==11)\n"
+        " line(1,1,3,3,8) line(9) is(@0x5f25==9 and @0x5f35==1 and pen(3,3))\n"
+        " line(nil) is(@0x5f25==0 and @0x5f35==1)\n"
+        " cls() line(1,1,3,3,8) line(5,3,nil) is(@0x5f25==0 and pget(4,3)==0 and pen(5,3))\n"
+        " cls() line(1,1,3,3,8) poke2(0x5f3c,10) poke2(0x5f3e,2) line(12,2)\n"
+        " is(pget(10,2)==8 and pget(11,2)==8 and pget(4,3)==0)\n"
+        " cls() line(1,1,1,1,8) poke(0x5f35,5) line(4,1) is(pget(2,1)==0 and @0x5f35==0 and pen(4,1))\n"
+        " cls() line() poke(0x5f35,0) poke2(0x5f3c,0) poke2(0x5f3e,9) line(4,9,8) is(pget(0,9)==8 and pget(4,9)==8)\n"
+        " cls() camera(2,2) line(3,3,5,5,7) is(pen(5,5)) line(8,5) is(pget(7,5)==7) camera()\n"
+        " line(-5,-6,-7,-300,7) is(pen(-7,-300))\n"
+        " line(1.7,2.2,3.9,4.5,7) is(pen(3,4))\n"
+        " line(1,1,40000,2,7) is(pen(-25536,2))\n"
+        " cls() line(1,1,3,3,8) line(nil,nil,5,5) is(pget(0,0)==8 and pget(5,5)==8)\n"
+        " cls() line(1,8,3,nil,12) is(pget(3,0)==12 and pget(1,8)==12 and pen(3,0))\n"
+        " line(1,1,2,2,7) rect(5,5,6,6) circ(8,8,1) pset(9,9) print(\"a\",0,0) cls() is(@0x5f35==0 and pen(2,2))\n"
+        " cls() for i=1,#r do pset(i-1,0,r[i] and 11 or 8) end\n"
+        "end\n"
+        ;
+    p8p_cart_t cart = {};
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                    sizeof(source) - 1, &cart) == 0);
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    const uint8_t *fb = p8p_runtime_framebuffer(runtime);
+    for (int index = 0; index < 20; ++index) {
+        if (fb[index] != 11)
+            fprintf(stderr, "FAIL line pen case %d\n", index + 1);
+        CHECK(fb[index] == 11);
+    }
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+}
+
 static void draw_palette_transitions(void) {
     struct PaletteCase {
         const char *name;
@@ -558,6 +606,7 @@ int main(void) {
     palette_leaf_contracts();
     palette_fast_path_semantics();
     draw_palette_transitions();
+    line_pen_matches_pico8();
     audio_chunk_boundaries();
     static const uint8_t source[] =
         "pico-8 cartridge // http://www.pico-8.com\n"

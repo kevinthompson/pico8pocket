@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `line(x, y)` and `line(x, y, c)` continue from the previous line's endpoint,
+  and `line()` starts a new polyline, as in PICO-8 0.2.7. They used to draw a
+  single point, or read the colour as a coordinate. The pen is kept in
+  draw-state RAM at `0x5f35` and `0x5f3c`-`0x5f3f`, so carts can peek and poke
+  it.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps

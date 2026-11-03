@@ -855,14 +855,54 @@ static int api_color(lua_State *lua) {
     return 1;
 }
 
+/*
+ * line() keeps its pen in draw-state RAM, as PICO-8 does: 0x5f3c and 0x5f3e
+ * hold the last endpoint as signed 16-bit values, and a nonzero 0x5f35 means
+ * there is none, so the next line(x, y) only moves the pen.  The argument
+ * count picks the form: line() and line(c) lift the pen, line(x, y[, c])
+ * continues from it, and four or more arguments draw a whole line.
+ */
+static int16_t line_pen_get(const p8p_runtime_t *runtime, int address) {
+    return (int16_t)(runtime->ram[address] | (runtime->ram[address + 1] << 8));
+}
+
+static void line_pen_set(p8p_runtime_t *runtime, int x, int y) {
+    runtime->ram[0x5f35] = 0;
+    runtime->ram[0x5f3c] = (uint8_t)x;
+    runtime->ram[0x5f3d] = (uint8_t)(x >> 8);
+    runtime->ram[0x5f3e] = (uint8_t)y;
+    runtime->ram[0x5f3f] = (uint8_t)(y >> 8);
+}
+
 static int api_line(lua_State *lua) {
     profile_api(P8P_API_GRAPHICS);
     p8p_runtime_t *runtime = active_runtime;
+    int count = arg_count(lua);
+    if (count < 2) {
+        if (count == 1)
+            set_pen_color(runtime, arg_int(lua, 1, 0));
+        runtime->ram[0x5f35] = 1;
+        return 0;
+    }
+    if (count < 4) {
+        int x1 = arg_int(lua, 1, 0);
+        int y1 = arg_int(lua, 2, 0);
+        int color = count == 3 ? arg_int(lua, 3, 0) : runtime->draw_color;
+        set_pen_color(runtime, color);
+        int pen_lifted = runtime->ram[0x5f35];
+        int x0 = line_pen_get(runtime, 0x5f3c);
+        int y0 = line_pen_get(runtime, 0x5f3e);
+        line_pen_set(runtime, x1, y1);
+        if (!pen_lifted)
+            draw_line(runtime, x0, y0, x1, y1, color);
+        return 0;
+    }
     int x0 = arg_int(lua, 1, 0);
     int y0 = arg_int(lua, 2, 0);
-    int x1 = arg_int(lua, 3, x0);
-    int y1 = arg_int(lua, 4, y0);
+    int x1 = arg_int(lua, 3, 0);
+    int y1 = arg_int(lua, 4, 0);
     int color = arg_pen(lua, 5, runtime);
+    line_pen_set(runtime, x1, y1);
     draw_line(runtime, x0, y0, x1, y1, color);
     return 0;
 }
