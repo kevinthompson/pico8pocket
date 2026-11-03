@@ -84,8 +84,7 @@ static void update_palette_default_flags(p8p_runtime_t *runtime) {
     int palettes_default = 1;
     int transparency_default = runtime->transparent[0] != 0;
     for (int i = 0; i < 16; ++i) {
-        if (runtime->draw_palette[i] != i ||
-            runtime->screen_palette[i] != i)
+        if (runtime->draw_palette[i] != i || runtime->ram[0x5f10 + i] != i)
             palettes_default = 0;
         if (i && runtime->transparent[i])
             transparency_default = 0;
@@ -434,11 +433,24 @@ static void draw_state_to_ram(p8p_runtime_t *runtime) {
     runtime->ram[0x5f33] = runtime->fill_pattern_transparent;
 }
 
-static void palette_entry_to_ram(p8p_runtime_t *runtime, int color) {
+static void draw_palette_entry_to_ram(p8p_runtime_t *runtime, int color) {
     runtime->ram[0x5f00 + color] =
         (uint8_t)(runtime->draw_palette[color] |
                   (runtime->transparent[color] ? 0x10 : 0));
-    runtime->ram[0x5f10 + color] = runtime->screen_palette[color];
+}
+
+/* pal(c, v, 1) keeps v's low byte at 0x5f10 + c and returns the byte it
+ * replaced, as PICO-8 does; the display uses the colour bits (0x8f). */
+static int set_screen_palette_entry(p8p_runtime_t *runtime, int color,
+                                    int value) {
+    uint8_t raw = (uint8_t)value;
+    int previous = runtime->ram[0x5f10 + color];
+    if (previous != raw) {
+        runtime->ram[0x5f10 + color] = raw;
+        runtime->screen_palette[color] = raw & 0x8f;
+        runtime->palettes_default = 0;
+    }
+    return previous;
 }
 
 static void cursor_to_ram(p8p_runtime_t *runtime) {
@@ -1461,7 +1473,8 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
             for (int i = 0; i < 16; ++i) {
                 runtime->draw_palette[i] = (uint8_t)i;
                 runtime->screen_palette[i] = (uint8_t)i;
-                palette_entry_to_ram(runtime, i);
+                runtime->ram[0x5f10 + i] = (uint8_t)i;
+                draw_palette_entry_to_ram(runtime, i);
             }
             runtime->palettes_default = 1;
         }
@@ -1472,31 +1485,29 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
         while (lua_next(lua, 1) != 0) {
             if (lua_isnumber(lua, -2) && lua_isnumber(lua, -1)) {
                 int from = (int)lua_tonumber(lua, -2) & 15;
-                int to = (int)lua_tonumber(lua, -1) &
-                         (screen ? 0x8f : 15);
-                uint8_t *entry = screen ? &runtime->screen_palette[from] :
-                                          &runtime->draw_palette[from];
-                if (*entry != (uint8_t)to) {
-                    *entry = (uint8_t)to;
+                int value = (int)lua_tonumber(lua, -1);
+                if (screen) {
+                    set_screen_palette_entry(runtime, from, value);
+                } else if (runtime->draw_palette[from] != (value & 15)) {
+                    runtime->draw_palette[from] = (uint8_t)(value & 15);
                     runtime->palettes_default = 0;
-                    palette_entry_to_ram(runtime, from);
+                    draw_palette_entry_to_ram(runtime, from);
                 }
             }
             lua_pop(lua, 1);
         }
     } else {
         int from = arg_int(lua, 1, 0) & 15;
-        int screen = arg_int(lua, 3, 0) == 1;
-        int to = arg_int(lua, 2, from) & (screen ? 0x8f : 15);
-        int previous = screen ? runtime->screen_palette[from]
-                              : runtime->draw_palette[from];
-        if (previous != to) {
-            if (screen)
-                runtime->screen_palette[from] = (uint8_t)to;
-            else
-                runtime->draw_palette[from] = (uint8_t)to;
+        int value = arg_int(lua, 2, from);
+        if (arg_int(lua, 3, 0) == 1) {
+            push_int(lua, set_screen_palette_entry(runtime, from, value));
+            return 1;
+        }
+        int previous = runtime->draw_palette[from];
+        if (previous != (value & 15)) {
+            runtime->draw_palette[from] = (uint8_t)(value & 15);
             runtime->palettes_default = 0;
-            palette_entry_to_ram(runtime, from);
+            draw_palette_entry_to_ram(runtime, from);
         }
         push_int(lua, previous);
         return 1;

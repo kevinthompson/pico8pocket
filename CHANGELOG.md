@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `pal(c, v, 1)` keeps the low byte of `v` at `0x5f10 + c` and returns the
+  byte it replaced, as PICO-8 0.2.7 does, instead of storing `v & 0x8f`. The
+  display still uses the colour bits, so only peeks and return values change.
+
 - The `btnp()` repeat delay and interval at `0x5f5c` and `0x5f5d` start at 0,
   which means PICO-8's defaults of 15 and 4 frames, instead of holding 15 and
   4. Repeat timing is unchanged; carts that peek these bytes now read 0 as in
