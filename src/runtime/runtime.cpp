@@ -1165,7 +1165,13 @@ static int api_circfill(lua_State *lua) {
     int x = radius;
     int y = 0;
     int error = 1 - radius;
-    while (x >= y) {
+    /* Past this offset, rows on both sides of the centre are clipped.  Every
+     * row the walk fills is at offset y or x, and x >= y, so once y passes it
+     * nothing left is visible: a huge circle centred on screen stops after
+     * at most a screen's height of steps. */
+    int last_offset = circle.sy - circle.clip_y0 > circle.clip_y1 - circle.sy ?
+        circle.sy - circle.clip_y0 : circle.clip_y1 - circle.sy;
+    while (x >= y && y <= last_offset) {
         fill_circle_rows(&circle, y, x);
         ++y;
         if (error < 0) {
@@ -1478,6 +1484,48 @@ static int api_fset(lua_State *lua) {
     return 0;
 }
 
+#if __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "blit_tile_rows packs pixels as little-endian words"
+#endif
+
+/* Four packed sprite pixels (two bytes) as four framebuffer bytes, first
+ * pixel in the low byte. */
+static inline uint32_t unpack_four_pixels(uint32_t packed) {
+    uint32_t spread = (packed & 0xff) | (packed & 0xff00) << 8;
+    return (spread & 0x000f000fu) | (spread & 0x00f000f0u) << 4;
+}
+
+/* Colour 0 is transparent in the default draw state. */
+static inline void store_four_pixels(uint8_t *destination, uint32_t pixels) {
+    if (!pixels)
+        return;
+    uint32_t has_transparent = (pixels - 0x01010101u) & ~pixels & 0x80808080u;
+    if (!has_transparent && !((uintptr_t)destination & 3)) {
+        memcpy(__builtin_assume_aligned(destination, 4), &pixels, 4);
+        return;
+    }
+    for (int i = 0; i < 4; ++i, pixels >>= 8)
+        if (pixels & 15) destination[i] = (uint8_t)pixels;
+}
+
+/* Horizontally unclipped rows in the default draw state: one word read per
+ * eight pixels, skipping transparent rows and writing opaque runs as words.
+ * Sprite rows are word aligned: RAM is (static_assert), the sheet base is a
+ * multiple of 256 and each tile starts at a multiple of four bytes.  Kept out
+ * of line: BRAM has no room for it, and the loop stays hot in the I-cache. */
+static __attribute__((noinline)) void blit_tile_rows(const uint8_t *source, uint8_t *destination,
+                                  int rows) {
+    source = (const uint8_t *)__builtin_assume_aligned(source, 4);
+    for (int y = 0; y < rows; ++y, source += 64, destination += 128) {
+        uint32_t packed;
+        memcpy(&packed, source, 4);
+        if (!packed)
+            continue;
+        store_four_pixels(destination, unpack_four_pixels(packed & 0xffff));
+        store_four_pixels(destination + 4, unpack_four_pixels(packed >> 16));
+    }
+}
+
 /* map() spends most of its time dispatching hundreds of ordinary 8x8 tiles.
  * Keep that hot path separate from the fully general scaled/flipped sprite
  * renderer so it does not rebuild the same width, height and camera state for
@@ -1503,6 +1551,14 @@ static P8P_FASTTEXT void blit_tile(p8p_runtime_t *runtime, int sprite,
     if (!runtime->palettes_default && runtime->transparency_default)
         default_colors = p8p_draw_palette_identity(runtime->draw_palette);
     runtime->screen_ram_dirty = 1;
+    if (default_colors && start_x == 0 && end_x == 8) {
+        blit_tile_rows(runtime->ram + sprite_base + (source_y + start_y) * 64 +
+                           source_x / 2,
+                       runtime->framebuffer + (screen_y + start_y) * 128 +
+                           screen_x,
+                       end_y - start_y);
+        return;
+    }
     for (int y = start_y; y < end_y; ++y) {
         const uint8_t *source = runtime->ram + sprite_base +
             (source_y + y) * 64 + source_x / 2;
@@ -1693,6 +1749,8 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
             }
             lua_pop(lua, 1);
         }
+        if (target == 2 && !runtime->palettes_default)
+            update_palette_default_flags(runtime);
     } else if (arg_count(lua) == 1) {
         /* pal(p) resets one palette, and pal(0) also resets transparency. */
         if (palette == 2) {
@@ -1719,8 +1777,10 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
             uint8_t *entry = &runtime->ram[P8P_SECONDARY_PALETTE + from];
             int previous = *entry;
             *entry = (uint8_t)arg_int(lua, 2, 0);
+            /* Recompute rather than clear: setting an entry back to its
+             * default keeps the tile blitter's fast path. */
             if (*entry != previous)
-                runtime->palettes_default = 0;
+                update_palette_default_flags(runtime);
             push_int(lua, previous);
             return 1;
         }
@@ -4219,6 +4279,72 @@ extern "C" const uint8_t *p8p_runtime_framebuffer(p8p_runtime_t *runtime) {
         runtime->display[i * 2 + 1] = packed >> 4;
     }
     return runtime->display;
+}
+
+/* Writes the 0x5f2c screen transformation of SOURCE to DESTINATION and returns
+ * nonzero, or returns zero when MODE leaves the screen unchanged.  The whole
+ * screen is transformed at presentation, as on PICO-8; drawing and screen
+ * memory always use the normal 128x128 layout. */
+static int transform_screen(int mode, const uint8_t *source,
+                            uint8_t *destination) {
+    switch (mode) {
+    case 1: case 2: case 3: {
+        /* Stretch the left half, top half or top-left quarter. */
+        int x_shift = mode & 1, y_shift = mode >> 1;
+        for (int y = 0; y < 128; ++y) {
+            const uint8_t *row = source + (y >> y_shift) * 128;
+            for (int x = 0; x < 128; ++x)
+                *destination++ = row[x >> x_shift];
+        }
+        return 1;
+    }
+    case 5: case 6: case 7: {
+        /* Reflect the left half, top half or top-left quarter. */
+        int mirror_x = mode & 1, mirror_y = mode & 2;
+        for (int y = 0; y < 128; ++y) {
+            const uint8_t *row =
+                source + (mirror_y && y >= 64 ? 127 - y : y) * 128;
+            for (int x = 0; x < 128; ++x)
+                *destination++ = row[mirror_x && x >= 64 ? 127 - x : x];
+        }
+        return 1;
+    }
+    case 129: case 130: case 131: case 134: {
+        /* 134 is a half turn, which is the same as flipping both axes. */
+        int flip_x = mode != 130, flip_y = mode != 129;
+        for (int y = 0; y < 128; ++y) {
+            const uint8_t *row = source + (flip_y ? 127 - y : y) * 128;
+            for (int x = 0; x < 128; ++x)
+                *destination++ = row[flip_x ? 127 - x : x];
+        }
+        return 1;
+    }
+    case 133:
+        /* Clockwise quarter turn. */
+        for (int y = 0; y < 128; ++y)
+            for (int x = 0; x < 128; ++x)
+                *destination++ = source[(127 - x) * 128 + y];
+        return 1;
+    case 135:
+        /* Counterclockwise quarter turn. */
+        for (int y = 0; y < 128; ++y)
+            for (int x = 0; x < 128; ++x)
+                *destination++ = source[x * 128 + 127 - y];
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+extern "C" const uint8_t *p8p_runtime_display_framebuffer(
+    p8p_runtime_t *runtime) {
+    const uint8_t *screen = p8p_runtime_framebuffer(runtime);
+    if (!screen)
+        return NULL;
+    /* Bit 6 of the mode is ignored. */
+    return transform_screen(runtime->ram[0x5f2c] & ~0x40, screen,
+                            runtime->transformed)
+               ? runtime->transformed : screen;
 }
 
 extern "C" const uint8_t *p8p_runtime_screen_palette(p8p_runtime_t *runtime) {

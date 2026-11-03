@@ -863,7 +863,11 @@ int main(int argc, char **argv) {
                 average_update_runtime_us = smooth_time(
                     average_update_runtime_us, runtime_us);
             if (running) {
-                present_framebuffer = p8p_runtime_framebuffer(runtime);
+                /* An update-only frame shows nothing unless a state
+                 * notice is up, so skip the screen-mode transform. */
+                if (drew_game_frame || g_state_notice)
+                    present_framebuffer =
+                        p8p_runtime_display_framebuffer(runtime);
                 present_palette = p8p_runtime_screen_palette(runtime);
                 if (drew_game_frame && average_draw_runtime_us) {
                     int desired = p8p_render_divisor_for_load(

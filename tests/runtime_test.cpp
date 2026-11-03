@@ -561,6 +561,24 @@ static void circles_match_pico8(void) {
             fprintf(stderr, "FAIL circfill radius %d differs from circ\n", radius);
         CHECK(matches);
     }
+    /* The walk stops once every remaining row is clipped.  A clipped circle
+     * must match the unclipped one on the rows left visible. */
+    {
+        uint8_t full[128 * 128];
+        memcpy(full, draw_shape(runtime, "circfill(64,30,50,7)"), sizeof(full));
+        const uint8_t *fb = draw_shape(runtime, "clip(0,0,128,40) circfill(64,30,50,7)");
+        int matches = 1;
+        for (int i = 0; i < 128 * 128; ++i)
+            if (fb[i] != (i < 40 * 128 ? full[i] : 0))
+                matches = 0;
+        CHECK(matches);
+        fb = draw_shape(runtime, "circfill(64,64,5000,7)");
+        int covered = 1;
+        for (int i = 0; i < 128 * 128; ++i)
+            if (fb[i] != 7)
+                covered = 0;
+        CHECK(covered);
+    }
     p8p_runtime_destroy(runtime);
 }
 
@@ -672,6 +690,55 @@ static void draw_palette_transitions(void) {
         p8p_runtime_destroy(runtime);
         p8p_cart_destroy(&cart);
     }
+}
+
+/* spr() and map() share an 8x8 tile blitter; sspr() at unit scale is a
+ * separate path.  Every alignment, clip edge, camera offset and transparency
+ * or palette mode must render the same pixels through both. */
+static void tile_blitter_matches_sspr(void) {
+    static const char text[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "function _init() srand(7)\n"
+        " for s=1,8 do for y=0,7 do local kind=(s+y)%4 for x=0,7 do\n"
+        "  local c=kind==0 and 0 or kind==1 and 1+flr(rnd(15)) or flr(rnd(16))\n"
+        "  if kind==3 and x%3==0 then c=0 end\n"
+        "  sset(s%16*8+x,s\\16*8+y,c) end end end\n"
+        " for my=0,15 do for mx=0,15 do mset(mx,my,1+(mx+my*3)%8) end end end\n"
+        "function tile(s,x,y) if btn(0) then sspr(s%16*8,s\\16*8,8,8,x,y) else spr(s,x,y) end end\n"
+        "function _draw() clip() pal() camera() cls(5)\n"
+        " if btn(1) then clip(13,7,100,90) end\n"
+        " if btn(2) then palt(0,false) palt(3,true) end\n"
+        " if btn(3) then pal(5,9) pal(12,1) end\n"
+        " if btn(4) then camera(3,-2) end\n"
+        " if btn(5) then\n"
+        "  if btn(0) then for my=0,15 do for mx=0,15 do tile(mget(mx,my),mx*8-3,my*8+5) end end\n"
+        "  else map(0,0,-3,5,16,16) end\n"
+        " else local i=0 for y=-3,125,11 do for x=-5,125,9 do tile(1+i%8,x,y) i+=1 end end end\n"
+        "end\n";
+    p8p_cart_t cart = {};
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    if (!runtime) return;
+    int loaded = p8p_cart_load_text_memory((const uint8_t *)text, strlen(text), &cart);
+    if (loaded == 0) loaded = p8p_runtime_load(runtime, &cart);
+    CHECK(loaded == 0);
+    for (int options = 0; loaded == 0 && options < 32; ++options) {
+        uint8_t blitted[128 * 128];
+        CHECK(p8p_runtime_step(runtime, (uint8_t)(options << 1)) == 0);
+        memcpy(blitted, p8p_runtime_framebuffer(runtime), sizeof(blitted));
+        CHECK(p8p_runtime_step(runtime, (uint8_t)(options << 1 | 1)) == 0);
+        const uint8_t *reference = p8p_runtime_framebuffer(runtime);
+        int differing = 0, drawn = 0;
+        for (int pixel = 0; pixel < 128 * 128; ++pixel) {
+            differing += blitted[pixel] != reference[pixel];
+            drawn += reference[pixel] != 5;
+        }
+        CHECK(drawn > 1000);
+        CHECK(differing == 0);
+        if (differing) fprintf(stderr, "tile blitter options=%d differing=%d\n", options, differing);
+    }
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
 }
 
 static void test_terminal_nul_source(void) {
@@ -1054,6 +1121,7 @@ int main(void) {
     secondary_palette_matches_pico8();
     circles_match_pico8();
     state_restores_fill_pattern();
+    tile_blitter_matches_sspr();
     audio_chunk_boundaries();
     menu_glyphs_follow_pico8_font();
     static const uint8_t source[] =
@@ -2022,6 +2090,60 @@ int main(void) {
             CHECK(p8p_runtime_step(runtime, 0) == 0);
             CHECK(p8p_runtime_take_pause_request(runtime) == 1);
             p8p_cart_destroy(&suppress_cart);
+        }
+
+        {
+            /* 0x5f2c transforms the whole screen at presentation.  One pixel
+             * at (10,20) must land exactly on the listed display pixels. */
+            static const struct {
+                int mode;
+                int count;
+                int pixels[4][2];
+            } screen_modes[] = {
+                {0, 1, {{10, 20}}},
+                {1, 2, {{20, 20}, {21, 20}}},
+                {2, 2, {{10, 40}, {10, 41}}},
+                {3, 4, {{20, 40}, {21, 40}, {20, 41}, {21, 41}}},
+                {4, 1, {{10, 20}}},
+                {5, 2, {{10, 20}, {117, 20}}},
+                {6, 2, {{10, 20}, {10, 107}}},
+                {7, 4, {{10, 20}, {117, 20}, {10, 107}, {117, 107}}},
+                {67, 4, {{20, 40}, {21, 40}, {20, 41}, {21, 41}}},
+                {128, 1, {{10, 20}}},
+                {129, 1, {{117, 20}}},
+                {130, 1, {{10, 107}}},
+                {131, 1, {{117, 107}}},
+                {132, 1, {{10, 20}}},
+                {133, 1, {{107, 10}}},
+                {134, 1, {{117, 107}}},
+                {135, 1, {{20, 117}}},
+            };
+            for (const auto &screen_mode : screen_modes) {
+                char mode_source[256];
+                snprintf(mode_source, sizeof(mode_source),
+                         "pico-8 cartridge // http://www.pico-8.com\n"
+                         "version 42\n__lua__\n"
+                         "poke(0x5f2c,%d)\n"
+                         "function _draw() cls() pset(10,20,8) end\n",
+                         screen_mode.mode);
+                p8p_cart_t mode_cart = {};
+                CHECK(p8p_cart_load_text_memory((const uint8_t *)mode_source,
+                                                strlen(mode_source),
+                                                &mode_cart) == 0);
+                CHECK(p8p_runtime_load(runtime, &mode_cart) == 0);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                const uint8_t *shown = p8p_runtime_display_framebuffer(runtime);
+                int lit = 0;
+                for (int pixel = 0; pixel < 128 * 128; ++pixel)
+                    lit += shown[pixel] == 8;
+                CHECK(lit == screen_mode.count);
+                for (int index = 0; index < screen_mode.count; ++index)
+                    CHECK(shown[screen_mode.pixels[index][1] * 128 +
+                                screen_mode.pixels[index][0]] == 8);
+                /* Screen memory keeps the normal layout. */
+                CHECK(p8p_runtime_framebuffer(runtime)[20 * 128 + 10] == 8);
+                p8p_cart_destroy(&mode_cart);
+            }
         }
 
         {
