@@ -2822,6 +2822,10 @@ static int api_protected_call(lua_State *lua) {
 
 static int api_extcmd(lua_State *lua) {
     const char *command = lua_tostring(lua, 1);
+    if (command && strcmp(command, "pause") == 0) {
+        active_runtime->pause_requested = 1;
+        return 0;
+    }
     if (command && strcmp(command, "go_back") == 0 &&
         p8p_runtime_request_back(active_runtime) == 0)
         return lua_yield(lua, 0);
@@ -2836,17 +2840,29 @@ static int api_stub(lua_State *lua) {
 /* menuitem(index, [label, [callback]]) adds, replaces, relabels (no
  * callback) or (without a label) removes pause-menu entry 1-5.  Bits 8-15 of index filter which button
  * presses reach the callback. */
+/* The menu table holds the callbacks in slots 1-5, then what PICO-8 keeps
+ * of the last callback that ran. */
+enum { MENU_LAST_CALLBACK = 6, MENU_LAST_SLOT = 7 };
+
 static int api_menuitem(lua_State *lua) {
     p8p_runtime_t *runtime = active_runtime;
-    int index = arg_int(lua, 1, 0);
-    int slot = (index & 0xff) - 1;
-    if (slot < 0 || slot >= 5)
-        return 0;
     if (runtime->menu_ref == LUA_NOREF) {
         lua_newtable(lua);
         runtime->menu_ref = luaL_ref(lua, LUA_REGISTRYINDEX);
     }
     lua_rawgeti(lua, LUA_REGISTRYINDEX, runtime->menu_ref);
+    int menu = lua_gettop(lua);
+    /* A nil index means the slot of the last callback that ran. */
+    lua_rawgeti(lua, menu, MENU_LAST_SLOT);
+    int last_slot = (int)lua_tonumber(lua, -1);
+    lua_pop(lua, 1);
+    int index = lua_isnil(lua, 1) || lua_isnone(lua, 1) ?
+                last_slot : arg_int(lua, 1, 0);
+    int slot = (index & 0xff) - 1;
+    if (slot < 0 || slot >= 5) {
+        lua_pop(lua, 1);
+        return 0;
+    }
     if (lua_isstring(lua, 2)) {
         /* The system menu font is ASCII: button glyphs become letters and
          * arrows, other P8SCII characters '?'. */
@@ -2863,19 +2879,17 @@ static int api_menuitem(lua_State *lua) {
         }
         runtime->menu_labels[slot][used] = '\0';
         runtime->menu_filters[slot] = (uint8_t)((index >> 8) & 0xff);
-        if (lua_isfunction(lua, 3)) {
+        /* A new label alone takes the last callback that ran, as PICO-8
+         * does: carts relabel a toggle from inside its own callback. */
+        if (lua_isfunction(lua, 3))
             lua_pushvalue(lua, 3);
-        } else {
-            /* A new label alone keeps the callback, as PICO-8 does: carts
-             * relabel a toggle from inside its own callback. */
-            lua_pop(lua, 1);
-            return 0;
-        }
+        else
+            lua_rawgeti(lua, menu, MENU_LAST_CALLBACK);
     } else {
         runtime->menu_labels[slot][0] = '\0';
         lua_pushnil(lua);
     }
-    lua_rawseti(lua, -2, slot + 1);
+    lua_rawseti(lua, menu, slot + 1);
     lua_pop(lua, 1);
     return 0;
 }
@@ -3534,6 +3548,7 @@ extern "C" int p8p_runtime_load_context(p8p_runtime_t *runtime,
     runtime->cart_thread_ref = LUA_NOREF;
     runtime->cart_thread_active = 0;
     memset(runtime->menu_labels, 0, sizeof(runtime->menu_labels));
+    runtime->pause_requested = 0;
     memset(runtime->menu_filters, 0, sizeof(runtime->menu_filters));
     runtime->menu_ref = LUA_NOREF;
     memset(runtime->ram, 0, sizeof(runtime->ram));
@@ -3730,14 +3745,47 @@ extern "C" void p8p_runtime_set_live_buttons(p8p_runtime_t *runtime,
      * the frame started with (a short tap would vanish before the cart read
      * it) and leave btnp() timing to the next frame boundary (a press seen
      * here after the cart's btnp() check would otherwise never register). */
-    runtime->buttons = (uint8_t)(runtime->frame_buttons | (buttons & 0x7f));
+    uint8_t visible = runtime->pause_button_held ? 0x3f : 0x7f;
+    runtime->buttons = (uint8_t)(runtime->frame_buttons | (buttons & visible));
 }
+
+static int step_frame(p8p_runtime_t *runtime, uint8_t buttons,
+                      int draw_frame);
 
 extern "C" int p8p_runtime_step_with_draw(p8p_runtime_t *runtime,
                                             uint8_t buttons,
                                             int draw_frame) {
     if (!runtime || !runtime->lua)
         return -1;
+    /* The cart sees the pause button for one frame per press, however long
+     * it stays down, so btn(6) never holds and btnp(6) never repeats. */
+    int pause_held = (buttons & 0x40) != 0;
+    int pause_pressed = pause_held && !runtime->pause_button_held;
+    runtime->pause_button_held = pause_held;
+    if (!pause_pressed)
+        buttons &= (uint8_t)~0x40;
+    int status = step_frame(runtime, buttons, draw_frame);
+    /* The pause button opens the menu once the frame that saw it ends,
+     * unless that frame poked 0x5f30 = 1 to keep the press for itself. */
+    if (pause_pressed && status >= 0 && !runtime->cart_halted) {
+        if (runtime->ram[0x5f30] == 1)
+            runtime->ram[0x5f30] = 0;
+        else
+            runtime->pause_requested = 1;
+    }
+    return status;
+}
+
+extern "C" int p8p_runtime_take_pause_request(p8p_runtime_t *runtime) {
+    if (!runtime)
+        return 0;
+    int requested = runtime->pause_requested;
+    runtime->pause_requested = 0;
+    return requested;
+}
+
+static int step_frame(p8p_runtime_t *runtime, uint8_t buttons,
+                      int draw_frame) {
     if (runtime->cart_halted)
         return 0;
     if (runtime->restart_requested)
@@ -4050,14 +4098,15 @@ extern "C" int p8p_runtime_menu_select(p8p_runtime_t *runtime, int slot,
                                         int buttons) {
     /* O/X select (PICO-8 passes 16|32|64 for them) and close the menu unless
      * the callback returns true; left/right only notify the callback. */
-    int choose = (buttons & 0x70) != 0;
-    int filter;
+    int choose = (buttons & 3) == 0;
     int keep_open;
     if (!p8p_runtime_menu_item(runtime, slot) || runtime->menu_ref == LUA_NOREF)
         return choose ? 0 : 1;
-    filter = runtime->menu_filters[slot - 1];
-    if (filter && !(filter & buttons))
-        return choose ? 0 : 1;
+    /* Bits 8-15 of the menuitem index name buttons to ignore. The callback
+     * gets what is left, and without any button left the press does nothing. */
+    buttons &= ~runtime->menu_filters[slot - 1];
+    if (!buttons)
+        return 1;
     active_runtime = runtime;
     lua_rawgeti(runtime->lua, LUA_REGISTRYINDEX, runtime->menu_ref);
     lua_rawgeti(runtime->lua, -1, slot);
@@ -4072,6 +4121,12 @@ extern "C" int p8p_runtime_menu_select(p8p_runtime_t *runtime, int slot,
         lua_pop(runtime->lua, 1);
         return 0;
     }
+    lua_rawgeti(runtime->lua, LUA_REGISTRYINDEX, runtime->menu_ref);
+    lua_pushvalue(runtime->lua, -2);
+    lua_rawseti(runtime->lua, -2, MENU_LAST_CALLBACK);
+    lua_pushnumber(runtime->lua, fix32(slot));
+    lua_rawseti(runtime->lua, -2, MENU_LAST_SLOT);
+    lua_pop(runtime->lua, 1);
     lua_State *thread = lua_newthread(runtime->lua);
     int reference = luaL_ref(runtime->lua, LUA_REGISTRYINDEX);
     lua_xmove(runtime->lua, thread, 1);

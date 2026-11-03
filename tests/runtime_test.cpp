@@ -1,4 +1,5 @@
 #include "p8p/audio.h"
+#include "p8p/pico8_font.h"
 #include "p8p/cart.h"
 #include "p8p/menu.h"
 #include "p8p/platform.h"
@@ -246,6 +247,22 @@ static void test_incompatible_carts(void) {
         }
         p8p_cart_destroy(&cart);
     }
+}
+
+/* Menu text uses PICO-8's own letter shapes: its uppercase rows are the font's
+ * lowercase glyphs, the ones printed by default. */
+static void menu_glyphs_follow_pico8_font(void) {
+    for (unsigned character = 32; character < 127; ++character) {
+        unsigned source = character >= 'A' && character <= 'Z' ?
+            character + 32 : character;
+        uint16_t expected = 0;
+        for (int row = 0; row < 5; ++row)
+            for (int column = 0; column < 3; ++column)
+                if (p8p_pico8_font[source * 8 + row] & (1u << column))
+                    expected |= (uint16_t)(1u << (14 - row * 3 - column));
+        CHECK(p8p_menu_glyph(character) == expected);
+    }
+    CHECK(p8p_menu_glyph('N') != p8p_menu_glyph('M'));
 }
 
 static void audio_chunk_boundaries(void) {
@@ -821,6 +838,7 @@ int main(void) {
     draw_palette_transitions();
     update_callbacks_follow_init();
     audio_chunk_boundaries();
+    menu_glyphs_follow_pico8_font();
     static const uint8_t source[] =
         "pico-8 cartridge // http://www.pico-8.com\n"
         "version 42\n"
@@ -1714,6 +1732,80 @@ int main(void) {
         }
 
         {
+            /* The pause button asks for the menu once per press, 0x5f30
+             * suppresses one press, and extcmd("pause") asks directly. */
+            static const char pause_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "function _update() end\n";
+            p8p_cart_t pause_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)pause_source,
+                                            sizeof(pause_source) - 1,
+                                            &pause_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &pause_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            CHECK(p8p_runtime_take_pause_request(runtime) == 0);
+            CHECK(p8p_runtime_step(runtime, P8P_BTN_PAUSE) == 0);
+            CHECK(p8p_runtime_take_pause_request(runtime) == 1);
+            CHECK(p8p_runtime_take_pause_request(runtime) == 0);
+            /* Holding the button is one press. */
+            CHECK(p8p_runtime_step(runtime, P8P_BTN_PAUSE) == 0);
+            CHECK(p8p_runtime_take_pause_request(runtime) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            p8p_cart_destroy(&pause_cart);
+        }
+
+        {
+            /* PICO-8 0.2.7 shows the pause button to the cart for one frame
+             * per press, however long it is held, and never repeats btnp. */
+            static const char pulse_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "n=0 p=0 poke(0x5f30,1)\n"
+                "function _update() poke(0x5f30,1) if btn(6) then n+=1 end\n"
+                "if btnp(6) then p+=1 end end\n"
+                "function _draw() cls() pset(0,0,n) pset(1,0,p) end\n";
+            p8p_cart_t pulse_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)pulse_source,
+                                            sizeof(pulse_source) - 1,
+                                            &pulse_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &pulse_cart) == 0);
+            for (int frame = 0; frame < 40; ++frame)
+                CHECK(p8p_runtime_step(runtime, 1u << 6) == 0);
+            CHECK(p8p_runtime_framebuffer(runtime)[0] == 1);
+            CHECK(p8p_runtime_framebuffer(runtime)[1] == 1);
+            /* A later press after a release is a new pulse. */
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            CHECK(p8p_runtime_step(runtime, 1u << 6) == 0);
+            CHECK(p8p_runtime_framebuffer(runtime)[0] == 2);
+            CHECK(p8p_runtime_framebuffer(runtime)[1] == 2);
+            p8p_cart_destroy(&pulse_cart);
+        }
+
+        {
+            static const char suppress_source[] =
+                "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                "n=0 function _update() n+=1\n"
+                "if n==2 then poke(0x5f30,1) end\n"
+                "if n==6 then extcmd(\"pause\") end end\n";
+            p8p_cart_t suppress_cart = {};
+            CHECK(p8p_cart_load_text_memory((const uint8_t *)suppress_source,
+                                            sizeof(suppress_source) - 1,
+                                            &suppress_cart) == 0);
+            CHECK(p8p_runtime_load(runtime, &suppress_cart) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            CHECK(p8p_runtime_step(runtime, P8P_BTN_PAUSE) == 0);
+            CHECK(p8p_runtime_take_pause_request(runtime) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            /* The poke covered one press only. */
+            CHECK(p8p_runtime_step(runtime, P8P_BTN_PAUSE) == 0);
+            CHECK(p8p_runtime_take_pause_request(runtime) == 1);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            CHECK(p8p_runtime_take_pause_request(runtime) == 0);
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+            CHECK(p8p_runtime_take_pause_request(runtime) == 1);
+            p8p_cart_destroy(&suppress_cart);
+        }
+
+        {
             /* stat(26) counts 183/22050 s ticks into the music pattern:
              * 9600 samples at 48 kHz are 24 ticks. */
             audio_crossings_for(runtime,
@@ -1943,7 +2035,7 @@ int main(void) {
         }
 
         {
-            /* menuitem(): slots 1-5, removal, the button filter in bits 8-15,
+            /* menuitem(): slots 1-5, removal, an ignored button in bits 8-15,
              * O/X closing unless the callback returns true, and errors. */
             static const char menu_source[] =
                 "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
@@ -1982,6 +2074,69 @@ int main(void) {
             CHECK(p8p_runtime_menu_select(runtime, 4, 112) == -1);
             CHECK(strstr(p8p_runtime_error(runtime), "boom") != NULL);
 
+            {
+                /* Only a callback that has run is reused: menuitem(nil,...)
+                 * addresses its slot, and a label with no callback takes the
+                 * last one run, so an item relabelled first has no callback. */
+                static const char last_source[] =
+                    "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                    "n=0\n"
+                    "function _init() local f=function() n+=1 menuitem(nil,\"new\") return true end\n"
+                    "menuitem(1,\"a\",f) menuitem(2,\"b\",f) menuitem(2,\"c\") end\n"
+                    "function _draw() cls() pset(0,0,n) end\n";
+                p8p_cart_t last_cart = {};
+                CHECK(p8p_cart_load_text_memory(
+                          (const uint8_t *)last_source,
+                          sizeof(last_source) - 1, &last_cart) == 0);
+                CHECK(p8p_runtime_load(runtime, &last_cart) == 0);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                CHECK(p8p_runtime_menu_select(runtime, 2, 112) == 0);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                CHECK(p8p_runtime_framebuffer(runtime)[0] == 0);
+                CHECK(p8p_runtime_menu_select(runtime, 1, 112) == 1);
+                const char *renamed = p8p_runtime_menu_item(runtime, 1);
+                CHECK(renamed && strcmp(renamed, "new") == 0);
+                CHECK(p8p_runtime_menu_select(runtime, 1, 112) == 1);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                CHECK(p8p_runtime_framebuffer(runtime)[0] == 2);
+                p8p_cart_destroy(&last_cart);
+            }
+
+            {
+                /* Bits 8-15 name buttons to ignore: they are masked out of the
+                 * value, and nothing happens when no button remains. */
+                static const char filter_source[] =
+                    "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                    "last=0\n"
+                    "function _init() local f=function(b) last=b end\n"
+                    "menuitem(1|0x300,\"a\",f) menuitem(2|0x3000,\"b\",f)\n"
+                    "menuitem(3|0x7f00,\"c\",f) end\n"
+                    "function _draw() cls() pset(0,0,last&15) pset(1,0,last>>4) end\n";
+                p8p_cart_t filter_cart = {};
+                CHECK(p8p_cart_load_text_memory(
+                          (const uint8_t *)filter_source,
+                          sizeof(filter_source) - 1, &filter_cart) == 0);
+                CHECK(p8p_runtime_load(runtime, &filter_cart) == 0);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                CHECK(p8p_runtime_menu_select(runtime, 1, 1) == 1);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                CHECK(p8p_runtime_framebuffer(runtime)[0] == 0);
+                CHECK(p8p_runtime_menu_select(runtime, 1, 112) == 0);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                CHECK(p8p_runtime_framebuffer(runtime)[1] == 7);
+                CHECK(p8p_runtime_menu_select(runtime, 2, 112) == 0);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                CHECK(p8p_runtime_framebuffer(runtime)[1] == 4);
+                CHECK(p8p_runtime_menu_select(runtime, 2, 1) == 1);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                CHECK(p8p_runtime_framebuffer(runtime)[0] == 1);
+                CHECK(p8p_runtime_menu_select(runtime, 3, 2) == 1);
+                CHECK(p8p_runtime_menu_select(runtime, 3, 112) == 1);
+                CHECK(p8p_runtime_step(runtime, 0) == 0);
+                CHECK(p8p_runtime_framebuffer(runtime)[0] == 1);
+                p8p_cart_destroy(&filter_cart);
+            }
+
             /* The system menu lists cart entries after RESUME: right on
              * entry 1 keeps the menu open, A on it closes the menu. */
             CHECK(p8p_runtime_load(runtime, &menu_cart) == 0);
@@ -1997,38 +2152,50 @@ int main(void) {
             p8p_settings_defaults(&menu_settings);
             p8p_menu_t *menu = p8p_menu_create(&menu_settings, &menu_hash, "P8");
             CHECK(menu != NULL);
+            /* Pause menu: down to the cart row, X keeps it open only when the
+             * callback returns true; Start closes it. */
+            p8p_menu_open_pause(menu, runtime, 0, 0);
+            CHECK(p8p_menu_update(menu, runtime, 0, 0, P8P_BTN_DOWN) == P8P_MENU_NONE);
+            CHECK(p8p_menu_update(menu, runtime, 0, 0, 0) == P8P_MENU_NONE);
+            CHECK(p8p_menu_update(menu, runtime, 0, 0, P8P_BTN_X) == P8P_MENU_CLOSE);
+            p8p_menu_open_pause(menu, runtime, 0, 0);
+            CHECK(p8p_menu_update(menu, runtime, 0, 0, P8P_BTN_PAUSE) == P8P_MENU_CLOSE);
+            p8p_menu_open_pause(menu, runtime, 0, 0);
+            CHECK(p8p_menu_update(menu, runtime, 0, 0, P8P_BTN_UP) == P8P_MENU_NONE);
+            CHECK(p8p_menu_update(menu, runtime, 0, 0, 0) == P8P_MENU_NONE);
+            CHECK(p8p_menu_update(menu, runtime, 0, 0, P8P_BTN_O) == P8P_MENU_RESTART);
             p8p_menu_open(menu, runtime, 0, 1);
-            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN) == P8P_MENU_NONE);
-            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_RIGHT) == P8P_MENU_NONE);
-            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_A) == P8P_MENU_CLOSE);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN, 0) == P8P_MENU_NONE);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_RIGHT, 0) == P8P_MENU_NONE);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_A, 0) == P8P_MENU_CLOSE);
             CHECK(p8p_runtime_step(runtime, 0) == 0);
             CHECK(p8p_runtime_framebuffer(runtime)[0] == 1);
             CHECK(p8p_runtime_framebuffer(runtime)[1] == 7);
             /* Entry 4 raises an error: two rows below entry 1. */
             p8p_menu_open(menu, runtime, 0, 1);
             for (int i = 0; i < 3; ++i)
-                p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN);
-            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_A) == P8P_MENU_CART_ERROR);
+                p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN, 0);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_A, 0) == P8P_MENU_CART_ERROR);
             /* After a runtime error the cart entries are hidden. */
             p8p_menu_open(menu, runtime, 0, 0);
-            p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN);
-            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_A) == P8P_MENU_NONE);
+            p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN, 0);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_A, 0) == P8P_MENU_NONE);
             /* X confirms like A, as both are PICO-8's X button in play:
              * it resumes, opens STATES (B then leaves it, and B again
              * closes the menu) and confirms a restart. */
             p8p_menu_open(menu, runtime, 0, 0);
-            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_X) == P8P_MENU_CLOSE);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_X, 0) == P8P_MENU_CLOSE);
             p8p_menu_open(menu, runtime, 0, 0);
             for (int i = 0; i < 3; ++i)
-                p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN);
-            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_X) == P8P_MENU_NONE);
-            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_B) == P8P_MENU_NONE);
-            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_B) == P8P_MENU_CLOSE);
+                p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN, 0);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_X, 0) == P8P_MENU_NONE);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_B, 0) == P8P_MENU_NONE);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_B, 0) == P8P_MENU_CLOSE);
             p8p_menu_open(menu, runtime, 0, 0);
             for (int i = 0; i < 4; ++i)
-                p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN);
-            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_X) == P8P_MENU_NONE);
-            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_X) == P8P_MENU_RESTART);
+                p8p_menu_update(menu, runtime, 0, P8P_PHYS_DOWN, 0);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_X, 0) == P8P_MENU_NONE);
+            CHECK(p8p_menu_update(menu, runtime, 0, P8P_PHYS_X, 0) == P8P_MENU_RESTART);
             p8p_menu_destroy(menu);
             p8p_cart_destroy(&menu_cart);
             unlink("save:0");

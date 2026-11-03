@@ -44,6 +44,13 @@
   openfpgaOS stalled on "Loading app" after that restart. The app now checks
   the slot once a second and loads a new cart in place, with its own save
   states and cartdata.
+- Start opens a PICO-8 pause menu with Continue, the cart's `menuitem` entries
+  and Reset Cart. It uses the cart's mapped buttons, honours `0x5f30`
+  suppression, and also opens from `extcmd("pause")`. Select still opens the
+  system menu. As in PICO-8, `btn(6)` is true for one frame per press and
+  `btnp(6)` does not repeat.
+- Menu text uses the PICO-8 font data instead of a separate hand-drawn font, in
+  which letters such as `M` and `N` were hard to tell apart.
 
 ## 0.0.35 — 2026-10-21
 
