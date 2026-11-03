@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `circfill` draws the same shape as PICO-8 0.2.7: each row is filled out to
+  the outline `circ` draws. Rows near the top and bottom of a circle were
+  previously too narrow, so small filled circles looked pinched.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps

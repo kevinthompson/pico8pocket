@@ -312,6 +312,96 @@ static void audio_chunk_boundaries(void) {
     }
 }
 
+/* Draws one shape on a cleared screen; returns the framebuffer. */
+static const uint8_t *draw_shape(p8p_runtime_t *runtime, const char *call) {
+    static char source[256];
+    snprintf(source, sizeof(source),
+             "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+             "function _draw() cls() %s end\n", call);
+    p8p_cart_t cart = {};
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source, strlen(source),
+                                    &cart) == 0);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    p8p_cart_destroy(&cart);
+    return p8p_runtime_framebuffer(runtime);
+}
+
+/* circfill() rows, measured in PICO-8 0.2.7: the half-width of each row
+ * below the centre, for radii 0-16.  Every row is a single span, and the
+ * filled circle reaches exactly the outline circ() draws. */
+static void circles_match_pico8(void) {
+    static const char *const measured[] = {
+        "0",
+        "1,0",
+        "2,2,1",
+        "3,3,2,1",
+        "4,4,3,3,1",
+        "5,5,5,4,3,2",
+        "6,6,6,5,4,3,2",
+        "7,7,7,6,6,5,4,2",
+        "8,8,8,7,7,6,5,4,2",
+        "9,9,9,8,8,7,7,6,4,2",
+        "10,10,10,10,9,9,8,7,6,5,3",
+        "11,11,11,11,10,10,9,8,8,6,5,3",
+        "12,12,12,12,11,11,10,10,9,8,7,5,3",
+        "13,13,13,13,12,12,12,11,10,9,8,7,6,3",
+        "14,14,14,14,13,13,13,12,11,11,10,9,7,6,3",
+        "15,15,15,15,14,14,14,13,13,12,11,10,9,8,6,3",
+        "16,16,16,16,15,15,15,14,14,13,12,12,11,9,8,6,3",
+    };
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    char call[64];
+    for (int radius = 0; radius < 17; ++radius) {
+        snprintf(call, sizeof(call), "circfill(64,64,%d,7)", radius);
+        const uint8_t *fb = draw_shape(runtime, call);
+        for (int dy = -radius - 1; dy <= radius + 1; ++dy) {
+            int width = -1;
+            if (abs(dy) <= radius) {
+                const char *field = measured[radius];
+                for (int skip = abs(dy); skip > 0; --skip)
+                    field = strchr(field, ',') + 1;
+                width = atoi(field);
+            }
+            int row_ok = 1;
+            for (int x = 64 - radius - 1; x <= 64 + radius + 1; ++x)
+                if ((fb[(64 + dy) * 128 + x] == 7) != (abs(x - 64) <= width))
+                    row_ok = 0;
+            if (!row_ok)
+                fprintf(stderr, "FAIL circfill radius %d row %d\n", radius, dy);
+            CHECK(row_ok);
+        }
+    }
+    /* Larger radii: each filled row spans exactly from circ()'s leftmost to
+     * its rightmost pixel on that row. */
+    for (int radius = 17; radius <= 60; ++radius) {
+        int left[128], right[128];
+        snprintf(call, sizeof(call), "circ(64,64,%d,7)", radius);
+        const uint8_t *fb = draw_shape(runtime, call);
+        for (int y = 0; y < 128; ++y) {
+            left[y] = 128;
+            right[y] = -1;
+            for (int x = 0; x < 128; ++x)
+                if (fb[y * 128 + x] == 7) {
+                    if (x < left[y]) left[y] = x;
+                    right[y] = x;
+                }
+        }
+        snprintf(call, sizeof(call), "circfill(64,64,%d,7)", radius);
+        fb = draw_shape(runtime, call);
+        int matches = 1;
+        for (int y = 0; y < 128; ++y)
+            for (int x = 0; x < 128; ++x)
+                if ((fb[y * 128 + x] == 7) != (x >= left[y] && x <= right[y]))
+                    matches = 0;
+        if (!matches)
+            fprintf(stderr, "FAIL circfill radius %d differs from circ\n", radius);
+        CHECK(matches);
+    }
+    p8p_runtime_destroy(runtime);
+}
+
 static void draw_palette_transitions(void) {
     struct PaletteCase {
         const char *name;
@@ -558,6 +648,7 @@ int main(void) {
     palette_leaf_contracts();
     palette_fast_path_semantics();
     draw_palette_transitions();
+    circles_match_pico8();
     audio_chunk_boundaries();
     static const uint8_t source[] =
         "pico-8 cartridge // http://www.pico-8.com\n"
@@ -862,7 +953,9 @@ int main(void) {
         CHECK(framebuffer[20 * 128 + 21] == 7);
         CHECK(framebuffer[28 * 128 + 30] == 10);
         CHECK(framebuffer[29 * 128 + 29] == 10);
-        CHECK(framebuffer[29 * 128 + 28] == 0);
+        /* PICO-8 fills a radius-2 circle's second row out to two pixels. */
+        CHECK(framebuffer[29 * 128 + 28] == 10);
+        CHECK(framebuffer[28 * 128 + 28] == 0);
         CHECK(framebuffer[30 * 128 + 32] == 10);
         CHECK(framebuffer[50 * 128 + 50] == 1);
         CHECK(framebuffer[50 * 128 + 51] == 2);
