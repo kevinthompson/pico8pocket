@@ -312,6 +312,60 @@ static void audio_chunk_boundaries(void) {
     }
 }
 
+/* PICO-8 chooses 30 or 60 fps once _init has run, so carts may install
+ * _update60 from _init.  A 30 fps cart that later swaps _update for
+ * _update60 gets two _update60 calls per frame.  Measured in PICO-8 0.2.7. */
+static void update_callbacks_follow_init(void) {
+    static const struct {
+        const char *name;
+        const char *source;
+        int steps;
+        int fps;
+        int count;
+    } cases[] = {
+        {"_update60 set in _init",
+         "function _init() _update60=function() n+=1 end end\n", 3, 60, 3},
+        {"_init adds _update60 beside _update",
+         "function _update() n+=2 end\n"
+         "function _init() _update60=function() n+=1 end end\n", 3, 60, 3},
+        {"_init removes _update60",
+         "function _update60() n+=1 end\n"
+         "function _init() _update60=nil _update=function() n+=2 end end\n",
+         3, 30, 6},
+        {"_init yields before setting _update60",
+         "function _init() flip() _update60=function() n+=1 end end\n",
+         4, 60, 3},
+        {"_update swapped for _update60 mid-run",
+         "function _update() n+=1\n"
+         "if n==2 then _update60=_update _update=nil end end\n", 4, 30, 6},
+    };
+    for (const auto &test : cases) {
+        char source[512];
+        snprintf(source, sizeof(source),
+                 "pico-8 cartridge // http://www.pico-8.com\nversion 42\n"
+                 "__lua__\nn=0\n%s"
+                 "function _draw() cls() pset(n,0,7) end\n", test.source);
+        p8p_cart_t cart = {};
+        CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                        strlen(source), &cart) == 0);
+        p8p_runtime_t *runtime = p8p_runtime_create();
+        CHECK(runtime != NULL);
+        CHECK(p8p_runtime_load(runtime, &cart) == 0);
+        for (int step = 0; step < test.steps; ++step)
+            CHECK(p8p_runtime_step(runtime, 0) == 0);
+        const uint8_t *fb = p8p_runtime_framebuffer(runtime);
+        int matches = p8p_runtime_target_fps(runtime) == test.fps &&
+                      fb[test.count] == 7;
+        if (!matches)
+            fprintf(stderr, "FAIL %s: fps %d, pixel %d at n=%d\n", test.name,
+                    p8p_runtime_target_fps(runtime), fb[test.count],
+                    test.count);
+        CHECK(matches);
+        p8p_runtime_destroy(runtime);
+        p8p_cart_destroy(&cart);
+    }
+}
+
 static void draw_palette_transitions(void) {
     struct PaletteCase {
         const char *name;
@@ -558,6 +612,7 @@ int main(void) {
     palette_leaf_contracts();
     palette_fast_path_semantics();
     draw_palette_transitions();
+    update_callbacks_follow_init();
     audio_chunk_boundaries();
     static const uint8_t source[] =
         "pico-8 cartridge // http://www.pico-8.com\n"
