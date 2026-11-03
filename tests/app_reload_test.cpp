@@ -60,6 +60,7 @@ void p8p_platform_present(const uint8_t *pixels, const uint8_t *) {
 void p8p_platform_audio_pump(struct p8p_runtime *) {}
 void p8p_platform_audio_set_paused(int) {}
 void p8p_platform_audio_set_volume(unsigned) {}
+int p8p_platform_audio_queued_frames(void) { return 2048; }
 unsigned p8p_platform_set_scale(unsigned scale) { return scale; }
 uint8_t p8p_platform_dim_color(uint8_t color) { return color; }
 void p8p_platform_poll_input(p8p_physical_input_t *input) {
