@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `peek2(a, n)` and `peek4(a, n)` return `n` values, and `poke2` and `poke4`
+  write every value they are given, as in PICO-8 0.2.7. They used to read and
+  write a single value. `peek`, `peek2` and `peek4` also return no values for
+  a count of 0, a negative count or `nil`, where they used to return one.
 - `peek2`, `poke2`, `peek4`, `poke4`, `memset`, `memcpy` and `reload` reach
   upper memory (`0x8000`-`0xffff`) and wrap past `0xffff` to `0x0000`, as in
   PICO-8 0.2.7. Those addresses are negative numbers in PICO-8, and the
