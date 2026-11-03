@@ -565,11 +565,19 @@ static void sprite_set(p8p_runtime_t *runtime, int x, int y, uint8_t color) {
     }
 }
 
-static uint8_t map_get(const p8p_runtime_t *runtime, int x, int y) {
-    int width = runtime->ram[0x5f57] ? runtime->ram[0x5f57] : 256;
+/* Cells in the map that 0x5f56 (address) and 0x5f57 (width) select. */
+static void map_dimensions(const p8p_runtime_t *runtime, int *width,
+                           int *height) {
     int mapping = runtime->ram[0x5f56];
     int size = mapping >= 0x80 ? 0x10000 - (mapping << 8) : 8192;
-    int height = size / width;
+    *width = runtime->ram[0x5f57] ? runtime->ram[0x5f57] : 256;
+    *height = size / *width;
+}
+
+static uint8_t map_get(const p8p_runtime_t *runtime, int x, int y) {
+    int width, height;
+    map_dimensions(runtime, &width, &height);
+    int mapping = runtime->ram[0x5f56];
     if (x < 0 || y < 0 || x >= width || y >= height)
         return 0;
     int index = y * width + x;
@@ -580,10 +588,9 @@ static uint8_t map_get(const p8p_runtime_t *runtime, int x, int y) {
 }
 
 static void map_set(p8p_runtime_t *runtime, int x, int y, uint8_t value) {
-    int width = runtime->ram[0x5f57] ? runtime->ram[0x5f57] : 256;
+    int width, height;
+    map_dimensions(runtime, &width, &height);
     int mapping = runtime->ram[0x5f56];
-    int size = mapping >= 0x80 ? 0x10000 - (mapping << 8) : 8192;
-    int height = size / width;
     if (x < 0 || y < 0 || x >= width || y >= height)
         return;
     int index = y * width + x;
