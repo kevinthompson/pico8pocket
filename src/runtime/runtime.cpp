@@ -721,11 +721,19 @@ static void sprite_set(p8p_runtime_t *runtime, int x, int y, uint8_t color) {
     }
 }
 
-static uint8_t map_get(const p8p_runtime_t *runtime, int x, int y) {
-    int width = runtime->ram[0x5f57] ? runtime->ram[0x5f57] : 256;
+/* Cells in the map that 0x5f56 (address) and 0x5f57 (width) select. */
+static void map_dimensions(const p8p_runtime_t *runtime, int *width,
+                           int *height) {
     int mapping = runtime->ram[0x5f56];
     int size = mapping >= 0x80 ? 0x10000 - (mapping << 8) : 8192;
-    int height = size / width;
+    *width = runtime->ram[0x5f57] ? runtime->ram[0x5f57] : 256;
+    *height = size / *width;
+}
+
+static uint8_t map_get(const p8p_runtime_t *runtime, int x, int y) {
+    int width, height;
+    map_dimensions(runtime, &width, &height);
+    int mapping = runtime->ram[0x5f56];
     if (x < 0 || y < 0 || x >= width || y >= height)
         return 0;
     int index = y * width + x;
@@ -736,10 +744,9 @@ static uint8_t map_get(const p8p_runtime_t *runtime, int x, int y) {
 }
 
 static void map_set(p8p_runtime_t *runtime, int x, int y, uint8_t value) {
-    int width = runtime->ram[0x5f57] ? runtime->ram[0x5f57] : 256;
+    int width, height;
+    map_dimensions(runtime, &width, &height);
     int mapping = runtime->ram[0x5f56];
-    int size = mapping >= 0x80 ? 0x10000 - (mapping << 8) : 8192;
-    int height = size / width;
     if (x < 0 || y < 0 || x >= width || y >= height)
         return;
     int index = y * width + x;
@@ -1687,8 +1694,10 @@ static int api_map(lua_State *lua) {
     int cell_y = arg_int(lua, 2, 0);
     int screen_x = arg_int(lua, 3, 0);
     int screen_y = arg_int(lua, 4, 0);
-    int cell_w = arg_int(lua, 5, 16);
-    int cell_h = arg_int(lua, 6, 16);
+    int map_w, map_h;
+    map_dimensions(runtime, &map_w, &map_h);  /* PICO-8 draws the whole map */
+    int cell_w = arg_int(lua, 5, map_w);
+    int cell_h = arg_int(lua, 6, map_h);
     int layer = arg_int(lua, 7, 0);
     int origin_x = screen_x - runtime->camera_x;
     int origin_y = screen_y - runtime->camera_y;

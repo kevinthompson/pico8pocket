@@ -963,6 +963,49 @@ static void multi_value_peek_poke_matches_pico8(void) {
     p8p_cart_destroy(&cart);
 }
 
+/* map() with its size left out draws the whole map that 0x5f56/0x5f57
+ * select.  Each case puts sprite 1 (solid 7) in one cell, moves the camera
+ * onto it and reads pixel 0,0.  The same cart passes all 19 cases in
+ * PICO-8 0.2.7. */
+static void map_default_size_matches_pico8(void) {
+    static const char source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "r={}\n"
+        "function probe(want,cx,cy,...)\n"
+        " cls() mset(cx,cy,1) camera(cx*8,cy*8) map(...) camera()\n"
+        " add(r,pget(0,0)==want) mset(cx,cy,0)\n"
+        "end\n"
+        "function _draw()\n"
+        " for x=0,7 do for y=0,7 do sset(8+x,y,7) end end\n"
+        " probe(7,127,31) probe(7,127,63) probe(7,16,0) probe(7,0,16)\n"
+        " probe(7,15,15) probe(0,0,64)\n"
+        " probe(7,127,31,0,0) probe(7,30,0,0,0,0,0)\n"
+        " probe(7,30,0,0,0,0,0,nil,nil) probe(7,0,30,0,0,0,0,40)\n"
+        " probe(0,0,0,0,0,0,0,0,0)\n"
+        " poke(0x5f56,0x80) poke(0x5f57,64)\n"
+        " probe(7,63,0) probe(7,63,255) probe(7,0,511) probe(0,64,0)\n"
+        " poke(0x5f57,0) probe(7,255,0) probe(7,255,127)\n"
+        " poke(0x5f56,0x20) poke(0x5f57,32) probe(7,31,0) probe(7,0,191)\n"
+        " poke(0x5f57,128)\n"
+        " cls() for i=1,#r do pset(i-1,0,r[i] and 11 or 8) end\n"
+        "end\n";
+    p8p_cart_t cart = {};
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                    sizeof(source) - 1, &cart) == 0);
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    const uint8_t *fb = p8p_runtime_framebuffer(runtime);
+    for (int index = 0; index < 19; ++index) {
+        if (fb[index] != 11)
+            fprintf(stderr, "FAIL map default size case %d\n", index + 1);
+        CHECK(fb[index] == 11);
+    }
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+}
+
 static void draw_palette_transitions(void) {
     struct PaletteCase {
         const char *name;
@@ -1465,6 +1508,7 @@ int main(void) {
     palette_leaf_contracts();
     palette_fast_path_semantics();
     draw_palette_transitions();
+    map_default_size_matches_pico8();
     multi_value_peek_poke_matches_pico8();
     memory_addresses_wrap_like_pico8();
     update_callbacks_follow_init();
