@@ -44,6 +44,8 @@ int p8p_platform_init(void);
 uint8_t *p8p_platform_framebuffer(void);
 void p8p_platform_present(const uint8_t *framebuffer, const uint8_t *palette);
 void p8p_platform_audio_pump(struct p8p_runtime *runtime);
+/* Stereo pairs still waiting to be played. */
+int p8p_platform_audio_queued_frames(void);
 void p8p_platform_audio_set_paused(int paused);
 void p8p_platform_audio_set_volume(unsigned percent);
 unsigned p8p_platform_set_scale(unsigned scale);
@@ -55,6 +57,10 @@ void p8p_platform_wait_frame(void);
 uint32_t p8p_platform_time_us(void);
 void p8p_platform_sleep_us(uint32_t microseconds);
 void p8p_platform_exit(void);
+/* Read length bytes at offset from an APF data slot through the OS's direct
+ * DMA path.  Returns 0 on success, negative on failure.  Pocket only. */
+int p8p_platform_read_slot(unsigned slot, uint32_t offset, void *dest,
+                           uint32_t length);
 
 /* The Pocket's own save states (Memories, sleep/wake).  poll() returns one
  * of these once per pending request; the app answers it with save() or

@@ -41,6 +41,7 @@ void p8p_platform_present(const uint8_t *pixels, const uint8_t *) {
     if (++presents == 11) longjmp(done, 1);
 }
 void p8p_platform_audio_pump(struct p8p_runtime *) {}
+int p8p_platform_audio_queued_frames(void) { return 2048; }
 void p8p_platform_audio_set_paused(int paused) { if (paused) ++pauses; }
 void p8p_platform_audio_set_volume(unsigned) {}
 unsigned p8p_platform_set_scale(unsigned s) { return s; }

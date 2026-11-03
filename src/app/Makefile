@@ -27,6 +27,7 @@ SRCS := \
 	$(PROJECT_ROOT)/src/runtime/audio.c \
 	$(PROJECT_ROOT)/src/runtime/display.c \
 	$(PROJECT_ROOT)/src/platform/openfpgaos/platform.c \
+	$(PROJECT_ROOT)/src/platform/openfpgaos/slot_read.c \
 	$(FAKE08_ROOT)/libs/miniz/miniz.c
 SRCS_CXX := \
 	$(PROJECT_ROOT)/src/runtime/runtime.cpp \
