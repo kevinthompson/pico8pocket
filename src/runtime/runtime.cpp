@@ -1478,6 +1478,48 @@ static int api_fset(lua_State *lua) {
     return 0;
 }
 
+#if __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "blit_tile_rows packs pixels as little-endian words"
+#endif
+
+/* Four packed sprite pixels (two bytes) as four framebuffer bytes, first
+ * pixel in the low byte. */
+static inline uint32_t unpack_four_pixels(uint32_t packed) {
+    uint32_t spread = (packed & 0xff) | (packed & 0xff00) << 8;
+    return (spread & 0x000f000fu) | (spread & 0x00f000f0u) << 4;
+}
+
+/* Colour 0 is transparent in the default draw state. */
+static inline void store_four_pixels(uint8_t *destination, uint32_t pixels) {
+    if (!pixels)
+        return;
+    uint32_t has_transparent = (pixels - 0x01010101u) & ~pixels & 0x80808080u;
+    if (!has_transparent && !((uintptr_t)destination & 3)) {
+        memcpy(__builtin_assume_aligned(destination, 4), &pixels, 4);
+        return;
+    }
+    for (int i = 0; i < 4; ++i, pixels >>= 8)
+        if (pixels & 15) destination[i] = (uint8_t)pixels;
+}
+
+/* Horizontally unclipped rows in the default draw state: one word read per
+ * eight pixels, skipping transparent rows and writing opaque runs as words.
+ * Sprite rows are word aligned: RAM is (static_assert), the sheet base is a
+ * multiple of 256 and each tile starts at a multiple of four bytes.  Kept out
+ * of line: BRAM has no room for it, and the loop stays hot in the I-cache. */
+static __attribute__((noinline)) void blit_tile_rows(const uint8_t *source, uint8_t *destination,
+                                  int rows) {
+    source = (const uint8_t *)__builtin_assume_aligned(source, 4);
+    for (int y = 0; y < rows; ++y, source += 64, destination += 128) {
+        uint32_t packed;
+        memcpy(&packed, source, 4);
+        if (!packed)
+            continue;
+        store_four_pixels(destination, unpack_four_pixels(packed & 0xffff));
+        store_four_pixels(destination + 4, unpack_four_pixels(packed >> 16));
+    }
+}
+
 /* map() spends most of its time dispatching hundreds of ordinary 8x8 tiles.
  * Keep that hot path separate from the fully general scaled/flipped sprite
  * renderer so it does not rebuild the same width, height and camera state for
@@ -1503,6 +1545,14 @@ static P8P_FASTTEXT void blit_tile(p8p_runtime_t *runtime, int sprite,
     if (!runtime->palettes_default && runtime->transparency_default)
         default_colors = p8p_draw_palette_identity(runtime->draw_palette);
     runtime->screen_ram_dirty = 1;
+    if (default_colors && start_x == 0 && end_x == 8) {
+        blit_tile_rows(runtime->ram + sprite_base + (source_y + start_y) * 64 +
+                           source_x / 2,
+                       runtime->framebuffer + (screen_y + start_y) * 128 +
+                           screen_x,
+                       end_y - start_y);
+        return;
+    }
     for (int y = start_y; y < end_y; ++y) {
         const uint8_t *source = runtime->ram + sprite_base +
             (source_y + y) * 64 + source_x / 2;

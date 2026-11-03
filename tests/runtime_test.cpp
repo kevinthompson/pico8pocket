@@ -674,6 +674,55 @@ static void draw_palette_transitions(void) {
     }
 }
 
+/* spr() and map() share an 8x8 tile blitter; sspr() at unit scale is a
+ * separate path.  Every alignment, clip edge, camera offset and transparency
+ * or palette mode must render the same pixels through both. */
+static void tile_blitter_matches_sspr(void) {
+    static const char text[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "function _init() srand(7)\n"
+        " for s=1,8 do for y=0,7 do local kind=(s+y)%4 for x=0,7 do\n"
+        "  local c=kind==0 and 0 or kind==1 and 1+flr(rnd(15)) or flr(rnd(16))\n"
+        "  if kind==3 and x%3==0 then c=0 end\n"
+        "  sset(s%16*8+x,s\\16*8+y,c) end end end\n"
+        " for my=0,15 do for mx=0,15 do mset(mx,my,1+(mx+my*3)%8) end end end\n"
+        "function tile(s,x,y) if btn(0) then sspr(s%16*8,s\\16*8,8,8,x,y) else spr(s,x,y) end end\n"
+        "function _draw() clip() pal() camera() cls(5)\n"
+        " if btn(1) then clip(13,7,100,90) end\n"
+        " if btn(2) then palt(0,false) palt(3,true) end\n"
+        " if btn(3) then pal(5,9) pal(12,1) end\n"
+        " if btn(4) then camera(3,-2) end\n"
+        " if btn(5) then\n"
+        "  if btn(0) then for my=0,15 do for mx=0,15 do tile(mget(mx,my),mx*8-3,my*8+5) end end\n"
+        "  else map(0,0,-3,5,16,16) end\n"
+        " else local i=0 for y=-3,125,11 do for x=-5,125,9 do tile(1+i%8,x,y) i+=1 end end end\n"
+        "end\n";
+    p8p_cart_t cart = {};
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    if (!runtime) return;
+    int loaded = p8p_cart_load_text_memory((const uint8_t *)text, strlen(text), &cart);
+    if (loaded == 0) loaded = p8p_runtime_load(runtime, &cart);
+    CHECK(loaded == 0);
+    for (int options = 0; loaded == 0 && options < 32; ++options) {
+        uint8_t blitted[128 * 128];
+        CHECK(p8p_runtime_step(runtime, (uint8_t)(options << 1)) == 0);
+        memcpy(blitted, p8p_runtime_framebuffer(runtime), sizeof(blitted));
+        CHECK(p8p_runtime_step(runtime, (uint8_t)(options << 1 | 1)) == 0);
+        const uint8_t *reference = p8p_runtime_framebuffer(runtime);
+        int differing = 0, drawn = 0;
+        for (int pixel = 0; pixel < 128 * 128; ++pixel) {
+            differing += blitted[pixel] != reference[pixel];
+            drawn += reference[pixel] != 5;
+        }
+        CHECK(drawn > 1000);
+        CHECK(differing == 0);
+        if (differing) fprintf(stderr, "tile blitter options=%d differing=%d\n", options, differing);
+    }
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+}
+
 static void test_terminal_nul_source(void) {
     /* Legacy PNGs can count the terminating NUL in their declared code length.
      * Keep those decoded bytes for content/save identity, but compile source
@@ -1054,6 +1103,7 @@ int main(void) {
     secondary_palette_matches_pico8();
     circles_match_pico8();
     state_restores_fill_pattern();
+    tile_blitter_matches_sspr();
     audio_chunk_boundaries();
     menu_glyphs_follow_pico8_font();
     static const uint8_t source[] =
