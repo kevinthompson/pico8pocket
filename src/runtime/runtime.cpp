@@ -482,6 +482,17 @@ static void draw_state_from_ram(p8p_runtime_t *runtime) {
     runtime->fill_pattern_transparent = runtime->ram[0x5f33] & 1;
 }
 
+/* Bring the framebuffer, draw state and cartdata up to date after 'length'
+ * RAM bytes from 'address' were written. */
+static void ram_written(p8p_runtime_t *runtime, int address, int length) {
+    if (range_touches_screen(address, length))
+        ram_to_screen_range(runtime, address, length);
+    if (range_touches_draw_state(address, length))
+        draw_state_from_ram(runtime);
+    if (range_touches_cartdata(address, length))
+        cartdata_mark_dirty(runtime);
+}
+
 static uint8_t screen_get(const p8p_runtime_t *runtime, int x, int y) {
     if ((unsigned)x >= 128u || (unsigned)y >= 128u)
         return 0;
@@ -1606,12 +1617,7 @@ static int api_poke(lua_State *lua) {
     for (int i = 0; i < values; ++i)
         active_runtime->ram[(address + i) & 0xffff] =
             (uint8_t)arg_int(lua, i + 2, 0);
-    if (range_touches_screen(address, values))
-        ram_to_screen_range(active_runtime, address, values);
-    if (range_touches_draw_state(address, values))
-        draw_state_from_ram(active_runtime);
-    if (range_touches_cartdata(address, values))
-        cartdata_mark_dirty(active_runtime);
+    ram_written(active_runtime, address, values);
     return 0;
 }
 
@@ -1637,11 +1643,7 @@ static int api_poke2(lua_State *lua) {
         return 0;
     active_runtime->ram[address] = (uint8_t)value;
     active_runtime->ram[address + 1] = (uint8_t)(value >> 8);
-    if (range_touches_screen(address, 2))
-        ram_to_screen_range(active_runtime, address, 2);
-    if (range_touches_draw_state(address, 2))
-        draw_state_from_ram(active_runtime);
-    if (range_touches_cartdata(address, 2)) cartdata_mark_dirty(active_runtime);
+    ram_written(active_runtime, address, 2);
     return 0;
 }
 
@@ -1672,11 +1674,7 @@ static int api_poke4(lua_State *lua) {
     active_runtime->ram[address + 1] = (uint8_t)(bits >> 8);
     active_runtime->ram[address + 2] = (uint8_t)(bits >> 16);
     active_runtime->ram[address + 3] = (uint8_t)(bits >> 24);
-    if (range_touches_screen(address, 4))
-        ram_to_screen_range(active_runtime, address, 4);
-    if (range_touches_draw_state(address, 4))
-        draw_state_from_ram(active_runtime);
-    if (range_touches_cartdata(address, 4)) cartdata_mark_dirty(active_runtime);
+    ram_written(active_runtime, address, 4);
     return 0;
 }
 
@@ -1687,12 +1685,7 @@ static int api_memset(lua_State *lua) {
     int length = arg_int(lua, 3, 0);
     if (destination >= 0 && length >= 0 && destination + length <= 0x10000) {
         memset(active_runtime->ram + destination, value, (size_t)length);
-        if (range_touches_screen(destination, length))
-            ram_to_screen_range(active_runtime, destination, length);
-        if (range_touches_draw_state(destination, length))
-            draw_state_from_ram(active_runtime);
-        if (range_touches_cartdata(destination, length))
-            cartdata_mark_dirty(active_runtime);
+        ram_written(active_runtime, destination, length);
     }
     return 0;
 }
@@ -1704,18 +1697,11 @@ static int api_memcpy(lua_State *lua) {
     int length = arg_int(lua, 3, 0);
     if (destination >= 0 && source >= 0 && length >= 0 &&
         destination + length <= 0x10000 && source + length <= 0x10000) {
-        int reads_screen = range_touches_screen(source, length);
-        int writes_screen = range_touches_screen(destination, length);
-        if (reads_screen)
+        if (range_touches_screen(source, length))
             screen_to_ram(active_runtime);
         memmove(active_runtime->ram + destination, active_runtime->ram + source,
                 (size_t)length);
-        if (writes_screen)
-            ram_to_screen_range(active_runtime, destination, length);
-        if (range_touches_draw_state(destination, length))
-            draw_state_from_ram(active_runtime);
-        if (range_touches_cartdata(destination, length))
-            cartdata_mark_dirty(active_runtime);
+        ram_written(active_runtime, destination, length);
     }
     return 0;
 }
