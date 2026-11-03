@@ -1653,18 +1653,41 @@ static int api_btnp(lua_State *lua) {
     return 1;
 }
 
-static int api_peek(lua_State *lua) {
-    profile_api(P8P_API_MEMORY);
-    int address = arg_int(lua, 1, 0) & 0xffff;
-    int count = arg_int(lua, 2, 1);
-    if (count < 1) count = 1;
+/*
+ * peek(), peek2() and peek4() return one value without a count, and none for
+ * a count below 1, nil included, as in PICO-8.  poke(), poke2() and poke4()
+ * write each value in turn, and a missing value writes 0.
+ */
+static int peek_count(lua_State *lua) {
+    if (arg_count(lua) < 2)
+        return 1;
+    int count = arg_int(lua, 2, 0);
+    if (count < 1)
+        return 0;
     /* PICO-8 v0.2.5+ raised the multi-value peek limit from 8192. */
-    if (count > 32767) count = 32767;
+    if (count > 32767)
+        count = 32767;
     /* C functions are only guaranteed LUA_MINSTACK free slots. */
     if (count > LUA_MINSTACK && !lua_checkstack(lua, count))
         return luaL_error(lua, "peek: stack overflow");
-    if (range_touches_screen(address, count))
+    return count;
+}
+
+static int poke_count(lua_State *lua) {
+    int values = arg_count(lua) - 1;
+    return values < 1 ? 1 : values;
+}
+
+static void flush_screen_for_peek(int address, int count, int size) {
+    if (range_touches_screen(address, ram_length(count * size)))
         screen_to_ram(active_runtime);
+}
+
+static int api_peek(lua_State *lua) {
+    profile_api(P8P_API_MEMORY);
+    int address = arg_int(lua, 1, 0) & 0xffff;
+    int count = peek_count(lua);
+    flush_screen_for_peek(address, count, 1);
     for (int i = 0; i < count; ++i)
         push_int(lua, active_runtime->ram[(address + i) & 0xffff]);
     return count;
@@ -1673,9 +1696,7 @@ static int api_peek(lua_State *lua) {
 static int api_poke(lua_State *lua) {
     profile_api(P8P_API_MEMORY);
     int address = arg_int(lua, 1, 0) & 0xffff;
-    int values = arg_count(lua) - 1;
-    if (values < 1)
-        values = 1;
+    int values = poke_count(lua);
     for (int i = 0; i < values; ++i)
         active_runtime->ram[(address + i) & 0xffff] =
             (uint8_t)arg_int(lua, i + 2, 0);
@@ -1686,37 +1707,43 @@ static int api_poke(lua_State *lua) {
 static int api_peek2(lua_State *lua) {
     profile_api(P8P_API_MEMORY);
     int address = arg_int(lua, 1, 0) & 0xffff;
-    if (range_touches_screen(address, 2))
-        screen_to_ram(active_runtime);
-    push_int(lua, (int)ram_read(active_runtime, address, 2));
-    return 1;
+    int count = peek_count(lua);
+    flush_screen_for_peek(address, count, 2);
+    for (int i = 0; i < count; ++i)
+        push_int(lua, (int)ram_read(active_runtime, address + i * 2, 2));
+    return count;
 }
 
 static int api_poke2(lua_State *lua) {
     profile_api(P8P_API_MEMORY);
     int address = arg_int(lua, 1, 0) & 0xffff;
-    int value = arg_int(lua, 2, 0);
-    ram_write(active_runtime, address, (uint32_t)value, 2);
-    ram_written(active_runtime, address, 2);
+    int values = poke_count(lua);
+    for (int i = 0; i < values; ++i)
+        ram_write(active_runtime, address + i * 2,
+                  (uint32_t)arg_int(lua, i + 2, 0), 2);
+    ram_written(active_runtime, address, ram_length(values * 2));
     return 0;
 }
 
 static int api_peek4(lua_State *lua) {
     profile_api(P8P_API_MEMORY);
     int address = arg_int(lua, 1, 0) & 0xffff;
-    if (range_touches_screen(address, 4))
-        screen_to_ram(active_runtime);
-    lua_pushnumber(lua, fix32::frombits(
-        (int32_t)ram_read(active_runtime, address, 4)));
-    return 1;
+    int count = peek_count(lua);
+    flush_screen_for_peek(address, count, 4);
+    for (int i = 0; i < count; ++i)
+        lua_pushnumber(lua, fix32::frombits(
+            (int32_t)ram_read(active_runtime, address + i * 4, 4)));
+    return count;
 }
 
 static int api_poke4(lua_State *lua) {
     profile_api(P8P_API_MEMORY);
     int address = arg_int(lua, 1, 0) & 0xffff;
-    uint32_t bits = (uint32_t)arg_number(lua, 2, fix32(0)).bits();
-    ram_write(active_runtime, address, bits, 4);
-    ram_written(active_runtime, address, 4);
+    int values = poke_count(lua);
+    for (int i = 0; i < values; ++i)
+        ram_write(active_runtime, address + i * 4,
+                  (uint32_t)arg_number(lua, i + 2, fix32(0)).bits(), 4);
+    ram_written(active_runtime, address, ram_length(values * 4));
     return 0;
 }
 

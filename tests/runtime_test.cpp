@@ -362,6 +362,52 @@ static void memory_addresses_wrap_like_pico8(void) {
     p8p_cart_destroy(&cart);
 }
 
+static void multi_value_peek_poke_matches_pico8(void) {
+    /* Each case was checked against PICO-8 0.2.7. */
+    static const char source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "r={}\n"
+        "function is(c) add(r,c) end\n"
+        "function n(...) return select(\"#\",...) end\n"
+        "function _draw()\n"
+        " for i=0,15 do poke(0x8000+i,i+1) end\n"
+        " local a,b,c=peek2(0x8000,3) is(a==0x0201 and b==0x0403 and c==0x0605)\n"
+        " a,b=peek4(0x8000,2) is(a==0x0403.0201 and b==0x0807.0605)\n"
+        " is(n(peek2(0x8000))==1 and n(peek4(0x8000))==1 and n(peek(0x8000))==1)\n"
+        " is(n(peek2(0,0))==0 and n(peek4(0,nil))==0 and n(peek(0,-1))==0 and n(peek(0,nil))==0)\n"
+        " is(n(peek2(0,20))==20 and n(peek4(0,8193))==8193 and n(peek2(0,32767))==32767)\n"
+        " poke(0xffff,0xaa) poke(0,0xbb,0xcc,0xdd,0xee)\n"
+        " a,b=peek2(0xfffe,2) is(a==0xaa00 and b==0xccbb)\n"
+        " a,b=peek4(0xfffe,2) is(a==0xccbb.aa00 and b==0x0000.eedd)\n"
+        " poke2(0x9000,1,2,3) is(peek2(0x9000)==1 and peek2(0x9002)==2 and peek2(0x9004)==3)\n"
+        " poke4(0x9100,1,2) is(peek4(0x9100)==1 and peek4(0x9104)==2)\n"
+        " memset(0x9000,0x55,16) poke2(0x9000,1,nil,3) is(peek2(0x9002)==0 and peek2(0x9004)==3)\n"
+        " memset(0x9000,0x55,16) poke4(0x9000,1.5,nil,-2) is(peek4(0x9000)==1.5 and peek4(0x9004)==0 and peek4(0x9008)==-2)\n"
+        " memset(0x9000,0x55,4) poke2(0x9000) is(peek2(0x9000)==0 and @0x9002==0x55)\n"
+        " poke2(0xfffe,0x1111,0x2222) is(peek2(0xfffe)==0x1111 and peek2(0)==0x2222)\n"
+        " local args={0xa000} for i=1,300 do args[i+1]=i end poke2(unpack(args)) is(peek2(0xa000+2*299)==300)\n"
+        " cls() poke2(0x6000,0x1234,0x5678) is(pget(0,0)==4 and pget(3,0)==1 and pget(4,0)==8 and pget(7,0)==5)\n"
+        " a,b=peek2(0x6000,2) is(a==0x1234 and b==0x5678)\n"
+        " cls() for i=1,#r do pset(i-1,0,r[i] and 11 or 8) end\n"
+        "end\n"
+        ;
+    p8p_cart_t cart = {};
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                    sizeof(source) - 1, &cart) == 0);
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    const uint8_t *fb = p8p_runtime_framebuffer(runtime);
+    for (int index = 0; index < 16; ++index) {
+        if (fb[index] != 11)
+            fprintf(stderr, "FAIL multi-value peek/poke case %d\n", index + 1);
+        CHECK(fb[index] == 11);
+    }
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+}
+
 static void draw_palette_transitions(void) {
     struct PaletteCase {
         const char *name;
@@ -608,6 +654,7 @@ int main(void) {
     palette_leaf_contracts();
     palette_fast_path_semantics();
     draw_palette_transitions();
+    multi_value_peek_poke_matches_pico8();
     memory_addresses_wrap_like_pico8();
     audio_chunk_boundaries();
     static const uint8_t source[] =
