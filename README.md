@@ -63,9 +63,9 @@ started and how you can help improve it.
   content-hash-keyed override for each cartridge; D-pad, A/B/X/Y, L/R and Start
   can all be reassigned while Select remains reserved for the system UI.
 - Pressing Select opens the PICO-8-styled system menu and fully pauses the
-  cartridge with a short audio fade. Holding Select and pressing the physical X
-  button, or pressing X from the main system menu, toggles the opt-in
-  profiler. Its labelled rows show logical FPS (`L`), estimated visible FPS (`V`), update
+  cartridge with a short audio fade. A or X chooses a row and B goes back; on
+  the save-state screen X saves. Holding Select and pressing the physical X
+  button toggles the opt-in profiler, with the menu open or closed. Its labelled rows show logical FPS (`L`), estimated visible FPS (`V`), update
   time (`U`), draw time (`D`), audio time (`A`), presentation time (`P`), the
   active render divisor (`R`), a Lua activity count (`K`) and the full runtime
   step the frame-skip scheduler measures (`F`: update and draw plus audio

@@ -1,6 +1,7 @@
 #include "p8p/cart.h"
 #include "p8p/menu.h"
 #include "p8p/multicart.h"
+#include "p8p/pico8_font.h"
 #include "p8p/platform.h"
 #include "p8p/runtime.h"
 #include "p8p/scheduler.h"
@@ -91,59 +92,20 @@ static void draw_profile(uint8_t *fb, unsigned logical_fps,
     }
 }
 
+/* Error and overlay text use PICO-8's own 3x5 letter shapes.  Letters map
+ * to the font's lowercase codes, which hold the shapes PICO-8 prints by
+ * default; anything outside printable ASCII is blank. */
 static uint16_t error_glyph(unsigned char character) {
-#define GLYPH(r0, r1, r2, r3, r4) \
-    ((uint16_t)((r0) << 12) | (uint16_t)((r1) << 9) | \
-     (uint16_t)((r2) << 6) | (uint16_t)((r3) << 3) | (uint16_t)(r4))
-    if (character >= 'a' && character <= 'z')
-        character = (unsigned char)(character - ('a' - 'A'));
-    switch (character) {
-    case '0': return GLYPH(2, 5, 5, 5, 2);
-    case '1': return GLYPH(2, 6, 2, 2, 7);
-    case '2': return GLYPH(6, 1, 2, 4, 7);
-    case '3': return GLYPH(6, 1, 2, 1, 6);
-    case '4': return GLYPH(5, 5, 7, 1, 1);
-    case '5': return GLYPH(7, 4, 6, 1, 6);
-    case '6': return GLYPH(3, 4, 6, 5, 2);
-    case '7': return GLYPH(7, 1, 2, 2, 2);
-    case '8': return GLYPH(2, 5, 2, 5, 2);
-    case '9': return GLYPH(2, 5, 3, 1, 6);
-    case 'A': return GLYPH(2, 5, 7, 5, 5);
-    case 'B': return GLYPH(6, 5, 6, 5, 6);
-    case 'C': return GLYPH(3, 4, 4, 4, 3);
-    case 'D': return GLYPH(6, 5, 5, 5, 6);
-    case 'E': return GLYPH(7, 4, 6, 4, 7);
-    case 'F': return GLYPH(7, 4, 6, 4, 4);
-    case 'G': return GLYPH(3, 4, 5, 5, 3);
-    case 'H': return GLYPH(5, 5, 7, 5, 5);
-    case 'I': return GLYPH(7, 2, 2, 2, 7);
-    case 'J': return GLYPH(1, 1, 1, 5, 2);
-    case 'K': return GLYPH(5, 5, 6, 5, 5);
-    case 'L': return GLYPH(4, 4, 4, 4, 7);
-    case 'M': return GLYPH(5, 7, 7, 5, 5);
-    case 'N': return GLYPH(5, 7, 7, 7, 5);
-    case 'O': return GLYPH(2, 5, 5, 5, 2);
-    case 'P': return GLYPH(6, 5, 6, 4, 4);
-    case 'Q': return GLYPH(2, 5, 5, 3, 1);
-    case 'R': return GLYPH(6, 5, 6, 5, 5);
-    case 'S': return GLYPH(3, 4, 2, 1, 6);
-    case 'T': return GLYPH(7, 2, 2, 2, 2);
-    case 'U': return GLYPH(5, 5, 5, 5, 7);
-    case 'V': return GLYPH(5, 5, 5, 5, 2);
-    case 'W': return GLYPH(5, 5, 7, 7, 5);
-    case 'X': return GLYPH(5, 5, 2, 5, 5);
-    case 'Y': return GLYPH(5, 5, 2, 2, 2);
-    case 'Z': return GLYPH(7, 1, 2, 4, 7);
-    case '!': return GLYPH(2, 2, 2, 0, 2);
-    case '?': return GLYPH(6, 1, 2, 0, 2);
-    case '.': return GLYPH(0, 0, 0, 0, 2);
-    case ':': return GLYPH(0, 2, 0, 2, 0);
-    case '-': return GLYPH(0, 0, 7, 0, 0);
-    case '/': return GLYPH(1, 1, 2, 4, 4);
-    case '_': return GLYPH(0, 0, 0, 0, 7);
-    default: return 0;
-    }
-#undef GLYPH
+    uint16_t bits = 0;
+    if (character < 32 || character > 126)
+        return 0;
+    if (character >= 'A' && character <= 'Z')
+        character = (unsigned char)(character + ('a' - 'A'));
+    for (int row = 0; row < 5; ++row)
+        for (int column = 0; column < 3; ++column)
+            if ((p8p_pico8_font[character * 8 + row] >> column) & 1)
+                bits |= (uint16_t)(1u << (14 - row * 3 - column));
+    return bits;
 }
 
 static void draw_error_text(uint8_t *fb, int x, int y, const char *value,
@@ -634,13 +596,6 @@ int main(int argc, char **argv) {
                     memset(&runtime_profile, 0, sizeof(runtime_profile));
                     average_instructions = 0;
                 }
-                menu_open = 0;
-                suppress_buttons = physical;
-                p8p_platform_audio_set_paused(0);
-            } else if (action == P8P_MENU_TOGGLE_DIAGNOSTICS) {
-                set_diagnostics(runtime, &diagnostics_visible,
-                                &runtime_profile, &average_instructions,
-                                !diagnostics_visible);
                 menu_open = 0;
                 suppress_buttons = physical;
                 p8p_platform_audio_set_paused(0);

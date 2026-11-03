@@ -1,6 +1,6 @@
 ---
 name: pocket-benchmarking
-description: Use when selecting Pico8Pocket platform profiles, planning benchmark cores, or collecting and comparing device profiler screenshots with pocket-harness.
+description: Use when choosing Pico8Pocket profiles, preserving routine regression baselines, planning benchmark cores, or collecting and comparing profiler evidence.
 ---
 
 # Pocket benchmark evidence
@@ -35,3 +35,16 @@ excludes production OS/presentation paths and does not establish device parity.
 Historical bare-metal os25 experiments retain their original build/model; the
 collector's Butterscotch-only `harness-revision` importer does not add PICO-8
 report import support or extend any simulation model.
+
+## Routine regression checks
+
+For recurring software checks, require the shared `benchmarks/REGRESSIONS.md`
+and read it with this project's benchmark guide. The contract was introduced in
+`fd5fc7af6cb51b19bb800d6c2cd43b7c03cfcf58`; record the actual verified shared
+checkout commit. Preserve the accepted reference, create independent candidates,
+and require project correctness and negative controls before interpreting deltas.
+A missing adapter or fixture is an explicit coverage gap. Collector `verify` or
+`compare` is not an output-regression gate or a substitute for device checks.
+Use the separate bounded os20/90 MHz adapter and native/cart checks. Require
+repeat and native-output agreement; distinguish exported channel hashes from raw
+byte equality. Butterscotch's `regression.py` does not accept Pico8 cases.

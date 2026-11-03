@@ -20,7 +20,10 @@ that complete collection so Codex and Claude discover the same four skills:
   harness discovery and evidence collection/comparison.
 
 Use [the benchmark guide](docs/BENCHMARKING.md) for platform selection and
-screenshot-backed device comparisons. The shipping architecture is os20/90 MHz;
+screenshot-backed device comparisons and [routine regression checks](docs/BENCHMARKING.md#routine-regression-checks).
+Preserve accepted references and create independent candidates using the bounded
+os20 adapter plus project correctness checks; Butterscotch's `regression.py`
+does not accept Pico8 cases. The shipping architecture is os20/90 MHz;
 historical bare-metal os25 simulation does not qualify its device performance.
 Ordinary compatibility or packaging work need not use the shared collector.
 Keep private cartridges, profiles, measurements and screenshots out of commits

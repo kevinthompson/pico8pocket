@@ -623,14 +623,15 @@ static void blit_tile(p8p_runtime_t *runtime, int sprite, int screen_x,
 
 /* Not BRAM-resident: common sprites are handed to blit_tile(), which is. */
 static void draw_sprite(p8p_runtime_t *runtime, int sprite, int x,
-                        int y, int width, int height, int flip_x,
+                        int y, int pixel_width, int pixel_height, int flip_x,
                         int flip_y) {
     profile_api(P8P_API_SPRITE);
     int sprite_base = (int)runtime->ram[0x5f54] << 8;
     /* Unflipped 8x8-tile sprites that stay inside the sheet are exactly the
      * map tile case; reuse its unpacked two-pixels-per-byte blitter. */
+    int width = pixel_width >> 3, height = pixel_height >> 3;
     if (!flip_x && !flip_y && sprite >= 0 && sprite < 256 &&
-        width >= 1 && height >= 1 &&
+        width >= 1 && height >= 1 && !((pixel_width | pixel_height) & 7) &&
         (sprite & 15) + width <= 16 && (sprite >> 4) + height <= 16 &&
         sprite_base + 8192 <= 0x10000) {
         int screen_x = x - runtime->camera_x;
@@ -644,8 +645,6 @@ static void draw_sprite(p8p_runtime_t *runtime, int sprite, int x,
     }
     int source_x = (sprite & 15) * 8;
     int source_y = (sprite >> 4) * 8;
-    int pixel_width = width * 8;
-    int pixel_height = height * 8;
 
     int destination_x = x - runtime->camera_x;
     int destination_y = y - runtime->camera_y;
@@ -938,6 +937,73 @@ static int api_rect(lua_State *lua) {
     return 0;
 }
 
+/* Horizontal inset of a rounded corner ROW pixels from the top or bottom
+ * edge.  PICO-8 draws the corner as the midpoint circle of radius + 1, so
+ * this walks that circle's octant and reads the widest extent at the row. */
+static int rounded_corner_inset(int radius, int row) {
+    if (row >= radius)
+        return 0;
+    int circle_radius = radius + 1;
+    int offset_y = circle_radius - row;
+    int extent = 0;
+    int error = 1 - circle_radius;
+    for (int x = circle_radius, y = 0; y <= x;) {
+        if (y == offset_y && x > extent) extent = x;
+        if (x == offset_y && y > extent) extent = y;
+        ++y;
+        if (error < 0) {
+            error += 2 * y + 1;
+        } else {
+            --x;
+            error += 2 * (y - x) + 1;
+        }
+    }
+    return circle_radius - extent;
+}
+
+static void draw_rounded_rect(p8p_runtime_t *runtime, int x, int y,
+                              int width, int height, int radius, int color,
+                              int filled) {
+    if (width <= 0 || height <= 0)
+        return;
+    int max_radius = (width < height ? width : height) / 2 - 1;
+    if (radius > max_radius) radius = max_radius;
+    if (radius < 0) radius = 0;
+    int x1 = x + width - 1;
+    for (int row = 0; row < height; ++row) {
+        int edge_row = row < height - 1 - row ? row : height - 1 - row;
+        int inset = rounded_corner_inset(radius, edge_row);
+        if (filled || edge_row == 0) {
+            draw_hspan(runtime, x + inset, x1 - inset, y + row, color);
+            continue;
+        }
+        /* Join this row's edge pixel to the row nearer the edge, so the
+         * outline stays connected around the corner. */
+        int outer_inset = rounded_corner_inset(radius, edge_row - 1);
+        int run_end = outer_inset - 1 > inset ? outer_inset - 1 : inset;
+        draw_hspan(runtime, x + inset, x + run_end, y + row, color);
+        draw_hspan(runtime, x1 - run_end, x1 - inset, y + row, color);
+    }
+}
+
+static int api_rrect(lua_State *lua) {
+    profile_api(P8P_API_GRAPHICS);
+    p8p_runtime_t *runtime = active_runtime;
+    draw_rounded_rect(runtime, arg_int(lua, 1, 0), arg_int(lua, 2, 0),
+                      arg_int(lua, 3, 0), arg_int(lua, 4, 0),
+                      arg_int(lua, 5, 0), arg_pen(lua, 6, runtime), 0);
+    return 0;
+}
+
+static int api_rrectfill(lua_State *lua) {
+    profile_api(P8P_API_GRAPHICS);
+    p8p_runtime_t *runtime = active_runtime;
+    draw_rounded_rect(runtime, arg_int(lua, 1, 0), arg_int(lua, 2, 0),
+                      arg_int(lua, 3, 0), arg_int(lua, 4, 0),
+                      arg_int(lua, 5, 0), arg_pen(lua, 6, runtime), 1);
+    return 0;
+}
+
 static int api_circfill(lua_State *lua) {
     profile_api(P8P_API_GRAPHICS);
     p8p_runtime_t *runtime = active_runtime;
@@ -1027,8 +1093,14 @@ static int api_spr(lua_State *lua) {
         return 0;
     }
     flush_redirected_drawing(active_runtime);
-    draw_sprite(active_runtime, sprite, arg_int(lua, 2, 0),
-                arg_int(lua, 3, 0), arg_int(lua, 4, 1), arg_int(lua, 5, 1),
+    /* Sizes are in tiles and may be fractional: .875 draws 7 pixels.  The
+     * 1x1 default only applies without a w argument; after that, a missing
+     * or nil size is 0, so spr(n,x,y,1) and spr(n,x,y,nil,nil,flip) draw
+     * nothing in PICO-8. */
+    fix32 default_size = fix32(arg_count(lua) < 4 ? 1 : 0);
+    draw_sprite(active_runtime, sprite, arg_int(lua, 2, 0), arg_int(lua, 3, 0),
+                (int)(arg_number(lua, 4, default_size) * fix32(8)),
+                (int)(arg_number(lua, 5, default_size) * fix32(8)),
                 lua_toboolean(lua, 6), lua_toboolean(lua, 7));
     return 0;
 }
@@ -1391,7 +1463,7 @@ static int api_map(lua_State *lua) {
                                   origin_y + y * 8, sprite_base);
                 else
                     draw_sprite(runtime, sprite, screen_x + x * 8,
-                                screen_y + y * 8, 1, 1, 0, 0);
+                                screen_y + y * 8, 8, 8, 0, 0);
             }
         }
     }
@@ -1455,7 +1527,14 @@ static void reset_transparency(p8p_runtime_t *runtime) {
 extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
     profile_api(P8P_API_DRAW_STATE);
     p8p_runtime_t *runtime = active_runtime;
-    if (arg_count(lua) == 0) {
+    int reset_all = arg_count(lua) == 0;
+    int palette = 0;
+    if (arg_count(lua) == 1 && !lua_istable(lua, 1)) {
+        /* Anything but a number selects every palette, like -1. */
+        palette = lua_type(lua, 1) == LUA_TNUMBER ? arg_int(lua, 1, 0) : -1;
+        reset_all = palette == -1;
+    }
+    if (reset_all) {
         /* Like PICO-8, pal() also resets transparency to palt(). */
         if (!runtime->palettes_default) {
             for (int i = 0; i < 16; ++i) {
@@ -1484,10 +1563,25 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
             }
             lua_pop(lua, 1);
         }
+    } else if (arg_count(lua) == 1) {
+        /* pal(p) resets one palette, and pal(0) also resets transparency.
+         * There is no secondary palette yet, so pal(2) changes nothing. */
+        if (palette == 0 || palette == 1) {
+            uint8_t *entries = palette ? runtime->screen_palette
+                                       : runtime->draw_palette;
+            for (int i = 0; i < 16; ++i) {
+                if (entries[i] != i) {
+                    entries[i] = (uint8_t)i;
+                    palette_entry_to_ram(runtime, i);
+                }
+            }
+            if (palette == 0)
+                reset_transparency(runtime);
+        }
     } else {
         int from = arg_int(lua, 1, 0) & 15;
         int screen = arg_int(lua, 3, 0) == 1;
-        int to = arg_int(lua, 2, from) & (screen ? 0x8f : 15);
+        int to = arg_int(lua, 2, 0) & (screen ? 0x8f : 15);
         int previous = screen ? runtime->screen_palette[from]
                               : runtime->draw_palette[from];
         if (previous != to) {
@@ -1504,12 +1598,23 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
     return 0;
 }
 
+static int transparency_bits(const p8p_runtime_t *runtime) {
+    int bits = 0;
+    for (int color = 0; color < 16; ++color)
+        bits |= (runtime->transparent[color] ? 1 : 0) << (15 - color);
+    return (int16_t)bits;
+}
+
 static int api_palt(lua_State *lua) {
     profile_api(P8P_API_DRAW_STATE);
     p8p_runtime_t *runtime = active_runtime;
-    if (arg_count(lua) == 0) {
-        reset_transparency(runtime);
-    } else if (arg_count(lua) == 1) {
+    int arguments = arg_count(lua);
+    if (arguments < 2) {
+        push_int(lua, transparency_bits(runtime));
+        if (arguments == 0) {
+            reset_transparency(runtime);
+            return 1;
+        }
         /* palt(bitfield): bit 15-i makes colour i transparent. */
         int bits = arg_int(lua, 1, 0) & 0xffff;
         for (int color = 0; color < 16; ++color) {
@@ -1519,18 +1624,18 @@ static int api_palt(lua_State *lua) {
                 (runtime->transparent[color] ? 0x10 : 0));
         }
         runtime->transparency_default = bits == 0x8000;
-    } else {
-        int color = arg_int(lua, 1, 0) & 15;
-        uint8_t transparent =
-            (uint8_t)(arg_count(lua) < 2 || lua_toboolean(lua, 2));
-        if (runtime->transparent[color] != transparent) {
-            runtime->transparent[color] = transparent;
-            runtime->transparency_default = 0;
-            runtime->ram[0x5f00 + color] = (uint8_t)(
-                runtime->draw_palette[color] | (transparent ? 0x10 : 0));
-        }
+        return 1;
     }
-    return 0;
+    int color = arg_int(lua, 1, 0) & 15;
+    uint8_t transparent = (uint8_t)lua_toboolean(lua, 2);
+    lua_pushboolean(lua, runtime->transparent[color]);
+    if (runtime->transparent[color] != transparent) {
+        runtime->transparent[color] = transparent;
+        runtime->transparency_default = 0;
+        runtime->ram[0x5f00 + color] = (uint8_t)(
+            runtime->draw_palette[color] | (transparent ? 0x10 : 0));
+    }
+    return 1;
 }
 
 static int api_btn(lua_State *lua) {
@@ -2370,6 +2475,10 @@ static int api_stat(lua_State *lua) {
     case 56:
         push_int(lua, p8p_audio_music_ticks(runtime->audio));
         break;
+    case 57:
+        /* Music stays playing until a fade-out completes. */
+        lua_pushboolean(lua, p8p_audio_music_pattern(runtime->audio) >= 0);
+        break;
     case 28:
     case 30:
     case 120:
@@ -2385,14 +2494,20 @@ static int api_stat(lua_State *lua) {
     case 36:
     case 38:
     case 39:
-    case 90:
-    case 91:
-    case 92:
-    case 93:
-    case 94:
-    case 95:
+    case 83: case 84: case 85:
+    case 93: case 94: case 95:
     case 102:
         push_int(lua, 0);
+        break;
+    /* The openfpgaOS API exposes no wall clock.  UTC and local time report the
+     * Unix epoch: a valid date for cart arithmetic, and earlier than any real
+     * date so a cart can tell the clock is missing. */
+    case 80: case 90:
+        push_int(lua, 1970);
+        break;
+    case 81: case 82:
+    case 91: case 92:
+        push_int(lua, 1);
         break;
     case 31:
         lua_pushstring(lua, "");
@@ -2788,6 +2903,7 @@ static const luaL_Reg runtime_api[] = {
  * which was numbered under "cd", so moving it here keeps the IDs too. */
 static const luaL_Reg late_runtime_api[] = {
     {"cstore", api_stub}, {"trace", api_trace}, {"menuitem", api_menuitem},
+    {"rrect", api_rrect}, {"rrectfill", api_rrectfill},
     /* Not PICO-8 API, but Yarn calls exit() while drawing its score panel
      * once all levels are unlocked; a no-op lets it finish the frame. */
     {"exit", api_stub},
@@ -2844,7 +2960,7 @@ static const char bootstrap_lua[] =
     "rawset(debug.getregistry(),'__PICO8_SANDBOX',_G)\n"
     "eris.__p8p_perm={} eris.__p8p_unperm={} eris.__p8p_original={}\n"
     "function eris.__p8p_init()\n"
-    " local late={'cstore','trace','menuitem','exit'} local skip={} for _,k in ipairs(late) do skip[k]=true end\n"
+    " local late={'cstore','trace','menuitem','exit','rrect','rrectfill'} local skip={} for _,k in ipairs(late) do skip[k]=true end\n"
     " local keys={} for k in pairs(_G) do if not skip[k] then keys[#keys+1]=k end end table.sort(keys)\n"
     " local seen={} local n=0 local function permanent(v) local t=type(v)\n"
     "  if t~='table' and t~='function' and t~='userdata' and t~='thread' then return end\n"
@@ -3021,10 +3137,19 @@ extern "C" int p8p_runtime_request_back(p8p_runtime_t *runtime) {
     return 0;
 }
 
+/* PICO-8 runs at 60 fps when _update60 exists once _init has finished, so
+ * carts may install their callbacks from _init. */
+static void choose_frame_rate(p8p_runtime_t *runtime) {
+    lua_getglobal(runtime->lua, "_update60");
+    runtime->target_fps = lua_isfunction(runtime->lua, -1) ? 60 : 30;
+    lua_pop(runtime->lua, 1);
+}
+
 static int start_init_thread(p8p_runtime_t *runtime) {
     lua_getglobal(runtime->lua, "_init");
     if (!lua_isfunction(runtime->lua, -1)) {
         lua_pop(runtime->lua, 1);
+        choose_frame_rate(runtime);
         return 0;
     }
     runtime->cart_thread = lua_newthread(runtime->lua);
@@ -3047,13 +3172,12 @@ static int start_init_thread(p8p_runtime_t *runtime) {
         return -1;
     }
     release_cart_thread(runtime);
+    choose_frame_rate(runtime);
     return 0;
 }
 
 static int finish_cart_load(p8p_runtime_t *runtime) {
-    lua_getglobal(runtime->lua, "_update60");
-    runtime->target_fps = lua_isfunction(runtime->lua, -1) ? 60 : 30;
-    lua_pop(runtime->lua, 1);
+    choose_frame_rate(runtime);  /* what _init sees; chosen again after it */
     return start_init_thread(runtime);
 }
 
@@ -3081,7 +3205,10 @@ static const char frame_dispatcher_lua[] =
     "local prof=...\n"
     "return function(update, draw)\n"
     " local u=_ENV[update]\n"
-    " if u then prof(0) u() prof(1) end\n"
+    " if u then prof(0) u() prof(1)\n"
+    " elseif update=='_update' and _update60 then\n"
+    "  u=_update60 prof(0) u() u() prof(1)\n"
+    " end\n"
     " if draw then local d=_draw if d then prof(2) d() prof(3) end end\n"
     "end\n";
 
@@ -3465,6 +3592,8 @@ extern "C" int p8p_runtime_step_with_draw(p8p_runtime_t *runtime,
         release_cart_thread(runtime);
         if (thread_kind == 0 && finish_cart_load(runtime) != 0)
             return -2;
+        if (thread_kind == 1)
+            choose_frame_rate(runtime);
         install_service_hook(runtime);
         return 0;
     }

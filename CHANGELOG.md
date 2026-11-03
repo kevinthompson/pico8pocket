@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- `stat(80)`-`stat(85)` and `stat(90)`-`stat(95)` report 1970-01-01 00:00:00
+  instead of nil or 0, so carts that read the date at load no longer stop with
+  an arithmetic error. The Pocket runtime exposes no wall clock; a year before
+  2000 tells a cart that the date is not real.
+- Add `rrect` and `rrectfill`, which draw through the same clip, camera,
+  palette and fill-pattern path as `rectfill`.
+- `pal(p)` resets the draw or display palette, as the manual describes. It
+  previously mapped colour `p` to itself, so temporary palette changes
+  carried over into later drawing. `pal(0)` also resets transparency, as
+  PICO-8 does.
+- `spr()` honours fractional sizes, drawing `w*8` by `h*8` pixels. It previously
+  truncated them to whole tiles, so a width below 1 drew nothing. As in PICO-8,
+  a size left out or nil after `w` is passed counts as 0, not 1.
+- The runtime error screen and the performance overlay draw text with the
+  PICO-8 font instead of hand-drawn letters, so `M` and `N` are distinct and
+  messages look as they do in PICO-8.
+- X confirms in the Select system menu, as A does. Both are PICO-8's X button
+  in play, but X used to toggle the profiler and close the menu, so choosing a
+  row with it appeared to do nothing. The save-state screen keeps X for Save.
+  Select+X still toggles the profiler, with the menu open or closed.
+- `stat(57)` returns true while music plays, including during a fade-out, and
+  false otherwise, as in PICO-8 0.2.7. It previously returned nil.
+- Carts that set `_update60` inside `_init` now run at 60 fps, as in PICO-8
+  0.2.7. The frame rate was chosen before `_init`, so those carts ran at 30 fps
+  and called an `_update` that did not exist: the screen drew but the game never
+  advanced. A 30 fps cart that replaces `_update` with `_update60` while running
+  now gets two `_update60` calls per frame, as in PICO-8, instead of none.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps
