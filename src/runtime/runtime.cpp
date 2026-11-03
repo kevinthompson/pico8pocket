@@ -4034,6 +4034,11 @@ static void restore_fixed_state(p8p_runtime_t *runtime,
     runtime->draw_color = state->draw_color;
     runtime->cursor_x = state->cursor_x;
     runtime->cursor_y = state->cursor_y;
+    /* The fill pattern and its flags live in the restored RAM; rebuild the
+     * derived fields so drawing uses the saved pattern. */
+    set_fill_pattern(runtime, (uint16_t)(runtime->ram[0x5f31] |
+                                         ((uint16_t)runtime->ram[0x5f32] << 8)),
+                     runtime->ram[0x5f33]);
     runtime->target_fps = state->target_fps;
     runtime->frame_count = state->frame_count;
 }

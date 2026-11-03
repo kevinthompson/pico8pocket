@@ -564,6 +564,39 @@ static void circles_match_pico8(void) {
     p8p_runtime_destroy(runtime);
 }
 
+/* A save state keeps the fill pattern: loading it after fillp() cleared the
+ * pattern draws with the saved one again. */
+static void state_restores_fill_pattern(void) {
+    static const char source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "function _init() fillp(0x5a5a) end\n"
+        "function _update() if btn(0) then fillp() end end\n"
+        "function _draw() cls() rectfill(0,0,7,0,7) end\n";
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    p8p_cart_t cart = {};
+    void *state = NULL;
+    size_t state_size = 0;
+    uint8_t patterned[8];
+    CHECK(runtime != NULL);
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                    strlen(source), &cart) == 0);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    memcpy(patterned, p8p_runtime_framebuffer(runtime), sizeof(patterned));
+    CHECK(memchr(patterned, 0, sizeof(patterned)) != NULL);
+    CHECK(p8p_runtime_save_state(runtime, &state, &state_size) == 0);
+    CHECK(p8p_runtime_step(runtime, 1) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    CHECK(memchr(p8p_runtime_framebuffer(runtime), 0, 8) == NULL);
+    CHECK(p8p_runtime_load_state(runtime, state, state_size) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    CHECK(memcmp(p8p_runtime_framebuffer(runtime), patterned,
+                 sizeof(patterned)) == 0);
+    free(state);
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+}
+
 static void draw_palette_transitions(void) {
     struct PaletteCase {
         const char *name;
@@ -1020,6 +1053,7 @@ int main(void) {
     update_callbacks_follow_init();
     secondary_palette_matches_pico8();
     circles_match_pico8();
+    state_restores_fill_pattern();
     audio_chunk_boundaries();
     menu_glyphs_follow_pico8_font();
     static const uint8_t source[] =
