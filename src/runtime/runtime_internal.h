@@ -50,6 +50,11 @@ struct p8p_runtime {
     int draw_color;
     uint16_t fill_pattern;
     uint8_t fill_pattern_transparent;
+    /* The fill-pattern bits at 0x5f33 (P8P_FILL_*), and whether shapes take
+     * the patterned path: a pattern is set, or the secondary palette applies
+     * to them, which it does even with an empty pattern. */
+    uint8_t fill_pattern_flags;
+    uint8_t fill_pattern_active;
     int cursor_x;
     int cursor_y;
     int target_fps;

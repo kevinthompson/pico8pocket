@@ -80,6 +80,8 @@ static void profile_api(p8p_runtime_api_category_t category) {
         ++active_runtime->api_profile_calls[category];
 }
 
+static int secondary_palette_default(const p8p_runtime_t *runtime);
+
 static void update_palette_default_flags(p8p_runtime_t *runtime) {
     int palettes_default = 1;
     int transparency_default = runtime->transparent[0] != 0;
@@ -90,6 +92,8 @@ static void update_palette_default_flags(p8p_runtime_t *runtime) {
         if (i && runtime->transparent[i])
             transparency_default = 0;
     }
+    if (!secondary_palette_default(runtime))
+        palettes_default = 0;
     runtime->palettes_default = (uint8_t)palettes_default;
     runtime->transparency_default = (uint8_t)transparency_default;
 }
@@ -407,9 +411,65 @@ static int range_touches_cartdata(int address, int length) {
     return address < 0x5f00 && address + length > 0x5e00;
 }
 
-/* Includes 0x5f55, the draw-target mapping. */
+/* Includes 0x5f55, the draw-target mapping, and the secondary palette at
+ * 0x5f60-0x5f6f. */
 static int range_touches_draw_state(int address, int length) {
-    return length > 0 && address < 0x5f56 && address + length > 0x5f00;
+    return length > 0 && address < 0x5f70 && address + length > 0x5f00;
+}
+
+/* fillp() bits kept at 0x5f33. */
+enum {
+    P8P_FILL_TRANSPARENT = 1,
+    P8P_FILL_SPRITES = 2,
+    P8P_FILL_SECONDARY = 4
+};
+
+#define P8P_SECONDARY_PALETTE 0x5f60
+
+/* Each entry holds the two colours a fill pattern draws for one colour: the
+ * low nibble where a pattern bit is 0, the high nibble where it is 1.
+ * PICO-8 0.2.7 starts with each colour paired with a darker one. */
+static const uint8_t default_secondary_palette[16] = {
+    0x00, 0x01, 0x12, 0x13, 0x24, 0x15, 0xd6, 0x67,
+    0x48, 0x49, 0x9a, 0x3b, 0xdc, 0x5d, 0x8e, 0xef
+};
+
+static int secondary_palette_default(const p8p_runtime_t *runtime) {
+    return memcmp(runtime->ram + P8P_SECONDARY_PALETTE,
+                  default_secondary_palette, 16) == 0;
+}
+
+static void reset_secondary_palette(p8p_runtime_t *runtime) {
+    memcpy(runtime->ram + P8P_SECONDARY_PALETTE, default_secondary_palette,
+           16);
+}
+
+static void set_fill_pattern(p8p_runtime_t *runtime, uint16_t pattern,
+                             uint8_t flags) {
+    runtime->fill_pattern = pattern;
+    runtime->fill_pattern_flags = flags & 7;
+    runtime->fill_pattern_transparent = flags & P8P_FILL_TRANSPARENT;
+    runtime->fill_pattern_active =
+        pattern != 0 || (flags & P8P_FILL_SECONDARY) != 0;
+    runtime->ram[0x5f31] = (uint8_t)pattern;
+    runtime->ram[0x5f32] = (uint8_t)(pattern >> 8);
+    runtime->ram[0x5f33] = runtime->fill_pattern_flags;
+}
+
+/* The colours a shape's pattern draws for 0 and 1 bits.  With the
+ * secondary bit set, the draw-palette colour picks a secondary-palette pair,
+ * which is drawn as is. */
+static inline void pattern_colors(const p8p_runtime_t *runtime, int color,
+                                  uint8_t *clear, uint8_t *set) {
+    if (runtime->fill_pattern_flags & P8P_FILL_SECONDARY) {
+        uint8_t pair = runtime->ram[P8P_SECONDARY_PALETTE +
+                                    (runtime->draw_palette[color & 15] & 15)];
+        *clear = pair & 15;
+        *set = pair >> 4;
+    } else {
+        *clear = runtime->draw_palette[color & 15] & 15;
+        *set = runtime->draw_palette[(color >> 4) & 15] & 15;
+    }
 }
 
 static void draw_state_to_ram(p8p_runtime_t *runtime) {
@@ -431,7 +491,7 @@ static void draw_state_to_ram(p8p_runtime_t *runtime) {
     runtime->ram[0x5f2b] = (uint8_t)(runtime->camera_y >> 8);
     runtime->ram[0x5f31] = (uint8_t)runtime->fill_pattern;
     runtime->ram[0x5f32] = (uint8_t)(runtime->fill_pattern >> 8);
-    runtime->ram[0x5f33] = runtime->fill_pattern_transparent;
+    runtime->ram[0x5f33] = runtime->fill_pattern_flags;
 }
 
 static void palette_entry_to_ram(p8p_runtime_t *runtime, int color) {
@@ -477,9 +537,9 @@ static void draw_state_from_ram(p8p_runtime_t *runtime) {
         ((uint16_t)runtime->ram[0x5f29] << 8));
     runtime->camera_y = (int16_t)(runtime->ram[0x5f2a] |
         ((uint16_t)runtime->ram[0x5f2b] << 8));
-    runtime->fill_pattern = (uint16_t)(runtime->ram[0x5f31] |
-        ((uint16_t)runtime->ram[0x5f32] << 8));
-    runtime->fill_pattern_transparent = runtime->ram[0x5f33] & 1;
+    set_fill_pattern(runtime, (uint16_t)(runtime->ram[0x5f31] |
+                                         ((uint16_t)runtime->ram[0x5f32] << 8)),
+                     runtime->ram[0x5f33]);
 }
 
 static uint8_t screen_get(const p8p_runtime_t *runtime, int x, int y) {
@@ -504,20 +564,43 @@ static void screen_set_unchecked(p8p_runtime_t *runtime, int x, int y,
 static void screen_set(p8p_runtime_t *runtime, int x, int y, int color) {
     int screen_x = x - runtime->camera_x;
     int screen_y = y - runtime->camera_y;
-    int selected = color & 0x0f;
-    if (!runtime->fill_pattern) {
+    if (!runtime->fill_pattern_active) {
         screen_set_raw(runtime, screen_x, screen_y,
-                       runtime->draw_palette[selected]);
+                       runtime->draw_palette[color & 0x0f]);
         return;
     }
+    uint8_t clear, set;
+    pattern_colors(runtime, color, &clear, &set);
     int bit = 15 - ((screen_x & 3) + 4 * (screen_y & 3));
     if ((runtime->fill_pattern >> bit) & 1) {
         if (runtime->fill_pattern_transparent)
             return;
-        selected = (color >> 4) & 0x0f;
+        screen_set_raw(runtime, screen_x, screen_y, set);
+    } else {
+        screen_set_raw(runtime, screen_x, screen_y, clear);
     }
-    screen_set_raw(runtime, screen_x, screen_y,
-                   runtime->draw_palette[selected]);
+}
+
+/* One sprite pixel (screen coordinates, inside the clip rectangle) of a
+ * colour that is not transparent.  With the sprite fill-pattern bit set,
+ * the draw-palette colour picks a secondary-palette pair and the pattern
+ * at that screen position picks one of its two colours. */
+static void put_sprite_pixel(p8p_runtime_t *runtime, int screen_x,
+                             int screen_y, uint8_t color) {
+    uint8_t mapped = runtime->draw_palette[color & 15] & 15;
+    if (runtime->fill_pattern_flags & P8P_FILL_SPRITES) {
+        uint8_t pair = runtime->ram[P8P_SECONDARY_PALETTE + mapped];
+        int bit = 15 - ((screen_x & 3) + 4 * (screen_y & 3));
+        if ((runtime->fill_pattern >> bit) & 1) {
+            if (runtime->fill_pattern_transparent)
+                return;
+            mapped = pair >> 4;
+        } else {
+            mapped = pair & 15;
+        }
+    }
+    runtime->framebuffer[screen_y * 128 + screen_x] = mapped;
+    runtime->screen_ram_dirty = 1;
 }
 
 static uint8_t sprite_get(const p8p_runtime_t *runtime, int x, int y) {
@@ -630,7 +713,8 @@ static void draw_sprite(p8p_runtime_t *runtime, int sprite, int x,
     /* Unflipped 8x8-tile sprites that stay inside the sheet are exactly the
      * map tile case; reuse its unpacked two-pixels-per-byte blitter. */
     int width = pixel_width >> 3, height = pixel_height >> 3;
-    if (!flip_x && !flip_y && sprite >= 0 && sprite < 256 &&
+    int patterned = runtime->fill_pattern_flags & P8P_FILL_SPRITES;
+    if (!patterned && !flip_x && !flip_y && sprite >= 0 && sprite < 256 &&
         width >= 1 && height >= 1 && !((pixel_width | pixel_height) & 7) &&
         (sprite & 15) + width <= 16 && (sprite >> 4) + height <= 16 &&
         sprite_base + 8192 <= 0x10000) {
@@ -682,7 +766,12 @@ static void draw_sprite(p8p_runtime_t *runtime, int sprite, int x,
                 color = sprite_get_at_base(runtime, sprite_base, sample_x,
                                            source_y + sy);
             }
-            if (!runtime->transparent[color])
+            if (runtime->transparent[color])
+                continue;
+            if (patterned)
+                put_sprite_pixel(runtime, destination_x + px,
+                                 destination_y + py, color);
+            else
                 destination_row[px] = runtime->draw_palette[color] & 15;
         }
     }
@@ -702,8 +791,8 @@ struct pattern_row {
 static pattern_row fill_pattern_row(const p8p_runtime_t *runtime, int y,
                                     int color) {
     unsigned row = (runtime->fill_pattern >> (12 - 4 * (y & 3))) & 15u;
-    uint8_t clear = runtime->draw_palette[color & 15] & 15;
-    uint8_t set = runtime->draw_palette[(color >> 4) & 15] & 15;
+    uint8_t clear, set;
+    pattern_colors(runtime, color, &clear, &set);
     pattern_row result = {0, 0};
     for (int k = 0; k < 4; ++k) {
         int pattern_bit = (row >> (3 - k)) & 1u;
@@ -789,7 +878,7 @@ static P8P_FASTTEXT void draw_hspan(p8p_runtime_t *runtime, int x0, int x1,
     if (x0 > x1)
         return;
 
-    if (!runtime->fill_pattern) {
+    if (!runtime->fill_pattern_active) {
         uint8_t mapped = runtime->draw_palette[color & 15] & 15;
         memset(runtime->framebuffer + y * 128 + x0, mapped,
                (size_t)(x1 - x0 + 1));
@@ -888,7 +977,7 @@ static int api_rectfill(lua_State *lua) {
     if (y1 > visible_y1) y1 = visible_y1;
     if (y0 > y1)
         return 0;
-    if (runtime->fill_pattern) {
+    if (runtime->fill_pattern_active) {
         /* Same clipping as draw_hspan(), done once for every row. */
         int screen_x0 = x0 - runtime->camera_x;
         int screen_x1 = x1 - runtime->camera_x;
@@ -1030,7 +1119,7 @@ static int api_circfill(lua_State *lua) {
         clip_x0 > clip_x1 || clip_y0 > clip_y1)
         return 0;
     uint8_t mapped = runtime->draw_palette[color & 15] & 15;
-    int patterned = runtime->fill_pattern != 0;
+    int patterned = runtime->fill_pattern_active;
     int extent = radius;
     int radius_squared = radius * radius;
     /* Past this offset both rows are outside the clip rectangle. */
@@ -1166,8 +1255,7 @@ static int api_sspr(lua_State *lua) {
                 runtime, sprite_base, source_x + sample_x,
                 source_y + sample_y);
             if (!runtime->transparent[color])
-                screen_set_unchecked(runtime, screen_x + dx, screen_y + dy,
-                                     runtime->draw_palette[color]);
+                put_sprite_pixel(runtime, screen_x + dx, screen_y + dy, color);
             sx_error += source_w;
             while (sx_error >= destination_w) {
                 sx_error -= destination_w;
@@ -1296,8 +1384,7 @@ static int api_tline(lua_State *lua) {
                 int screen_y = y0 - runtime->camera_y;
                 if ((unsigned)screen_x < 128u && (unsigned)screen_y < 128u &&
                     in_clip(runtime, screen_x, screen_y))
-                    screen_set_unchecked(runtime, screen_x, screen_y,
-                                         runtime->draw_palette[color]);
+                    put_sprite_pixel(runtime, screen_x, screen_y, color);
             }
         }
         if (x0 == x1 && y0 == y1)
@@ -1457,8 +1544,10 @@ static int api_map(lua_State *lua) {
     if (end_x > cell_w) end_x = cell_w;
     if (end_y > cell_h) end_y = cell_h;
     int sprite_base = (int)runtime->ram[0x5f54] << 8;
+    /* Patterned sprites take draw_sprite()'s general path. */
     int fast_sprite_base = sprite_base >= 0 &&
-                           sprite_base + 8192 <= 0x10000;
+                           sprite_base + 8192 <= 0x10000 &&
+                           !(runtime->fill_pattern_flags & P8P_FILL_SPRITES);
     for (int y = first_y; y < end_y; ++y) {
         for (int x = first_x; x < end_x; ++x) {
             int sprite = map_get(runtime, cell_x + x, cell_y + y);
@@ -1547,19 +1636,23 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
                 runtime->screen_palette[i] = (uint8_t)i;
                 palette_entry_to_ram(runtime, i);
             }
+            reset_secondary_palette(runtime);
             runtime->palettes_default = 1;
         }
         reset_transparency(runtime);
     } else if (lua_istable(lua, 1)) {
-        int screen = arg_int(lua, 2, 0) == 1;
+        int target = arg_int(lua, 2, 0);
+        int screen = target == 1;
         lua_pushnil(lua);
         while (lua_next(lua, 1) != 0) {
             if (lua_isnumber(lua, -2) && lua_isnumber(lua, -1)) {
                 int from = (int)lua_tonumber(lua, -2) & 15;
                 int to = (int)lua_tonumber(lua, -1) &
-                         (screen ? 0x8f : 15);
-                uint8_t *entry = screen ? &runtime->screen_palette[from] :
-                                          &runtime->draw_palette[from];
+                         (target == 2 ? 0xff : screen ? 0x8f : 15);
+                uint8_t *entry =
+                    target == 2 ? &runtime->ram[P8P_SECONDARY_PALETTE + from] :
+                    screen ? &runtime->screen_palette[from] :
+                             &runtime->draw_palette[from];
                 if (*entry != (uint8_t)to) {
                     *entry = (uint8_t)to;
                     runtime->palettes_default = 0;
@@ -1569,9 +1662,11 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
             lua_pop(lua, 1);
         }
     } else if (arg_count(lua) == 1) {
-        /* pal(p) resets one palette, and pal(0) also resets transparency.
-         * There is no secondary palette yet, so pal(2) changes nothing. */
-        if (palette == 0 || palette == 1) {
+        /* pal(p) resets one palette, and pal(0) also resets transparency. */
+        if (palette == 2) {
+            reset_secondary_palette(runtime);
+            update_palette_default_flags(runtime);
+        } else if (palette == 0 || palette == 1) {
             uint8_t *entries = palette ? runtime->screen_palette
                                        : runtime->draw_palette;
             for (int i = 0; i < 16; ++i) {
@@ -1585,7 +1680,18 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
         }
     } else {
         int from = arg_int(lua, 1, 0) & 15;
-        int screen = arg_int(lua, 3, 0) == 1;
+        int target = arg_int(lua, 3, 0);
+        int screen = target == 1;
+        if (target == 2) {
+            /* A secondary entry is a whole byte: two colours. */
+            uint8_t *entry = &runtime->ram[P8P_SECONDARY_PALETTE + from];
+            int previous = *entry;
+            *entry = (uint8_t)arg_int(lua, 2, 0);
+            if (*entry != previous)
+                runtime->palettes_default = 0;
+            push_int(lua, previous);
+            return 1;
+        }
         int to = arg_int(lua, 2, 0) & (screen ? 0x8f : 15);
         int previous = screen ? runtime->screen_palette[from]
                               : runtime->draw_palette[from];
@@ -2606,14 +2712,16 @@ static int api_flip(lua_State *lua) {
 static int api_fillp(lua_State *lua) {
     profile_api(P8P_API_DRAW_STATE);
     p8p_runtime_t *runtime = active_runtime;
+    /* PICO-8 0.2.7 returns the transparency (0x0.8) and sprite (0x0.4)
+     * bits but not the secondary-palette bit (0x0.2). */
     int32_t previous = ((int32_t)runtime->fill_pattern << 16) |
-                       ((int32_t)runtime->fill_pattern_transparent << 8);
+        ((int32_t)(runtime->fill_pattern_flags & P8P_FILL_TRANSPARENT) << 15) |
+        ((int32_t)(runtime->fill_pattern_flags & P8P_FILL_SPRITES) << 13);
     int32_t bits = arg_number(lua, 1, fix32(0)).bits();
-    runtime->fill_pattern = (uint16_t)((uint32_t)bits >> 16);
-    runtime->fill_pattern_transparent = (uint8_t)((bits >> 15) & 1);
-    runtime->ram[0x5f31] = (uint8_t)runtime->fill_pattern;
-    runtime->ram[0x5f32] = (uint8_t)(runtime->fill_pattern >> 8);
-    runtime->ram[0x5f33] = runtime->fill_pattern_transparent;
+    set_fill_pattern(runtime, (uint16_t)((uint32_t)bits >> 16),
+                     (uint8_t)(((bits >> 15) & P8P_FILL_TRANSPARENT) |
+                               ((bits >> 13) & P8P_FILL_SPRITES) |
+                               ((bits >> 11) & P8P_FILL_SECONDARY)));
     lua_pushnumber(lua, fix32::frombits(previous));
     return 1;
 }
@@ -3455,6 +3563,7 @@ extern "C" p8p_runtime_t *p8p_runtime_create(void) {
         runtime->screen_palette[i] = (uint8_t)i;
     }
     runtime->transparent[0] = 1;
+    reset_secondary_palette(runtime);
     runtime->palettes_default = 1;
     runtime->transparency_default = 1;
     runtime->audio = p8p_audio_create(runtime->ram);
@@ -3563,6 +3672,7 @@ extern "C" int p8p_runtime_load_context(p8p_runtime_t *runtime,
     runtime->ram[0x5f5c] = 15;
     runtime->ram[0x5f5d] = 4;
     runtime->ram[0x5f5e] = 0xff;
+    reset_secondary_palette(runtime);
     for (int i = 0; i < 16; ++i) {
         runtime->draw_palette[i] = (uint8_t)i;
         runtime->screen_palette[i] = (uint8_t)i;
@@ -3576,8 +3686,7 @@ extern "C" int p8p_runtime_load_context(p8p_runtime_t *runtime,
     runtime->clip_x1 = runtime->clip_y1 = 128;
     runtime->draw_color = 6;
     runtime->cursor_x = runtime->cursor_y = 0;
-    runtime->fill_pattern = 0;
-    runtime->fill_pattern_transparent = 0;
+    set_fill_pattern(runtime, 0, 0);
     draw_state_to_ram(runtime);
     ram_to_screen(runtime);
     p8p_audio_reset(runtime->audio, runtime->ram);
