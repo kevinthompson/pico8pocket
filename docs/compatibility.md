@@ -119,7 +119,9 @@ Implemented and covered by host tests:
 - cooperative top-level and `_init` execution with real `flip()` yielding;
 - `run()` cartridge restart plus nil-safe PICO-8 table helpers and relative
   mouse `stat(38)`/`stat(39)` defaults;
-- extended graphics (`sspr`, `tline`, ovals and `fillp`), sprite/map remapping,
+- extended graphics (`sspr`, `tline`, ovals and `fillp`, including the
+  secondary palette at `0x5f60` and the sprite and secondary-palette fill-pattern
+  bits), sprite/map remapping,
   big-map memory, draw-state aliases and 8/16/32-bit memory APIs;
 - persistent `cartdata`, `dget` and `dset` records in Pocket save storage;
 - four-channel `sfx`/`music` playback (synthesized at 24 kHz, output at 48 kHz) with built-in waveforms, loops,

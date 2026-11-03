@@ -383,6 +383,220 @@ static void update_callbacks_follow_init(void) {
     }
 }
 
+/* The secondary palette and the sprite and global fill-pattern bits, as
+ * measured in PICO-8 0.2.7.  The cart checks 43 cases (pixels and memory)
+ * and marks each in row 127: 11 passed, 8 failed.  The same cart passes
+ * every case in PICO-8 itself. */
+static void secondary_palette_matches_pico8(void) {
+    static const char source[] =
+    "pico-8 cartridge // http://www.pico-8.com\n"
+    "version 42\n"
+    "__lua__\n"
+    "h=\"0123456789abcdef\" r={} n=0\n"
+    "function px(x,y) local c=pget(x,y) return sub(h,c+1,c+1) end\n"
+    "function rows(x,y,w,t)\n"
+    " n+=1 local ok=true\n"
+    " for j=1,#t do local s=\"\" for k=0,w-1 do s..=px(x+k,y+j-1) end\n"
+    "  if s~=t[j] then ok=false printh(\"case \"..n..\" row \"..j..\" got \"..s..\" want \"..t[j]) end end\n"
+    " r[n]=ok\n"
+    "end\n"
+    "function is(v) n+=1 r[n]=v if not v then printh(\"case \"..n..\" false\") end end\n"
+    "function sec() local s=\"\" for i=0,15 do local b=peek(0x5f60+i) s..=sub(h,b\\16+1,b\\16+1)..sub(h,b%16+1,b%16+1) end return s end\n"
+    "d=\"000112132415d66748499a3bdc5d8eef\"\n"
+    "P=0b0011001111001100\n"
+    "function _draw()\n"
+    "is(sec()==d)\n"
+    "cls() fillp(P+0b.01) spr(1,0,0) fillp() rows(0,0,8,{\"011145d6\",\"8993cd8e\"})\n"
+    "cls() pal(12,0x87,2) fillp(P+0b.01) spr(2,0,0) fillp() pal(2) rows(0,0,8,{\"77887788\",\"77887788\",\"88778877\",\"88778877\"})\n"
+    "cls(5) fillp(P+0b.11) spr(1,0,0) fillp() rows(0,0,8,{\"51554555\",\"8955cd55\"})\n"
+    "cls() pal(1,8) fillp(P+0b.01) spr(1,0,0) fillp() pal() rows(0,0,8,{\"081145d6\",\"8993cd8e\"})\n"
+    "cls(5) palt(0,false) fillp(P+0b.01) spr(1,0,0) fillp() palt() rows(0,0,8,{\"011145d6\",\"8993cd8e\"})\n"
+    "cls() fillp(P+0b.001) rectfill(0,0,7,3,12) fillp() rows(0,0,8,{\"ccddccdd\",\"ccddccdd\",\"ddccddcc\",\"ddccddcc\"})\n"
+    "cls() fillp(P+0b.001) rectfill(0,0,7,3,0x87) fillp() rows(0,0,8,{\"77667766\",\"77667766\",\"66776677\",\"66776677\"})\n"
+    "cls() fillp(P) rectfill(0,0,7,3,0x87) fillp() rows(0,0,8,{\"77887788\",\"77887788\",\"88778877\",\"88778877\"})\n"
+    "cls() mset(0,0,1) fillp(P+0b.01) map(0,0,0,0,1,1) fillp() mset(0,0,0) rows(0,0,8,{\"011145d6\",\"8993cd8e\"})\n"
+    "cls() fillp(P+0b.01) sspr(8,0,8,8,0,0,16,16) fillp() rows(0,0,16,{\"0000221144116666\",\"0000221144116666\",\"449999bbdddd88ff\",\"449999bbdddd88ff\"})\n"
+    "cls() pal(12,0x87,2) spr(2,0,0) pal(2) rows(0,0,8,{\"cccccccc\"})\n"
+    "cls() fillp(P+0b.01) for i=0,3 do pset(i,0,12) end fillp() rows(0,0,4,{\"cc00\"})\n"
+    "cls() camera(-2,-1) fillp(P+0b.01) spr(2,0,0) fillp() camera() rows(2,1,8,{\"ddccddcc\",\"ccddccdd\",\"ccddccdd\",\"ddccddcc\"})\n"
+    "cls() fillp(P+0b.001) line(0,0,7,0,12) pset(0,1,12) pset(1,1,12) fillp() rows(0,0,8,{\"ccddccdd\",\"cc000000\"})\n"
+    "cls() fillp(P+0b.001) spr(2,0,0) fillp() rows(0,0,8,{\"cccccccc\"})\n"
+    "cls() pal(12,0x87,2) fillp(0b.01) spr(2,0,0) fillp() pal(2) rows(0,0,8,{\"77777777\"})\n"
+    "cls() pal(12,0x87,2) fillp(0b.001) rectfill(0,0,7,0,12) fillp() pal(2) rows(0,0,8,{\"77777777\"})\n"
+    "cls() pal(12,3) fillp(P+0b.001) rectfill(0,0,7,1,12) fillp() pal() rows(0,0,8,{\"33113311\",\"33113311\"})\n"
+    "cls() fillp(P+0b.101) rectfill(0,0,7,1,12) fillp() rows(0,0,8,{\"cc00cc00\"})\n"
+    "cls() mset(0,0,2) fillp(P+0b.01) tline(0,0,7,0,0,0,1/8,0) fillp() mset(0,0,0) rows(0,0,8,{\"ccddccdd\"})\n"
+    "cls() poke(0x5f33,2) poke(0x5f31,0xcc) poke(0x5f32,0x33) pal(12,0x87,2) spr(2,0,0) fillp() pal(2) rows(0,0,8,{\"77887788\",\"77887788\"})\n"
+    "cls() fillp(P+0b.001) rect(0,0,7,3,12) fillp() rows(0,0,8,{\"ccddccdd\",\"c000000d\",\"d000000c\",\"ddccddcc\"})\n"
+    "cls() pal(2,4) fillp(P+0b.01) spr(1,0,0) fillp() pal() rows(0,0,8,{\"012145d6\"})\n"
+    "cls() pal(12,3) pal(1,8) fillp(P+0b.001) rectfill(0,0,7,0,12) fillp() pal() rows(0,0,8,{\"33113311\"})\n"
+    "cls() fillp(P+0b.01) spr(2,0,0,1,1,true) fillp() rows(0,0,8,{\"ccddccdd\"})\n"
+    "cls() fillp(P+0b.01) spr(1,1,1) fillp() rows(1,1,8,{\"001341d7\",\"49a3ddee\"})\n"
+    "pal(12,0x87,2) is(peek(0x5f0c)==12 and peek(0x5f6c)==0x87)\n"
+    "pal(3,5,2) is(peek(0x5f63)==5)\n"
+    "pal(2) is(sec()==d)\n"
+    "pal(12,0x87,2) pal() is(sec()==d)\n"
+    "pal(12,0x87,2) pal(0) is(peek(0x5f6c)==0x87)\n"
+    "pal(1) is(peek(0x5f6c)==0x87)\n"
+    "pal(-1) is(sec()==d)\n"
+    "pal({[1]=0x21,[2]=0x32},2) is(peek(0x5f61)==0x21 and peek(0x5f62)==0x32) pal(2)\n"
+    "fillp(P+0b.01) is(peek(0x5f33)==2) fillp(P+0b.11) is(peek(0x5f33)==3)\n"
+    "fillp(P+0b.001) is(peek(0x5f33)==4) fillp(P+0b.111) is(peek(0x5f33)==7)\n"
+    "is(fillp()==0x33cc.c)\n"
+    "fillp(P+0b.001) is(fillp()==0x33cc)\n"
+    "fillp(P+0b.01) is(fillp()==0x33cc.4)\n"
+    "fillp(P+0b.1) is(fillp()==0x33cc.8) fillp()\n"
+    "cls() local bad=0 for i=1,n do pset(i-1,127,r[i] and 11 or 8) if not r[i] then bad+=1 end end\n"
+    "end\n"
+    "__gfx__\n"
+    "0000000001234567cccccccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n"
+    "0000000089abcdefcccccccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n"
+    "0000000001234567cccccccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n"
+    "0000000089abcdefcccccccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n"
+    "0000000001234567cccccccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n"
+    "0000000089abcdefcccccccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n"
+    "0000000001234567cccccccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n"
+    "0000000089abcdefcccccccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n";
+    p8p_cart_t cart = {};
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                    sizeof(source) - 1, &cart) == 0);
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    const uint8_t *fb = p8p_runtime_framebuffer(runtime);
+    for (int index = 0; index < 43; ++index) {
+        if (fb[127 * 128 + index] != 11)
+            fprintf(stderr, "FAIL secondary palette case %d\n", index + 1);
+        CHECK(fb[127 * 128 + index] == 11);
+    }
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+}
+
+/* Draws one shape on a cleared screen; returns the framebuffer. */
+static const uint8_t *draw_shape(p8p_runtime_t *runtime, const char *call) {
+    static char source[256];
+    snprintf(source, sizeof(source),
+             "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+             "function _draw() cls() %s end\n", call);
+    p8p_cart_t cart = {};
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source, strlen(source),
+                                    &cart) == 0);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    p8p_cart_destroy(&cart);
+    return p8p_runtime_framebuffer(runtime);
+}
+
+/* circfill() rows, measured in PICO-8 0.2.7: the half-width of each row
+ * below the centre, for radii 0-16.  Every row is a single span, and the
+ * filled circle reaches exactly the outline circ() draws. */
+static void circles_match_pico8(void) {
+    static const char *const measured[] = {
+        "0",
+        "1,0",
+        "2,2,1",
+        "3,3,2,1",
+        "4,4,3,3,1",
+        "5,5,5,4,3,2",
+        "6,6,6,5,4,3,2",
+        "7,7,7,6,6,5,4,2",
+        "8,8,8,7,7,6,5,4,2",
+        "9,9,9,8,8,7,7,6,4,2",
+        "10,10,10,10,9,9,8,7,6,5,3",
+        "11,11,11,11,10,10,9,8,8,6,5,3",
+        "12,12,12,12,11,11,10,10,9,8,7,5,3",
+        "13,13,13,13,12,12,12,11,10,9,8,7,6,3",
+        "14,14,14,14,13,13,13,12,11,11,10,9,7,6,3",
+        "15,15,15,15,14,14,14,13,13,12,11,10,9,8,6,3",
+        "16,16,16,16,15,15,15,14,14,13,12,12,11,9,8,6,3",
+    };
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    char call[64];
+    for (int radius = 0; radius < 17; ++radius) {
+        snprintf(call, sizeof(call), "circfill(64,64,%d,7)", radius);
+        const uint8_t *fb = draw_shape(runtime, call);
+        for (int dy = -radius - 1; dy <= radius + 1; ++dy) {
+            int width = -1;
+            if (abs(dy) <= radius) {
+                const char *field = measured[radius];
+                for (int skip = abs(dy); skip > 0; --skip)
+                    field = strchr(field, ',') + 1;
+                width = atoi(field);
+            }
+            int row_ok = 1;
+            for (int x = 64 - radius - 1; x <= 64 + radius + 1; ++x)
+                if ((fb[(64 + dy) * 128 + x] == 7) != (abs(x - 64) <= width))
+                    row_ok = 0;
+            if (!row_ok)
+                fprintf(stderr, "FAIL circfill radius %d row %d\n", radius, dy);
+            CHECK(row_ok);
+        }
+    }
+    /* Larger radii: each filled row spans exactly from circ()'s leftmost to
+     * its rightmost pixel on that row. */
+    for (int radius = 17; radius <= 60; ++radius) {
+        int left[128], right[128];
+        snprintf(call, sizeof(call), "circ(64,64,%d,7)", radius);
+        const uint8_t *fb = draw_shape(runtime, call);
+        for (int y = 0; y < 128; ++y) {
+            left[y] = 128;
+            right[y] = -1;
+            for (int x = 0; x < 128; ++x)
+                if (fb[y * 128 + x] == 7) {
+                    if (x < left[y]) left[y] = x;
+                    right[y] = x;
+                }
+        }
+        snprintf(call, sizeof(call), "circfill(64,64,%d,7)", radius);
+        fb = draw_shape(runtime, call);
+        int matches = 1;
+        for (int y = 0; y < 128; ++y)
+            for (int x = 0; x < 128; ++x)
+                if ((fb[y * 128 + x] == 7) != (x >= left[y] && x <= right[y]))
+                    matches = 0;
+        if (!matches)
+            fprintf(stderr, "FAIL circfill radius %d differs from circ\n", radius);
+        CHECK(matches);
+    }
+    p8p_runtime_destroy(runtime);
+}
+
+/* A save state keeps the fill pattern: loading it after fillp() cleared the
+ * pattern draws with the saved one again. */
+static void state_restores_fill_pattern(void) {
+    static const char source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "function _init() fillp(0x5a5a) end\n"
+        "function _update() if btn(0) then fillp() end end\n"
+        "function _draw() cls() rectfill(0,0,7,0,7) end\n";
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    p8p_cart_t cart = {};
+    void *state = NULL;
+    size_t state_size = 0;
+    uint8_t patterned[8];
+    CHECK(runtime != NULL);
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                    strlen(source), &cart) == 0);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    memcpy(patterned, p8p_runtime_framebuffer(runtime), sizeof(patterned));
+    CHECK(memchr(patterned, 0, sizeof(patterned)) != NULL);
+    CHECK(p8p_runtime_save_state(runtime, &state, &state_size) == 0);
+    CHECK(p8p_runtime_step(runtime, 1) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    CHECK(memchr(p8p_runtime_framebuffer(runtime), 0, 8) == NULL);
+    CHECK(p8p_runtime_load_state(runtime, state, state_size) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    CHECK(memcmp(p8p_runtime_framebuffer(runtime), patterned,
+                 sizeof(patterned)) == 0);
+    free(state);
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+}
+
 static void draw_palette_transitions(void) {
     struct PaletteCase {
         const char *name;
@@ -837,6 +1051,9 @@ int main(void) {
     palette_fast_path_semantics();
     draw_palette_transitions();
     update_callbacks_follow_init();
+    secondary_palette_matches_pico8();
+    circles_match_pico8();
+    state_restores_fill_pattern();
     audio_chunk_boundaries();
     menu_glyphs_follow_pico8_font();
     static const uint8_t source[] =
@@ -1163,7 +1380,9 @@ int main(void) {
         CHECK(framebuffer[20 * 128 + 21] == 7);
         CHECK(framebuffer[28 * 128 + 30] == 10);
         CHECK(framebuffer[29 * 128 + 29] == 10);
-        CHECK(framebuffer[29 * 128 + 28] == 0);
+        /* PICO-8 fills a radius-2 circle's second row out to two pixels. */
+        CHECK(framebuffer[29 * 128 + 28] == 10);
+        CHECK(framebuffer[28 * 128 + 28] == 0);
         CHECK(framebuffer[30 * 128 + 32] == 10);
         CHECK(framebuffer[50 * 128 + 50] == 1);
         CHECK(framebuffer[50 * 128 + 51] == 2);
