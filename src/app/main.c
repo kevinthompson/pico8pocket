@@ -382,6 +382,98 @@ static int service_savestate(p8p_runtime_t *runtime, int running,
     return result == 0;
 }
 
+/*
+ * The cart slot is user-reloadable without a core restart: picking another
+ * cart in Core Settings swaps the file behind the slot while the app runs.
+ * Nothing announces the change, so the app compares the slot's size and the
+ * hash of its last bytes once a second.  Text and PNG carts share their
+ * opening bytes, so the tail is the part that tells two carts apart.
+ */
+#define CART_SLOT_CHECK_US 1000000u
+#define CART_SIGNATURE_TAIL 512
+
+typedef struct cart_signature {
+    long size;
+    uint32_t tail_hash;
+} cart_signature_t;
+
+#define CART_SLOT_ID 4u
+
+/*
+ * After the host swaps the file, openfpgaOS's stdio reads of the slot are
+ * unreliable.  On a Pocket, with a 77,497-byte cart replacing a 3,988-byte
+ * one, 64-byte fread()s at offsets 0 and 70000 succeeded while 3900, 3988
+ * and 4096 failed, and a whole-file read returned nothing.  ftell() still
+ * reports the new size, and the OS's direct DMA read returns the new file
+ * from start to end, so slot contents are read that way on the Pocket.
+ */
+static int read_slot_bytes(const char *path, long offset, void *dest,
+                           size_t length) {
+#ifdef OF_PC
+    FILE *file = fopen(path, "rb");
+    size_t count;
+    if (!file)
+        return -1;
+    if (fseek(file, offset, SEEK_SET) != 0) {
+        fclose(file);
+        return -1;
+    }
+    count = fread(dest, 1, length, file);
+    fclose(file);
+    return count == length ? 0 : -1;
+#else
+    (void)path;
+    return p8p_platform_read_slot(CART_SLOT_ID, (uint32_t)offset, dest,
+                                  (uint32_t)length);
+#endif
+}
+
+static long slot_size(const char *path) {
+    FILE *file = fopen(path, "rb");
+    long size = -1;
+    if (!file)
+        return -1;
+    if (fseek(file, 0, SEEK_END) == 0)
+        size = ftell(file);
+    fclose(file);
+    return size;
+}
+
+static int read_cart_signature(const char *path, cart_signature_t *out) {
+    unsigned char tail[CART_SIGNATURE_TAIL];
+    long start;
+    size_t count;
+    if ((out->size = slot_size(path)) < 0)
+        return -1;
+    start = out->size > CART_SIGNATURE_TAIL ? out->size - CART_SIGNATURE_TAIL : 0;
+    count = (size_t)(out->size - start);
+    if (count && read_slot_bytes(path, start, tail, count) != 0)
+        return -1;
+    out->tail_hash = 2166136261u;
+    for (size_t index = 0; index < count; ++index)
+        out->tail_hash = (out->tail_hash ^ tail[index]) * 16777619u;
+    return 0;
+}
+
+static int load_slot_cart(const char *path, p8p_cart_info_t *info,
+                          p8p_cart_t *cart) {
+    long size = slot_size(path);
+    uint8_t *data;
+    int result = -1;
+    if (size <= 0 || !(data = (uint8_t *)malloc((size_t)size)))
+        return -1;
+    if (read_slot_bytes(path, 0, data, (size_t)size) == 0 &&
+        p8p_cart_probe_memory(data, (size_t)size, (uint64_t)size, info) == 0 &&
+        info->valid) {
+        if (info->kind == P8P_CART_TEXT)
+            result = p8p_cart_load_text_memory(data, (size_t)size, cart);
+        else if (info->kind == P8P_CART_PNG)
+            result = p8p_cart_load_png_memory(data, (size_t)size, cart);
+    }
+    free(data);
+    return result;
+}
+
 int main(int argc, char **argv) {
     /* Slot 0 is the APF instance descriptor used to launch openfpgaOS. */
     const char *cart_path = "slot:4";
@@ -418,6 +510,9 @@ int main(int argc, char **argv) {
     uint32_t average_present_us = 0;
     uint32_t average_instructions = 0;
     runtime_profile_t runtime_profile = {0};
+    cart_signature_t cart_signature = {-1, 0};
+    uint32_t cart_checked_us;
+    const char *pack_path = "slot:20";
 
 #ifdef OF_PC
     if (argc > 1)
@@ -435,6 +530,8 @@ int main(int argc, char **argv) {
     settings.scale = (uint8_t)p8p_platform_set_scale(settings.scale);
     p8p_platform_audio_set_volume(settings.muted ? 0 : settings.volume);
 
+    if (read_cart_signature(cart_path, &cart_signature) != 0)
+        cart_signature.size = -1;
     if (p8p_cart_probe_file(cart_path, &cart) != 0)
         memset(&cart, 0, sizeof(cart));
 
@@ -446,7 +543,6 @@ int main(int argc, char **argv) {
         p8p_cart_load_file(cart_path, &loaded_cart) == 0) {
         runtime = p8p_runtime_create();
         if (runtime) {
-            const char *pack_path = "slot:20";
 #ifdef OF_PC
             pack_path = getenv("P8P_BBS_PACK");
             if (!pack_path)
@@ -490,6 +586,7 @@ int main(int argc, char **argv) {
     framebuffer = p8p_platform_framebuffer();
     next_frame_us = p8p_platform_time_us();
     previous_frame_us = next_frame_us;
+    cart_checked_us = next_frame_us;
     for (;;) {
         const uint8_t *present_framebuffer = framebuffer;
         const uint8_t *present_palette = NULL;
@@ -542,6 +639,68 @@ int main(int argc, char **argv) {
             menu_open = 0;
             suppress_buttons |= previous_physical;
             p8p_platform_audio_set_paused(0);
+        }
+
+        cart_signature_t current_signature;
+        if (runtime && frame_start_us - cart_checked_us >= CART_SLOT_CHECK_US) {
+            cart_checked_us = frame_start_us;
+            if (read_cart_signature(cart_path, &current_signature) == 0 &&
+                (current_signature.size != cart_signature.size ||
+                 current_signature.tail_hash != cart_signature.tail_hash)) {
+                p8p_cart_info_t next_info = {0};
+                p8p_cart_t next_cart = {0};
+                cart_signature = current_signature;
+                p8p_platform_audio_set_paused(1);
+                if (running)
+                    p8p_runtime_flush_cartdata(runtime);
+                printf("pico8pocket: cart slot changed, %ld bytes\n",
+                       cart_signature.size);
+                if (load_slot_cart(cart_path, &next_info, &next_cart) != 0) {
+                    p8p_cart_destroy(&next_cart);
+                    running = 0;
+                    runtime_failed = 1;
+                    snprintf(runtime_error, sizeof(runtime_error),
+                             "The selected cartridge could not be read.");
+                } else {
+                    /* The session points at the active cart, so it goes
+                     * first, along with any parents of a multicart. */
+                    p8p_multicart_destroy(multicart);
+                    p8p_cart_destroy(&loaded_cart);
+                    loaded_cart = next_cart;
+                    cart = next_info;
+                    multicart = p8p_multicart_create(runtime, &loaded_cart,
+                                                     pack_path);
+                    p8p_cart_content_hash(&loaded_cart, &cart_hash);
+                    p8p_menu_destroy(menu);
+                    menu = p8p_menu_create(&settings, &cart_hash,
+                                           p8p_cart_kind_name(cart.kind));
+                    if (p8p_runtime_load(runtime, &loaded_cart) == 0) {
+                        running = 1;
+                        runtime_failed = 0;
+                        runtime_error[0] = '\0';
+                        p8p_platform_savestate_set_id(cart_hash.bytes,
+                                                      sizeof(cart_hash.bytes));
+                        p8p_platform_savestate_enable(P8P_STATE_BLOB_MAX);
+                        p8p_runtime_set_service_hook(runtime, input_latch_service,
+                                                     &input_latch);
+                    } else {
+                        running = 0;
+                        runtime_failed = 1;
+                        snprintf(runtime_error, sizeof(runtime_error), "%s",
+                                 p8p_runtime_error(runtime));
+                    }
+                }
+                render_divisor = 1;
+                render_phase = probe_frames = overload_frames = recovery_frames = 0;
+                average_period_us = average_draw_runtime_us = average_update_runtime_us = 0;
+                average_audio_us = average_present_us = average_instructions = 0;
+                memset(&runtime_profile, 0, sizeof(runtime_profile));
+                memset(&input_latch.pending, 0, sizeof(input_latch.pending));
+                menu_open = 0;
+                suppress_buttons |= previous_physical;
+                next_frame_us = previous_frame_us = p8p_platform_time_us();
+                p8p_platform_audio_set_paused(0);
+            }
         }
 
         if (service_savestate(runtime, running, &cart_hash) && menu_open) {

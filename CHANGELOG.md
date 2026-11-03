@@ -39,6 +39,11 @@
   plays an existing sfx. `cls()` resets the clip and ignores the draw palette,
   and `cursor()` with no arguments returns to 0,0. Frame delays and the `\a`
   note language remain unimplemented.
+- Choosing another cart in Core Settings → Cartridge now switches to it while
+  the core keeps running. The cart slot used to restart the core, and
+  openfpgaOS stalled on "Loading app" after that restart. The app now checks
+  the slot once a second and loads a new cart in place, with its own save
+  states and cartdata.
 
 ## 0.0.35 — 2026-10-21
 

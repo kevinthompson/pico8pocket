@@ -118,9 +118,12 @@ started and how you can help improve it.
   keyed by the cartridge-supplied data ID. Dirty data is flushed periodically,
   on state saves and whenever the system menu opens.
 - `Select Cart` directs the user to AnalogueOS Core Settings → Cartridge. The
-  cartridge data slot is user-reloadable and restart-on-load. Its filename is
-  deliberately not persisted, so every fresh core launch opens Pocket's native
-  cartridge picker instead of reopening the previously used cart.
+  cartridge data slot is user-reloadable without a core restart: the app
+  notices the new file within a second and loads it in place. Restarting the
+  core on reload stalled openfpgaOS while it reloaded the app. The slot's
+  filename is deliberately not persisted, so every fresh core launch opens
+  Pocket's native cartridge picker instead of reopening the previously used
+  cart.
 - Public releases contain no cartridges or third-party sound banks. The
   `Assets/pico8/common/cards/` directory contains only installation
   instructions; users provide cartridges they are entitled to use.
