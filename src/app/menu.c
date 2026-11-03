@@ -581,6 +581,11 @@ static enum p8p_menu_action update_pause(p8p_menu_t *menu,
     if (result < 0)
         return P8P_MENU_CART_ERROR;
     refresh_pause_rows(menu, runtime);
+    /* The callback can add or remove items; keep the cursor on its row. */
+    menu->cursor = 0;
+    for (int row = 0; row < menu->pause_row_count; ++row)
+        if (menu->pause_rows[row] == slot)
+            menu->cursor = row;
     return result == 0 ? P8P_MENU_CLOSE : P8P_MENU_NONE;
 }
 

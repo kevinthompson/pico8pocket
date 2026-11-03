@@ -2498,7 +2498,8 @@ static int api_print(lua_State *lua) {
             int sfx_index = 0, digits = 0;
             for (; n + 1 < length && text[n + 1] >= '0' && text[n + 1] <= '9';
                  ++n, ++digits)
-                sfx_index = sfx_index * 10 + text[n + 1] - '0';
+                if (sfx_index < 100)
+                    sfx_index = sfx_index * 10 + text[n + 1] - '0';
             if (digits && (n + 1 >= length || text[n + 1] <= ' '))
                 p8p_audio_sfx(runtime->audio, sfx_index, -1, 0, 0);
             while (n + 1 < length && text[n + 1] > ' ')

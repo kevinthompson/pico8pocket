@@ -657,6 +657,9 @@ int main(int argc, char **argv) {
                        cart_signature.size);
                 if (load_slot_cart(cart_path, &next_info, &next_cart) != 0) {
                     p8p_cart_destroy(&next_cart);
+                    /* Retry on the next check: the slot may still be
+                     * mid-write. */
+                    cart_signature.size = -1;
                     running = 0;
                     runtime_failed = 1;
                     snprintf(runtime_error, sizeof(runtime_error),
