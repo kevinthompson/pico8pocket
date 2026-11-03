@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `map()` with its cell width or height left out draws the whole map, as in
+  PICO-8 0.2.7, instead of only the first 16x16 cells. Carts that move the
+  camera and call `map()` were missing everything past that corner, such as
+  title logos and level scenery. The default follows a map moved or resized
+  through `0x5f56` and `0x5f57`.
+
 ## 0.0.35 — 2026-10-21
 
 - Library filename cleanup scans `Assets/pico8/common/` recursively and keeps
