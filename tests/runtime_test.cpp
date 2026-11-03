@@ -867,7 +867,7 @@ static void audio_mix_level(void) {
 
 /* Addresses wrap modulo 0x10000 as in PICO-8, so 0x8000-0xffff (negative in
  * 16.16) are ordinary RAM and multi-byte accesses continue at 0x0000.  The
- * same cart passes all 16 checks in PICO-8 0.2.7. */
+ * same cart passes all 18 checks in PICO-8 0.2.7. */
 static void memory_addresses_wrap_like_pico8(void) {
     static const char source[] =
         "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
