@@ -1165,7 +1165,13 @@ static int api_circfill(lua_State *lua) {
     int x = radius;
     int y = 0;
     int error = 1 - radius;
-    while (x >= y) {
+    /* Past this offset, rows on both sides of the centre are clipped.  Every
+     * row the walk fills is at offset y or x, and x >= y, so once y passes it
+     * nothing left is visible: a huge circle centred on screen stops after
+     * at most a screen's height of steps. */
+    int last_offset = circle.sy - circle.clip_y0 > circle.clip_y1 - circle.sy ?
+        circle.sy - circle.clip_y0 : circle.clip_y1 - circle.sy;
+    while (x >= y && y <= last_offset) {
         fill_circle_rows(&circle, y, x);
         ++y;
         if (error < 0) {
@@ -1743,6 +1749,8 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
             }
             lua_pop(lua, 1);
         }
+        if (target == 2 && !runtime->palettes_default)
+            update_palette_default_flags(runtime);
     } else if (arg_count(lua) == 1) {
         /* pal(p) resets one palette, and pal(0) also resets transparency. */
         if (palette == 2) {
@@ -1769,8 +1777,10 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
             uint8_t *entry = &runtime->ram[P8P_SECONDARY_PALETTE + from];
             int previous = *entry;
             *entry = (uint8_t)arg_int(lua, 2, 0);
+            /* Recompute rather than clear: setting an entry back to its
+             * default keeps the tile blitter's fast path. */
             if (*entry != previous)
-                runtime->palettes_default = 0;
+                update_palette_default_flags(runtime);
             push_int(lua, previous);
             return 1;
         }

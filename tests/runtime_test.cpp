@@ -561,6 +561,24 @@ static void circles_match_pico8(void) {
             fprintf(stderr, "FAIL circfill radius %d differs from circ\n", radius);
         CHECK(matches);
     }
+    /* The walk stops once every remaining row is clipped.  A clipped circle
+     * must match the unclipped one on the rows left visible. */
+    {
+        uint8_t full[128 * 128];
+        memcpy(full, draw_shape(runtime, "circfill(64,30,50,7)"), sizeof(full));
+        const uint8_t *fb = draw_shape(runtime, "clip(0,0,128,40) circfill(64,30,50,7)");
+        int matches = 1;
+        for (int i = 0; i < 128 * 128; ++i)
+            if (fb[i] != (i < 40 * 128 ? full[i] : 0))
+                matches = 0;
+        CHECK(matches);
+        fb = draw_shape(runtime, "circfill(64,64,5000,7)");
+        int covered = 1;
+        for (int i = 0; i < 128 * 128; ++i)
+            if (fb[i] != 7)
+                covered = 0;
+        CHECK(covered);
+    }
     p8p_runtime_destroy(runtime);
 }
 
