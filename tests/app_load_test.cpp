@@ -87,6 +87,7 @@ void p8p_platform_present(const uint8_t *pixels, const uint8_t *palette) {
     if (++presents > 12) longjmp(app_exit, 2);
 }
 void p8p_platform_audio_pump(struct p8p_runtime *) { ++audio_calls; }
+int p8p_platform_audio_queued_frames(void) { return 2048; }
 void p8p_platform_audio_set_paused(int paused) {
     if (paused) ++pause_calls;
 }

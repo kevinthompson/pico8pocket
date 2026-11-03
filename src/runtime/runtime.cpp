@@ -1657,8 +1657,9 @@ static int api_btn(lua_State *lua) {
     return 1;
 }
 
-/* 0x5f5c/0x5f5d hold the btnp() repeat delay and interval in frames; 0 means
- * the default (15, 4) and a delay of 255 disables repeating. */
+/* 0x5f5c/0x5f5d hold the btnp() repeat delay and interval in frames at 30 fps,
+ * doubled at 60 fps as the manual states; 0 means the default (15, 4) and a
+ * delay of 255 disables repeating. */
 static int btnp_fires(const p8p_runtime_t *runtime, uint16_t held) {
     if (held == 1)
         return 1;
@@ -1666,7 +1667,10 @@ static int btnp_fires(const p8p_runtime_t *runtime, uint16_t held) {
     int interval = runtime->ram[0x5f5d] ? runtime->ram[0x5f5d] : 4;
     if (delay == 255)
         return 0;
-    return held > delay && (held - delay) % interval == 0;
+    int frames_per_step = runtime->target_fps == 60 ? 2 : 1;
+    delay *= frames_per_step;
+    interval *= frames_per_step;
+    return held > delay && (held - 1 - delay) % interval == 0;
 }
 
 static int api_btnp(lua_State *lua) {

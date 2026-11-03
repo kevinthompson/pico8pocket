@@ -44,6 +44,8 @@ int p8p_platform_init(void);
 uint8_t *p8p_platform_framebuffer(void);
 void p8p_platform_present(const uint8_t *framebuffer, const uint8_t *palette);
 void p8p_platform_audio_pump(struct p8p_runtime *runtime);
+/* Stereo pairs still waiting to be played. */
+int p8p_platform_audio_queued_frames(void);
 void p8p_platform_audio_set_paused(int paused);
 void p8p_platform_audio_set_volume(unsigned percent);
 unsigned p8p_platform_set_scale(unsigned scale);

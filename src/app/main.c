@@ -210,15 +210,16 @@ typedef struct input_latch {
     uint32_t instruction_hooks;
 } input_latch_t;
 
-static void input_latch_poll(input_latch_t *latch, int force) {
+/* Returns whether it sampled, which is at most once per 4 ms unless forced. */
+static int input_latch_poll(input_latch_t *latch, int force) {
     p8p_physical_input_t sample;
     uint32_t now_us;
 
     if (!latch)
-        return;
+        return 0;
     now_us = p8p_platform_time_us();
     if (!force && now_us - latch->last_poll_us < 4000u)
-        return;
+        return 0;
     p8p_platform_poll_input(&sample);
     sample.pressed |= sample.held & (uint16_t)~latch->previous_held;
     sample.released |= latch->previous_held & (uint16_t)~sample.held;
@@ -227,13 +228,22 @@ static void input_latch_poll(input_latch_t *latch, int force) {
     latch->pending.released |= sample.released;
     latch->previous_held = sample.held;
     latch->last_poll_us = now_us;
+    return 1;
 }
+
+/* The loop refills audio once per pass, and the queue is kept short because
+ * sound effects share it, so one step longer than the queue would silence
+ * the music.  16 ms of audio left is below what a frame that merely runs late
+ * reaches, and leaves time to render the refill before the queue empties. */
+#define AUDIO_REFILL_MID_STEP_FRAMES 768
 
 static void input_latch_service(void *userdata) {
     input_latch_t *latch = (input_latch_t *)userdata;
     if (latch)
         ++latch->instruction_hooks;
-    input_latch_poll(latch, 0);
+    if (input_latch_poll(latch, 0) && latch->runtime &&
+        p8p_platform_audio_queued_frames() < AUDIO_REFILL_MID_STEP_FRAMES)
+        p8p_platform_audio_pump(latch->runtime);
     if (latch && latch->runtime && latch->controls) {
         uint16_t physical = latch->pending.held &
                             (uint16_t)~latch->suppressed;
@@ -250,6 +260,20 @@ static void input_latch_take(input_latch_t *latch,
     *input = latch->pending;
     latch->pending.pressed = 0;
     latch->pending.released = 0;
+}
+
+/* Slow frames spend most of their time outside Lua, so keep sampling through
+ * the wait as well: a tap that fits inside the sleep must still be latched. */
+static void sleep_while_polling(input_latch_t *latch, uint32_t duration_us) {
+    uint32_t deadline_us = p8p_platform_time_us() + duration_us;
+    int32_t remaining_us;
+
+    while ((remaining_us = (int32_t)(deadline_us -
+                                     p8p_platform_time_us())) > 0) {
+        p8p_platform_sleep_us(remaining_us < 4000 ?
+                              (uint32_t)remaining_us : 4000u);
+        input_latch_poll(latch, 1);
+    }
 }
 
 static uint8_t status_color(const p8p_cart_info_t *cart) {
@@ -561,6 +585,11 @@ int main(int argc, char **argv) {
                                  (uint16_t)~suppress_buttons;
         if ((physical | physical_pressed) & P8P_PHYS_SELECT)
             game_physical &= (uint16_t)~P8P_PHYS_X;
+        /* Released and pressed again inside one slow frame: show this step
+         * the release, so the next one sees a new press and not a held one. */
+        game_physical &= (uint16_t)~(physical_input.released &
+                                     physical_input.pressed & physical &
+                                     previous_physical);
         buttons = p8p_controls_map(controls, game_physical);
 
         if (menu_open && (running || runtime_failed) &&
@@ -777,6 +806,7 @@ int main(int argc, char **argv) {
             p8p_platform_audio_pump(runtime);
             average_audio_us = smooth_time(
                 average_audio_us, p8p_platform_time_us() - audio_start_us);
+            input_latch_poll(&input_latch, 0);
         }
         if (present_required) {
             uint32_t present_start_us = p8p_platform_time_us();
@@ -784,6 +814,7 @@ int main(int argc, char **argv) {
             average_present_us = smooth_time(
                 average_present_us,
                 p8p_platform_time_us() - present_start_us);
+            input_latch_poll(&input_latch, 0);
         }
 
         /*
@@ -798,7 +829,7 @@ int main(int argc, char **argv) {
         next_frame_us += frame_period_us;
         int32_t remaining_us = (int32_t)(next_frame_us - now_us);
         if (remaining_us > 0)
-            p8p_platform_sleep_us((uint32_t)remaining_us);
+            sleep_while_polling(&input_latch, (uint32_t)remaining_us);
         else if (remaining_us < -(int32_t)(frame_period_us * 4u))
             /* Keep a bounded amount of lateness so cheap update-only frames
              * can repay one expensive rendered frame.  Resetting the deadline
