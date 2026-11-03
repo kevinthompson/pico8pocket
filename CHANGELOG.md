@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add PICO-8's undocumented built-ins `_set_fps`, `_update_buttons`,
+  `_get_menu_item_selected`, `_map_display`, `_mark_cpu`, `_startframe`,
+  `__trace`, `holdframe`, `_update_framerate` and `set_draw_slice`. Carts that
+  call them, such as ones that run their own main loop, used to stop at load.
+
 - `stat()` returns 0 for codes the core does not model, as PICO-8 0.2.7 does,
   instead of `nil`; codes 64-71, 100 and 101 still return `nil`. It also
   reports PICO-8's values for `stat(5)` (43), `stat(11)`-`stat(15)`,

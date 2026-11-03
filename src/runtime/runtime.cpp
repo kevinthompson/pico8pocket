@@ -2809,6 +2809,13 @@ static const luaL_Reg runtime_api[] = {
     {"foreach", api_foreach}, {NULL, NULL}
 };
 
+/* _map_display(n) selects the display that drawing goes to.  The Pocket
+ * has one, so as in PICO-8 with a single display, only n < 1 succeeds. */
+static int api_map_display(lua_State *lua) {
+    lua_pushboolean(lua, arg_int(lua, 1, 0) < 1);
+    return 1;
+}
+
 /* Added after 0.0.33's first save-state format: numbered last by
  * eris.__p8p_init so existing permanent-object IDs do not move. Keep in
  * sync with the list in that function.  menuitem used to share api_stub,
@@ -2818,6 +2825,16 @@ static const luaL_Reg late_runtime_api[] = {
     /* Not PICO-8 API, but Yarn calls exit() while drawing its score panel
      * once all levels are unlocked; a no-op lets it finish the frame. */
     {"exit", api_stub},
+    /* PICO-8 0.2.7 defines these undocumented functions.  Carts call
+     * _set_fps from their own main loops; PICO-8 resets the rate from
+     * _update60 when its loop starts, and a later change would only alter
+     * how often frames are drawn, so it is a no-op here like the frame and
+     * CPU hooks.  __trace matches trace. */
+    {"_set_fps", api_stub}, {"_update_buttons", api_stub},
+    {"_get_menu_item_selected", api_stub}, {"_map_display", api_map_display},
+    {"_mark_cpu", api_stub}, {"_startframe", api_stub},
+    {"__trace", api_trace}, {"holdframe", api_stub},
+    {"_update_framerate", api_stub}, {"set_draw_slice", api_stub},
     {NULL, NULL}
 };
 
@@ -2871,7 +2888,7 @@ static const char bootstrap_lua[] =
     "rawset(debug.getregistry(),'__PICO8_SANDBOX',_G)\n"
     "eris.__p8p_perm={} eris.__p8p_unperm={} eris.__p8p_original={}\n"
     "function eris.__p8p_init()\n"
-    " local late={'cstore','trace','menuitem','exit'} local skip={} for _,k in ipairs(late) do skip[k]=true end\n"
+    " local late={'cstore','trace','menuitem','exit','_set_fps','_update_buttons','_get_menu_item_selected','_map_display','_mark_cpu','_startframe','__trace','holdframe','_update_framerate','set_draw_slice'} local skip={} for _,k in ipairs(late) do skip[k]=true end\n"
     " local keys={} for k in pairs(_G) do if not skip[k] then keys[#keys+1]=k end end table.sort(keys)\n"
     " local seen={} local n=0 local function permanent(v) local t=type(v)\n"
     "  if t~='table' and t~='function' and t~='userdata' and t~='thread' then return end\n"
