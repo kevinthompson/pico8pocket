@@ -58,14 +58,14 @@ started and how you can help improve it.
   synchronizes PICO-8's packed screen RAM for memory APIs. This removes the
   packed read-modify-write from the common sprite/pixel path and maps the
   display palette during the existing 2× presentation pass.
-- Default controls are `B = O`, `A = X`, `Start = Pause`; `Y` and `X` are
+- Default controls are `B = O`, `A = X`, `Start = PICO-8 pause menu`; `Y` and `X` are
   alternate `O` and `X` buttons. The in-core menu has a global profile plus a
   content-hash-keyed override for each cartridge; D-pad, A/B/X/Y, L/R and Start
   can all be reassigned while Select remains reserved for the system UI.
 - Pressing Select opens the PICO-8-styled system menu and fully pauses the
-  cartridge with a short audio fade. Holding Select and pressing the physical X
-  button, or pressing X from the main system menu, toggles the opt-in
-  profiler. Its labelled rows show logical FPS (`L`), estimated visible FPS (`V`), update
+  cartridge with a short audio fade. A or X chooses a row and B goes back; on
+  the save-state screen X saves. Holding Select and pressing the physical X
+  button toggles the opt-in profiler, with the menu open or closed. Its labelled rows show logical FPS (`L`), estimated visible FPS (`V`), update
   time (`U`), draw time (`D`), audio time (`A`), presentation time (`P`), the
   active render divisor (`R`), a Lua activity count (`K`) and the full runtime
   step the frame-skip scheduler measures (`F`: update and draw plus audio
@@ -118,9 +118,12 @@ started and how you can help improve it.
   keyed by the cartridge-supplied data ID. Dirty data is flushed periodically,
   on state saves and whenever the system menu opens.
 - `Select Cart` directs the user to AnalogueOS Core Settings → Cartridge. The
-  cartridge data slot is user-reloadable and restart-on-load. Its filename is
-  deliberately not persisted, so every fresh core launch opens Pocket's native
-  cartridge picker instead of reopening the previously used cart.
+  cartridge data slot is user-reloadable without a core restart: the app
+  notices the new file within a second and loads it in place. Restarting the
+  core on reload stalled openfpgaOS while it reloaded the app. The slot's
+  filename is deliberately not persisted, so every fresh core launch opens
+  Pocket's native cartridge picker instead of reopening the previously used
+  cart.
 - Public releases contain no cartridges or third-party sound banks. The
   `Assets/pico8/common/cards/` directory contains only installation
   instructions; users provide cartridges they are entitled to use.

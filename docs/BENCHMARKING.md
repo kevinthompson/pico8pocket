@@ -4,10 +4,48 @@ Start with the existing [architecture](architecture.md#hardware-and-runtime),
 [PICO-8 compatibility target](compatibility.md) and [release process](RELEASING.md).
 They define the shipping os20/90 MHz configuration, behavior and acceptance gates.
 Use the local [pocket-benchmarking skill](../.agents/skills/pocket-benchmarking/SKILL.md)
-to locate the maintained `pocket-harness` checkout. Its `benchmarks/README.md`
+to locate the maintained `pocket-dev-tools` checkout (formerly `pocket-harness`).
+Its `benchmarks/README.md`
 owns collection, `PLATFORMS.md` owns profiles/comparison contracts and
 `SELECTION.md` owns project-specific selection. Commands below run there; paths
 under `build/` are private examples, not checked-in measurements.
+
+## Routine regression checks
+
+Use the [shared preserved-baseline contract](https://github.com/zenibako/pocket-dev-tools/blob/fd5fc7af6cb51b19bb800d6c2cd43b7c03cfcf58/benchmarks/REGRESSIONS.md)
+(introduced in shared commit `fd5fc7af6cb51b19bb800d6c2cd43b7c03cfcf58`) from the verified
+`pocket-dev-tools` checkout. Require its `benchmarks/REGRESSIONS.md` and record the
+actual shared commit; do not silently substitute an older checkout. Keep private
+source exports, accepted evidence, indices and candidate/failure records under
+that checkout's ignored directories. Do not ship them in this project's releases.
+
+Use the separate bounded `pico8/` os20/90 MHz workflow described in
+[the performance reference](../.agents/skills/pico8pocket-performance/references/os20-replay.md).
+Create an accepted case and each candidate under different unused names; never
+rerun completed baseline capture/replay phases or replace its source/cart files.
+Record source and dirty/patch inventory, cart/archive hashes, setup/input route,
+final hash seed, warmup/frame roster, compiler/ordered flags, BRAM placement and
+CPU/simulator identities. Match those controls for a software comparison.
+
+Require both repeat-capture success and `native_output_equal=true`, complete
+same-binary RTL channel/memory checks and the adapter's negative control before
+interpreting timing. Include a known bad candidate to test the project's
+cross-build decision. The standard runner exports channel hashes, not raw
+pixel/palette/PCM files or an automatic cross-case comparison; report hash
+agreement and require a separately validated collector for byte-equality claims.
+Butterscotch's `regression.py` does not accept Pico8 cases. Preserve the accepted
+case/index or hashed inventory and keep new candidates/failures separately.
+
+Keep `make test`, affected cart/native/frame/error/save-state checks and explicit
+private-fixture gaps. The legacy `make celeste` helper can exit zero for changed
+hashes or absent carts/references; inspect the complete matched roster and each
+output. Its `make celeste-baseline` action may overwrite files, so use it only
+for explicit reference establishment with the previous directory/digest preserved. Benchmark bundle `verify`/`compare` preserves archive
+integrity and numeric deltas; it neither runs those tests nor decides correctness
+or a slowdown threshold. Simulated runtime capacity excludes OS scheduling,
+presentation and adaptive skipping. Profile changes need a separate experiment;
+actual display/audio, cartdata, Memories, sleep/wake and affected slot-20/offline
+handoff/return paths still need the applicable device and release acceptance.
 
 ## Choose candidates before measuring
 

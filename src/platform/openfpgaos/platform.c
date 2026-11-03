@@ -275,6 +275,11 @@ void p8p_platform_audio_pump(p8p_runtime_t *runtime) {
     }
 }
 
+int p8p_platform_audio_queued_frames(void) {
+    int queued_frames = audio_ring_capacity - of_audio_free();
+    return queued_frames < 0 ? 0 : queued_frames;
+}
+
 void p8p_platform_audio_set_paused(int paused) {
     audio_paused = paused != 0;
 }

@@ -163,7 +163,15 @@ static void test_render_scheduler(void) {
     /* BAS: _update dominates, so R4 would ruin visuals for little gain. */
     CHECK(p8p_render_divisor_for_load(60, 29000, 25000, 3000, 3000) == 1);
     /* UFO: rendering dominates and skipping it materially improves speed. */
-    CHECK(p8p_render_divisor_for_load(60, 58000, 17000, 1000, 3000) == 4);
+    CHECK(p8p_render_divisor_for_load(60, 58000, 17000, 1000, 3000) == 3);
+    /* Beyond the budget at any divisor, a heavy update gains little from
+     * R4: R2 gives 45 logical and 23 visible fps, R4 51 and 13. */
+    CHECK(p8p_render_divisor_for_load(60, 21000, 14000, 3000, 3000) == 2);
+    /* A cheap update with one 21 ms draw: two steps take 32.5 ms and fit
+     * two 16.7 ms frames, so 30 visible fps is available, not 20. */
+    CHECK(p8p_render_divisor_for_load(60, 21000, 2500, 3000, 3000) == 2);
+    /* An unskipped frame still keeps the margin of the 60 Hz budget. */
+    CHECK(p8p_render_divisor_for_load(60, 11000, 2000, 2500, 2000) == 2);
     /* 30 Hz carts may skip at most every other draw. */
     CHECK(p8p_render_divisor_for_load(30, 45000, 15000, 5000, 3000) == 2);
 }
