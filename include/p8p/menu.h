@@ -16,7 +16,6 @@ enum p8p_menu_action {
     P8P_MENU_NONE = 0,
     P8P_MENU_CLOSE,
     P8P_MENU_RESTART,
-    P8P_MENU_TOGGLE_DIAGNOSTICS,
     P8P_MENU_EXIT,
     /* A cart menuitem() callback raised an error; see p8p_runtime_error. */
     P8P_MENU_CART_ERROR

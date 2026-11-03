@@ -18,6 +18,10 @@
 - The runtime error screen and the performance overlay draw text with the
   PICO-8 font instead of hand-drawn letters, so `M` and `N` are distinct and
   messages look as they do in PICO-8.
+- X confirms in the Select system menu, as A does. Both are PICO-8's X button
+  in play, but X used to toggle the profiler and close the menu, so choosing a
+  row with it appeared to do nothing. The save-state screen keeps X for Save.
+  Select+X still toggles the profiler, with the menu open or closed.
 
 ## 0.0.35 — 2026-10-21
 
