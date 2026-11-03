@@ -9,9 +9,9 @@ SECTIONS {
     HIDDEN(__p8p_hot_all_next_start = .);
     *(.text._ZL12api_all_nextP9lua_State*)
     ASSERT(. > __p8p_hot_all_next_start, "Missing hot all_next section; recheck VM layout");
-    HIDDEN(__p8p_hot_fastchain_start = .);
-    *(.text._ZL9fastchainP9lua_StatePK10lua_TValueS3_*)
-    ASSERT(. > __p8p_hot_fastchain_start, "Missing hot fastchain section; recheck VM layout");
+    HIDDEN(__p8p_hot_chainrefill_start = .);
+    *(.text._ZL11chainrefillP9lua_StateP10ChainEntryP5TableP7TStringj*)
+    ASSERT(. > __p8p_hot_chainrefill_start, "Missing hot chainrefill section; recheck VM layout");
     HIDDEN(__p8p_hot_gettable_start = .);
     *(.text._Z13luaV_gettableP9lua_StatePK10lua_TValuePS1_S4_*)
     ASSERT(. > __p8p_hot_gettable_start, "Missing hot gettable section; recheck VM layout");

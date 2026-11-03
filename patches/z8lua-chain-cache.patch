@@ -1,0 +1,370 @@
+Cache __index chain lookups for metatable classes.
+
+Carts that build classes from metatables (an instance whose metatable is
+its class, each class falling back to its parent through __index) read
+inherited fields, methods and missing names by walking the chain: two
+hash lookups per level.  luaV_gettable now asks a 128-entry cache keyed
+by the key's text and the receiver's metatable first.  An entry records
+the tables the result depended on and is valid while none of them has
+been written, given a new key, resized or had its metatable set (bit 7 of
+'flags', cleared by all of those); a hit then looks the key up in the
+final table only.
+
+The cache replaces fastchain from z8lua-index-chain.patch, which probed up
+to four __index levels for _ENV names before every slow lookup; removing
+its calls also shrinks the BRAM-resident VM loop.  luaV_gettable, the hit
+path and chainrefill are outside BRAM.
+
+diff --git a/ltable.h b/ltable.h
+index b28b6e6..54ecd12 100644
+--- a/ltable.h
++++ b/ltable.h
+@@ -17,6 +17,16 @@
+ 
+ #define invalidateTMcache(t)	((t)->flags = 0)
+ 
++/*
++** Pico8Pocket: bit 7 of 'flags' (above the cached tag methods) marks a
++** table that an __index chain-cache entry relies on.  It is set when the
++** chain is walked and cleared by anything that could change a lookup
++** through the table: every write clears 'flags', and new keys, resizes and
++** setmetatable clear it explicitly.  See luaV_chainget.
++*/
++#define CHAIN_VALID	0x80u
++#define invalidatechain(t)	((t)->flags &= cast_byte(~CHAIN_VALID))
++
+ /* returns the key, given the value of a table entry */
+ #define keyfromval(v) \
+   (gkey(cast(Node *, cast(char *, (v)) - offsetof(Node, i_val))))
+diff --git a/ltable.c b/ltable.c
+index 4532cc8..8bf49b3 100644
+--- a/ltable.c
++++ b/ltable.c
+@@ -303,6 +303,7 @@ static void setnodevector (lua_State *L, Table *t, int size) {
+ 
+ void luaH_resize (lua_State *L, Table *t, int nasize, int nhsize) {
+   int i;
++  invalidatechain(t);  /* nodes move */
+   int oldasize = t->sizearray;
+   int oldhsize = t->lsizenode;
+   Node *nold = t->node;  /* save old hash ... */
+@@ -368,7 +369,7 @@ static void rehash (lua_State *L, Table *t, const TValue *ek) {
+ Table *luaH_new (lua_State *L) {
+   Table *t = &luaC_newobj(L, LUA_TTABLE, sizeof(Table), NULL, 0)->h;
+   t->metatable = NULL;
+-  t->flags = cast_byte(~0);
++  t->flags = cast_byte(~CHAIN_VALID);  /* no tag methods; not in a chain */
+   t->array = NULL;
+   t->sizearray = 0;
+   setnodevector(L, t, 0);
+@@ -404,6 +405,7 @@ static Node *getfreepos (Table *t) {
+ */
+ TValue *luaH_newkey (lua_State *L, Table *t, const TValue *key) {
+   Node *mp;
++  invalidatechain(t);  /* a new key, and colliding nodes may move */
+   if (ttisnil(key)) luaG_runerror(L, "table index is nil");
+   else if (ttisnumber(key) && luai_numisnan(L, nvalue(key)))
+     luaG_runerror(L, "table index is NaN");
+diff --git a/lapi.c b/lapi.c
+index 606634a..a3c1331 100644
+--- a/lapi.c
++++ b/lapi.c
+@@ -832,6 +832,7 @@ LUA_API int lua_setmetatable (lua_State *L, int objindex) {
+   switch (ttypenv(obj)) {
+     case LUA_TTABLE: {
+       hvalue(obj)->metatable = mt;
++      invalidateTMcache(hvalue(obj));  /* its __index chain changed */
+       if (mt) {
+         luaC_objbarrierback(L, gcvalue(obj), mt);
+         luaC_checkfinalizer(L, gcvalue(obj), mt);
+diff --git a/lstate.h b/lstate.h
+index 0cd0ec3..6103418 100644
+--- a/lstate.h
++++ b/lstate.h
+@@ -146,6 +146,7 @@ typedef struct global_State {
+   TString *memerrmsg;  /* memory-error message */
+   TString *tmname[TM_N];  /* array with tag-method names */
+   struct Table *mt[LUA_NUMTAGS];  /* metatables for basic types */
++  struct ChainEntry *chaincache;  /* __index chain cache (lvm.c), lazily */
+ } global_State;
+ 
+ 
+diff --git a/lstate.c b/lstate.c
+index e20507d..d25a6a5 100644
+--- a/lstate.c
++++ b/lstate.c
+@@ -24,6 +24,7 @@
+ #include "lstring.h"
+ #include "ltable.h"
+ #include "ltm.h"
++#include "lvm.h"
+ 
+ 
+ #if !defined(LUAI_GCPAUSE)
+@@ -228,6 +229,7 @@ static void close_state (lua_State *L) {
+     luai_userstateclose(L);
+   luaM_freearray(L, G(L)->strt.hash, G(L)->strt.size);
+   luaZ_freebuffer(L, &g->buff);
++  luaV_freechaincache(g);
+   freestack(L);
+   lua_assert(gettotalbytes(g) == sizeof(LG));
+   (*g->frealloc)(g->ud, fromstate(L), sizeof(LG), 0);  /* free main block */
+@@ -288,6 +290,7 @@ LUA_API lua_State *lua_newstate (lua_Alloc f, void *ud) {
+   g->strt.size = 0;
+   g->strt.nuse = 0;
+   g->strt.hash = NULL;
++  g->chaincache = NULL;
+   setnilvalue(&g->l_registry);
+   luaZ_initbuffer(L, &g->buff);
+   g->panic = NULL;
+diff --git a/lvm.h b/lvm.h
+index 6b595ed..6ff1a80 100644
+--- a/lvm.h
++++ b/lvm.h
+@@ -40,6 +40,7 @@ LUAI_FUNC const TValue *luaV_delegatebits(lua_State *L, Value function_value,
+ LUAI_FUNC void luaV_callindex (lua_State *L, Value function_value,
+                               int function_tag, const TValue *p1,
+                               const TValue *p2, TValue *p3, int hasres);
++LUAI_FUNC void luaV_freechaincache (struct global_State *g);
+ LUAI_FUNC void luaV_gettable (lua_State *L, const TValue *t, TValue *key,
+                                             StkId val);
+ LUAI_FUNC void luaV_settable (lua_State *L, const TValue *t, TValue *key,
+diff --git a/lvm.c b/lvm.c
+index 278d1d6..51a62ff 100644
+--- a/lvm.c
++++ b/lvm.c
+@@ -127,7 +127,184 @@ static void callTM (lua_State *L, Value function_value, int function_tag,
+ }
+ 
+ 
++/*
++** Pico8Pocket: __index chain cache.
++**
++** Objects built as metatable classes (an instance whose metatable is its
++** class, each class falling back to its parent through __index) look up
++** inherited fields, methods and missing names by walking the whole chain:
++** two hash lookups per level (the key, then "__index" in the next
++** metatable).  PICO-8 itself charges such a read like a plain one.
++**
++** An entry is keyed by the key's text and the receiver's metatable, so
++** every instance of a class shares it.  It records the tables the result
++** depended on -- each metatable whose __index was followed and each table
++** the key was absent from -- and the final table: where the key was found,
++** or the end of the chain.  A hit checks that every recorded table still
++** has CHAIN_VALID (no write, new key, resize or setmetatable since) and
++** then looks the key up in the final table only, so changes to the final
++** table (typically the globals) never retire the entry.  Chains with
++** __index functions, non-table __index values, keys longer than
++** CHAIN_MAXKEY bytes or more than CHAIN_MAXTABLES links are not cached and
++** take luaV_gettable's normal walk.
++**
++** Recorded tables stay alive while the entry is valid: each is reachable
++** from the receiver's metatable through tables that have not changed, and
++** the receiver's metatable is the first recorded table.  The key is
++** compared by its text, not its address, so a string freed and replaced at
++** the same address cannot match a stale entry.
++*/
++#define CHAIN_ENTRIES	128
++#define CHAIN_MAXTABLES	32
++#define CHAIN_MAXKEY	16
++
++typedef struct ChainEntry {
++  Table *metatable;  /* the receiver's metatable; NULL: empty entry */
++  lu_int32 keylen;
++  lu_int32 key[CHAIN_MAXKEY / 4];  /* the key's text, zero-padded */
++  Table *final;  /* where the key was found, or where the chain ended */
++  int count;  /* tables in 'tables'; -1: chain not cacheable */
++  Table *tables[CHAIN_MAXTABLES];
++} ChainEntry;
++
++
++void luaV_freechaincache (global_State *g) {
++  if (g->chaincache)
++    (*g->frealloc)(g->ud, g->chaincache,
++                   CHAIN_ENTRIES * sizeof(ChainEntry), 0);
++  g->chaincache = NULL;
++}
++
++
++static __attribute__((noinline)) ChainEntry *chainalloc (global_State *g) {
++  /* Outside the GC's accounting, like the main state block. */
++  g->chaincache = cast(ChainEntry *,
++      (*g->frealloc)(g->ud, NULL, 0, CHAIN_ENTRIES * sizeof(ChainEntry)));
++  if (g->chaincache != NULL)
++    memset(g->chaincache, 0, CHAIN_ENTRIES * sizeof(ChainEntry));
++  return g->chaincache;
++}
++
++
++static inline ChainEntry *chainentry (lua_State *L, TString *key, Table *mt) {
++  global_State *g = G(L);
++  ChainEntry *cache = g->chaincache;
++  size_t slot = key->tsv.hash ^ ((size_t)mt >> 5);
++  if (cache == NULL && (cache = chainalloc(g)) == NULL) return NULL;
++  return &cache[slot & (CHAIN_ENTRIES - 1)];
++}
++
++
++/* Whether the entry's key has the same text as 'key', whose length
++** 'len' (at most CHAIN_MAXKEY) already matches.  String text is word
++** aligned; the bytes after the last whole word are compared one by one. */
++static inline int chainkeyequal (const ChainEntry *e, const TString *key,
++                                 size_t len) {
++  const char *text = cast(const char *,
++                          __builtin_assume_aligned(getstr(key), 4));
++  const char *saved = cast(const char *, e->key);
++  size_t i;
++  for (i = 0; i + 4 <= len; i += 4) {
++    lu_int32 a, b;
++    memcpy(&a, text + i, 4);
++    memcpy(&b, saved + i, 4);
++    if (a != b) return 0;
++  }
++  for (; i < len; i++)
++    if (text[i] != saved[i]) return 0;
++  return 1;
++}
++
++
++static void chainrecord (ChainEntry *e, int *count, Table *t) {
++  if (*count == 0 || e->tables[*count - 1] != t)  /* a class is often its */
++    e->tables[(*count)++] = t;                    /* own __index */
++}
++
++
++/*
++** Walk the __index chain from metatable 'mt' (of a table that lacks 'key')
++** and record it in 'e'.  Returns the value, or NULL when only
++** luaV_gettable's general walk can answer.
++*/
++static __attribute__((noinline))
++const TValue *chainrefill (lua_State *L, ChainEntry *e, Table *mt,
++                           TString *key, size_t keylen) {
++  const TValue *res;
++  int count = 0, i;
++  Table *t = NULL;  /* the table whose metatable is 'mt' (none at first) */
++  e->metatable = mt;
++  e->keylen = cast(lu_int32, keylen);
++  memset(e->key, 0, sizeof(e->key));
++  memcpy(e->key, getstr(key), keylen);
++  e->count = -1;
++  for (;;) {
++    const TValue *tm = fasttm(L, mt, TM_INDEX);
++    if (tm == NULL) {
++      if (t == NULL) {  /* no __index at all: nothing to cache */
++        e->metatable = NULL;
++        return luaO_nilobject;
++      }
++      res = luaO_nilobject;
++      break;  /* the chain ends at 't' */
++    }
++    if (!ttistable(tm) || count + 2 > CHAIN_MAXTABLES) return NULL;
++    if (t != NULL) chainrecord(e, &count, t);  /* key absent there */
++    chainrecord(e, &count, mt);  /* its __index was followed */
++    t = hvalue(tm);
++    res = luaH_getstr(t, key);
++    if (!ttisnil(res)) break;  /* found in 't' */
++    mt = t->metatable;
++    if (mt == NULL) break;  /* the chain ends at 't' */
++  }
++  for (i = 0; i < count; i++)
++    e->tables[i]->flags |= CHAIN_VALID;
++  e->final = t;
++  e->count = count;
++  return res;
++}
++
++
++/*
++** The value of 'key' read through table 'h', for a short-string key: an
++** entry of 'h' itself, or what the __index chain gives.  Returns NULL when
++** only luaV_gettable's general walk can answer (an __index function, an
++** uncacheable chain, or a chain that changed past the final table).
++*/
++static inline const TValue *luaV_chainget (lua_State *L, Table *h,
++                                           TString *key) {
++  const TValue *res = luaH_getstr(h, key);
++  Table *mt = h->metatable;
++  size_t keylen = key->tsv.len;
++  ChainEntry *e;
++  int i;
++  if (!ttisnil(res) || mt == NULL) return res;
++  if (keylen > CHAIN_MAXKEY) return NULL;
++  e = chainentry(L, key, mt);
++  if (e == NULL) return NULL;
++  if (e->metatable != mt || e->keylen != keylen ||
++      !chainkeyequal(e, key, keylen))
++    return chainrefill(L, e, mt, key, keylen);
++  if (e->count < 0) return NULL;
++  for (i = 0; i < e->count; i++)
++    if (!(e->tables[i]->flags & CHAIN_VALID))
++      return chainrefill(L, e, mt, key, keylen);
++  res = luaH_getstr(e->final, key);
++  if (!ttisnil(res) || fasttm(L, e->final->metatable, TM_INDEX) == NULL)
++    return res;
++  return NULL;  /* the final table now continues the chain */
++}
++
++
+ void luaV_gettable (lua_State *L, const TValue *t, TValue *key, StkId val) {
++  if (ttistable(t) && ttisshrstring(key)) {
++    const TValue *res = luaV_chainget(L, hvalue(t), rawtsvalue(key));
++    if (res != NULL) {
++      setobj2s(L, val, res);
++      return;
++    }
++  }
++
+   // PICO-8 0.2.5 changelog: sub(str,pos,pos) can be written as str[pos]
+   if (ttisstring(t)) {
+     const char *s = svalue(t);
+@@ -192,33 +369,6 @@ static LUAI_VM_HOT TValue *fastslot (const TValue *t, const TValue *key) {
+ }
+ 
+ 
+-/*
+-** After a miss of a name looked up through _ENV (the parser marks these
+-** with bit 8 of B), follow __index tables -- objects used as _ENV that fall
+-** back to the globals -- without leaving the loop.  Field reads (a.b,
+-** a:b()) are left alone: carts like Celeste 2 use __index functions there,
+-** and probing them first only costs time.  Only short-string keys, where a fastslot miss means the key is
+-** absent, and only hits are returned: misses, __index functions and other
+-** types return NULL and take luaV_gettable (and the sandbox fallback) as
+-** before.  Kept out of line so the direct-hit path is unchanged.
+-*/
+-/* Out of BRAM: only _ENV-object misses get here. */
+-static __attribute__((noinline))
+-const TValue *fastchain (lua_State *L, const TValue *t, const TValue *key) {
+-  int loop;
+-  if (!ttisshrstring(key)) return NULL;
+-  for (loop = 0; loop < 4 && ttistable(t); loop++) {
+-    const TValue *tm = fasttm(L, hvalue(t)->metatable, TM_INDEX);
+-    const TValue *res;
+-    if (tm == NULL || !ttistable(tm)) return NULL;
+-    res = luaH_getstr(hvalue(tm), rawtsvalue(key));
+-    if (!ttisnil(res)) return res;
+-    t = tm;
+-  }
+-  return NULL;
+-}
+-
+-
+ /*
+ ** Pico8Pocket: inline caches.  An instruction whose key is a constant short
+ ** string remembers the index of the hash node where it last found the key.
+@@ -802,7 +952,6 @@ void luaV_execute (lua_State *L) {
+         int b = encoded & 0xff;
+         const TValue *fast = cachedslot(cl->upvals[b]->v, RKC(i),
+                                         ISK(GETARG_C(i)));
+-        if (!fast && (encoded & (1 << 8))) fast = fastchain(L, cl->upvals[b]->v, RKC(i));
+         if (fast) { setobj2s(L, ra, fast); break; }
+         Protect(luaV_gettable(L, cl->upvals[b]->v, RKC(i), ra));
+         // ATTN: I don't think this is actually what PICO-8 does, but I'm not sure
+@@ -831,7 +980,6 @@ void luaV_execute (lua_State *L) {
+         int encoded = GETARG_B(i);
+         TValue *table = base + (encoded & 0xff);
+         const TValue *fast = cachedslot(table, RKC(i), ISK(GETARG_C(i)));
+-        if (!fast && (encoded & (1 << 8))) fast = fastchain(L, table, RKC(i));
+         if (fast) { setobj2s(L, ra, fast); break; }
+         Protect(luaV_gettable(L, table, RKC(i), ra));
+         // When _ENV is overridden (e.g., in a for loop), lookups use OP_GETTABLE instead of OP_GETTABUP

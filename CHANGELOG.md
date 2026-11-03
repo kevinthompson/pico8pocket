@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Reads through `__index` chains, as in carts that build classes from
+  metatables, are cached. Inherited fields, methods and missing names no
+  longer cost two hash lookups per level of the chain on every read.
+
 - `_set_fps(60)` in top-level code makes `flip()` loops there run at 60 fps,
   as in PICO-8 0.2.7, and `time()` stays continuous when the rate changes.
   Carts that run their title screen or whole game from top-level code used to

@@ -123,7 +123,11 @@ and exact binary before treating these shares as current hardware costs.
 - **Interpreter loop:** about half the frame. Dispatch is 11 instructions per
   Lua instruction. Constant-key table access (`GETTABUP`/`GETTABLE`) uses
   per-instruction inline caches (`patches/z8lua-inline-cache.patch`,
-  `z8lua-vm-tuning.patch`).
+  `z8lua-vm-tuning.patch`). Reads that miss the receiver and walk an
+  `__index` chain (metatable classes) go through a chain cache in
+  `luaV_gettable` (`z8lua-chain-cache.patch`), outside BRAM. It relies on bit
+  7 of `Table.flags`, which every write, new key, resize and `setmetatable`
+  clears; a new path that changes a table without clearing `flags` breaks it.
 - **API calls:** they go through `luaD_callcfast`. C API functions read their
   arguments with `arg_int`/`arg_value`, not `lua_gettop`/`lua_tonumberx`.
 - **Drawing:**
