@@ -82,6 +82,8 @@ void p8p_runtime_set_cartdata_hooks(p8p_runtime_t *runtime,
                                     void *userdata);
 void p8p_runtime_flush_cartdata(p8p_runtime_t *runtime);
 const uint8_t *p8p_runtime_framebuffer(p8p_runtime_t *runtime);
+/* The image to show: the framebuffer after the 0x5f2c screen transformation. */
+const uint8_t *p8p_runtime_display_framebuffer(p8p_runtime_t *runtime);
 const uint8_t *p8p_runtime_screen_palette(p8p_runtime_t *runtime);
 void p8p_runtime_audio_render(p8p_runtime_t *runtime, int16_t *stereo,
                               size_t frames);

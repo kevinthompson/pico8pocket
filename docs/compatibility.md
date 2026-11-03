@@ -136,6 +136,10 @@ Implemented and covered by host tests:
   2000 as no date;
 - P8SCII control codes, default attributes at `0x5f58`-`0x5f5b` and custom
   fonts at `0x5600`, checked pixel by pixel against PICO-8 0.2.7 (see below);
+- `0x5f2c` screen modes 1-3 (stretch), 5-7 (mirror), 129-131 (flip) and 133-135
+  (rotate), applied to the whole screen at presentation. Bit 6 is ignored, and
+  other values show the normal screen. The official manual does not document
+  this register; the mode list comes from the PICO-8 wiki;
 - 120 error-free headless frames of the official Celeste Classic cart.
 
 P8SCII behaviour was measured on PICO-8 0.2.7 with a differential harness that

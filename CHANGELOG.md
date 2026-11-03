@@ -62,6 +62,9 @@
 - `circfill` draws the same shape as PICO-8 0.2.7: each row is filled out to
   the outline `circ` draws. Rows near the top and bottom of a circle were
   previously too narrow, so small filled circles looked pinched.
+- Support every `0x5f2c` screen mode: 64x128, 128x64 and 64x64 stretches,
+  mirroring, flips and quarter-turn rotations. Pause menus and save-state
+  previews show the transformed image.
 
 ## 0.0.35 — 2026-10-21
 
