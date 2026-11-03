@@ -3137,10 +3137,19 @@ extern "C" int p8p_runtime_request_back(p8p_runtime_t *runtime) {
     return 0;
 }
 
+/* PICO-8 runs at 60 fps when _update60 exists once _init has finished, so
+ * carts may install their callbacks from _init. */
+static void choose_frame_rate(p8p_runtime_t *runtime) {
+    lua_getglobal(runtime->lua, "_update60");
+    runtime->target_fps = lua_isfunction(runtime->lua, -1) ? 60 : 30;
+    lua_pop(runtime->lua, 1);
+}
+
 static int start_init_thread(p8p_runtime_t *runtime) {
     lua_getglobal(runtime->lua, "_init");
     if (!lua_isfunction(runtime->lua, -1)) {
         lua_pop(runtime->lua, 1);
+        choose_frame_rate(runtime);
         return 0;
     }
     runtime->cart_thread = lua_newthread(runtime->lua);
@@ -3163,13 +3172,12 @@ static int start_init_thread(p8p_runtime_t *runtime) {
         return -1;
     }
     release_cart_thread(runtime);
+    choose_frame_rate(runtime);
     return 0;
 }
 
 static int finish_cart_load(p8p_runtime_t *runtime) {
-    lua_getglobal(runtime->lua, "_update60");
-    runtime->target_fps = lua_isfunction(runtime->lua, -1) ? 60 : 30;
-    lua_pop(runtime->lua, 1);
+    choose_frame_rate(runtime);  /* what _init sees; chosen again after it */
     return start_init_thread(runtime);
 }
 
@@ -3197,7 +3205,10 @@ static const char frame_dispatcher_lua[] =
     "local prof=...\n"
     "return function(update, draw)\n"
     " local u=_ENV[update]\n"
-    " if u then prof(0) u() prof(1) end\n"
+    " if u then prof(0) u() prof(1)\n"
+    " elseif update=='_update' and _update60 then\n"
+    "  u=_update60 prof(0) u() u() prof(1)\n"
+    " end\n"
     " if draw then local d=_draw if d then prof(2) d() prof(3) end end\n"
     "end\n";
 
@@ -3581,6 +3592,8 @@ extern "C" int p8p_runtime_step_with_draw(p8p_runtime_t *runtime,
         release_cart_thread(runtime);
         if (thread_kind == 0 && finish_cart_load(runtime) != 0)
             return -2;
+        if (thread_kind == 1)
+            choose_frame_rate(runtime);
         install_service_hook(runtime);
         return 0;
     }

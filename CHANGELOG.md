@@ -24,6 +24,11 @@
   Select+X still toggles the profiler, with the menu open or closed.
 - `stat(57)` returns true while music plays, including during a fade-out, and
   false otherwise, as in PICO-8 0.2.7. It previously returned nil.
+- Carts that set `_update60` inside `_init` now run at 60 fps, as in PICO-8
+  0.2.7. The frame rate was chosen before `_init`, so those carts ran at 30 fps
+  and called an `_update` that did not exist: the screen drew but the game never
+  advanced. A 30 fps cart that replaces `_update` with `_update60` while running
+  now gets two `_update60` calls per frame, as in PICO-8, instead of none.
 
 ## 0.0.35 — 2026-10-21
 
