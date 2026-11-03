@@ -29,6 +29,16 @@
   and called an `_update` that did not exist: the screen drew but the game never
   advanced. A 30 fps cart that replaces `_update` with `_update60` while running
   now gets two `_update60` calls per frame, as in PICO-8, instead of none.
+- `print` and P8SCII now match PICO-8 0.2.7 in a pixel-exact comparison of 5,383
+  cases, apart from the limits in `docs/compatibility.md`. `print` returns the
+  lowest y as a second value, and `0x5f24` holds the print margin. Console
+  scrolling, tabs, wrapping, blank lines, padded cells, backgrounds, invert,
+  stripes, pinball mode, outlines, underlines, `\*`, `\v`, one-off characters,
+  default attributes and custom fonts all follow the measured behaviour.
+- `\^c` homes the cursor, `\0` omits the newline, `\f` keeps the pen and `\a12`
+  plays an existing sfx. `cls()` resets the clip and ignores the draw palette,
+  and `cursor()` with no arguments returns to 0,0. Frame delays and the `\a`
+  note language remain unimplemented.
 
 ## 0.0.35 — 2026-10-21
 

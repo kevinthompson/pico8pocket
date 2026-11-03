@@ -392,7 +392,7 @@ static void draw_palette_transitions(void) {
         {"transparent nonzero", "pal(1,8,1) palt(1,true)", 6,6,15,8,15},
         {"transparency reset", "pal(1,8,1) palt(1,true) palt()", 6,1,15,8,15},
         {"screen-only reset", "pal({[1]=8,[15]=139},1) pal()", 6,1,15,1,15},
-        {"all draw entries", "for i=0,15 do pal(i,(i+1)%16) end", 7,2,0,1,15},
+        {"all draw entries", "for i=0,15 do pal(i,(i+1)%16) end", 6,2,0,1,15},
         {"all entries restored", "for i=0,15 do pal(i,(i+1)%16) end for i=0,15 do pal(i,i) end", 6,1,15,1,15},
         {"print memory", "print(chr(6)..'!5f01'..chr(4),0,100)", 6,4,15,1,15},
     };
@@ -601,12 +601,219 @@ static void palette_leaf_contracts(void) {
     free(runtime);
 }
 
+/* P8SCII behaviour measured on PICO-8 0.2.7.  Each body draws with print() and
+ * asserts through eq(actual, expected) and px(x, y, color). */
+struct print_case_t {
+    const char *label;
+    const char *body;
+};
+
+static const print_case_t print_cases[] = {
+    {"escapes lex to control codes", R"(eq(ord("\*"),1) eq(ord("\#"),2) eq(ord("\-"),3) eq(ord("\|"),4)
+eq(ord("\+"),5) eq(ord("\^"),6) eq(ord("\a"),7) eq(ord("\b"),8) eq(ord("\t"),9)
+eq(ord("\v"),11) eq(ord("\f"),12) eq(ord("\r"),13) eq(ord("\014"),14) eq(ord("\015"),15))"},
+    {"shifts, home and jump", R"(eq(print("\-ka",8,0),16) eq(print("a\|ga",0,8),8)
+print("\+kga",8,8,7) px(12,8,7)
+print("ab\^hc\^gd\ne",0,20,7) eq(print("\^j24",0,0),8)
+print("ab\rx",0,30,7) px(0,30,7) px(1,31,0))"},
+    {"modes toggle and stripe", R"(print("\^t\^=l",0,0,7) px(0,0,7) px(0,1,0) px(0,2,7)
+print("\^w\^=l",10,0,7) px(10,0,0) px(11,0,7)
+print("\^pl",20,0,7) px(20,0,0) px(21,0,7) px(21,1,0)
+eq(print("\^p\^-pl",30,0),34))"},
+    {"raw memory writes", R"(print("\^@43000002ABc") eq(peek(0x4300),65) eq(peek(0x4301),66)
+local y=peek(0x5f27) print("\^!4310XY") eq(peek(0x4311),89) eq(peek(0x5f27),y))"},
+    {"default n and m differ", R"(
+local function glyph(c,x,rows) print(c,x,0,7) for y=0,4 do local b=rows[y+1]
+for i=0,2 do px(x+i,y,(b>>(2-i))&1==1 and 7 or 0) end end end
+glyph("n",0,{6,5,5,5,5}) glyph("m",8,{7,7,5,5,5}) glyph("N",16,{0,6,5,5,5}) glyph("M",24,{0,7,7,5,5}))"},
+    {"foreground persists", R"(print("\fca",0,0,7) eq(peek(0x5f25),12)
+color(7) print("\f9x",0,10) pset(5,5) px(5,5,9))"},
+    {"cls homes cursor", R"(rectfill(0,0,127,127,3) print("\^c1ab",50,50,7)
+px(60,60,1) px(0,0,7) px(50,50,1))"},
+    {"terminator keeps cursor", R"(cursor(0,0) print("ab\0") eq(peek(0x5f26),8) eq(peek(0x5f27),0)
+print("c",7) px(9,0,7)
+print("a\0",20,30) eq(peek(0x5f26),24) eq(peek(0x5f27),30)
+eq(print("abc\0",0,0),12) print("\0abc",40,40) px(40,40,0))"},
+    {"console scrolls below 122", R"(cursor(0,120) pset(5,10,9) print("a",7)
+px(5,4,9) px(0,114,7) eq(peek(0x5f27),120))"},
+    {"scroll needs no coordinates", R"(pset(5,10,9) print("a",0,120,7)
+px(5,10,9) eq(peek(0x5f27),126))"},
+    {"scroll threshold", R"(cursor(0,114) pset(5,10,9) print("a",7) px(5,10,9) eq(peek(0x5f27),120))"},
+    {"scroll can be disabled", R"(poke(0x5f36,0x40) cursor(0,120) pset(5,10,9) print("a",7)
+px(5,10,9) eq(peek(0x5f27),126) poke(0x5f36,0))"},
+    {"scroll inside a string", R"(cursor(0,114) print("a\nb\nc",7) eq(peek(0x5f27),120))"},
+    {"scroll twice for a line past the end", R"(cursor(0,117) pset(5,10,9) print("a\nb",7) eq(peek(0x5f27),117)
+px(0,105,7) px(0,111,7))"},
+    {"terminator only skips the final scroll", R"(cursor(0,120) print("a\0",7) eq(peek(0x5f27),120)
+cursor(0,126) print("a\0",7) eq(peek(0x5f27),122))"},
+    {"scroll stays inside the clip", R"(rectfill(0,0,127,127,5) pset(20,20,8) pset(5,30,8) clip(10,10,50,50) cursor(0,120) print("a",7) clip()
+px(20,14,8) px(5,30,8) px(5,24,5))"},
+    {"scroll threshold follows the camera", R"(camera(0,10) cursor(0,117) print("a",7) eq(peek(0x5f27),123))"},
+    {"wide doubles the current width", R"(eq(print("\^wab",0,0),16) eq(print("\^x5\^wab",0,0),20)
+eq(print("\^w\^x5ab",0,0),20) eq(print("\^w\^-wa",0,0),4))"},
+    {"high characters advance", R"(eq(print("\130",0,0),8) eq(print("\#8\130",0,0),8)
+eq(print("\^i\130",0,0),8) eq(print("\^w\130",0,0),16) eq(print("\^x5\130",0,0),9))"},
+    {"custom widths survive modes", R"(poke(0x5600,6,10,8) eq(print("\014a\130",0,0),16)
+eq(print("\014\#9a\130",0,0),16) eq(print("\014\^wa",0,0),12)
+eq(print("\014\^w\^-wa",0,0),6) print("\014\^ta",0,0) eq(peek(0x5f27),16))"},
+    {"tall doubles the current height", R"(print("\^ta\nb",0,0,7) px(0,12,7) print("\^y4\^ta\nb",20,0,7) px(20,8,7))"},
+    {"default attribute modes set metrics", R"(poke(0x5f58,5) eq(print("ab",0,0),16)
+poke(0x5f58,9) print("a",0,0) eq(peek(0x5f27),12) poke(0x5f58,0))"},
+    {"backspace undoes last width", R"(print("\130\b\0",0,0) eq(peek(0x5f26),0)
+print("\^wa\b\0",0,0) eq(peek(0x5f26),0))"},
+    {"blank print uses character height", R"(print("\^y8",0,0) eq(peek(0x5f27),8))"},
+    {"default width and height", R"(poke(0x5f59,0x85) eq(print("ab",0,0),10) eq(peek(0x5f27),8))"},
+    {"default high width", R"(poke(0x5f5a,0x06) eq(print("\130",0,0),6) eq(print("a",0,0),4))"},
+    {"zero nibbles are ignored", R"(poke(0x5f59,0x05) print("\na",0,0,7) px(0,6,7) eq(print("a",0,0),5))"},
+    {"default offsets", R"(poke(0x5f5b,0x21) print("a",0,0,7) px(1,2,7) px(0,0,0))"},
+    {"tab reaches the next stop", R"(eq(print("a\tb",0,0),20) eq(print("\tb",0,0),20))"},
+    {"tab width counts fours of pixels", R"(eq(print("\^s8a\tb",0,0),36) eq(print("\^s1a\tb",0,0),12)
+eq(print("\^s0a\tb",0,0),20))"},
+    {"default tab width", R"(poke(0x5f5a,0x30) eq(print("a\tb",0,0),20) poke(0x5f5a,0x20) eq(print("a\tb",0,0),16)
+poke(0x5f5a,0x10) eq(print("\t\tb",0,0),20))"},
+    {"custom font tab width", R"(poke(0x5600,4) poke(0x5606,10) eq(print("\014a\tb",0,0),14)
+eq(print("a\tb",0,0),20))"},
+    {"tabs relative to home", R"(poke(0x5600,4) poke(0x5606,10) eq(print("\014a\tb",3,0),14)
+poke(0x5605,2) eq(print("\014a\tb",3,0),17))"},
+    {"background covers the padded cell", R"(print("\#8 ",10,20) px(9,19,8) px(13,24,8) px(13,25,8)
+print("\^-b\#9 ",30,20) px(29,20,0) px(30,19,0) px(30,20,9) px(33,25,9) px(34,20,0))"},
+    {"attribute padding", R"(poke(0x5f58,1) print("\#a ",50,20) px(49,20,0) px(53,25,10)
+poke(0x5f58,3) print("\#a ",60,20) px(59,19,10) poke(0x5f58,0))"},
+    {"padding switches back on", R"(print("\^-b\^b\#8 ",10,20) px(9,19,8))"},
+    {"invert fills the padded cell", R"(print("\^ix",10,20,7) px(9,19,7) px(10,20,0)
+px(11,20,7) px(13,24,7) px(13,25,7))"},
+    {"invert without padding", R"(print("\^-b\^ix",30,20,7) px(29,20,0) px(30,19,0) px(31,20,7) px(30,25,7))"},
+    {"solid background without a colour", R"(rectfill(0,40,40,60,5) print("\^#x",10,45,7)
+px(9,44,0) px(11,45,0) px(10,45,7))"},
+    {"background follows the fill pattern", R"(fillp(0x5a5a) print("\#8  ",20,90) fillp()
+px(21,90,0) px(20,90,8) px(21,91,8))"},
+    {"one-off cell keeps eight rows", R"(print("\#8\^;ff00000000000000",10,60,7) px(12,67,8) px(12,68,0))"},
+    {"cls code stays inside the clip", R"(clip(10,10,20,20) print("\^c5",10,10) clip() px(0,0,0) px(15,15,5))"},
+    {"high character cell", R"(print("\#8\130",20,50,7) px(19,49,8) px(27,55,8) px(28,50,0))"},
+    {"one-off ignores padding and height", R"(print("\#8\^:ff00000000000000",10,60,7)
+px(10,60,7) px(9,60,0) px(10,59,0) px(17,67,8) px(18,60,0)
+print("\^y3\^:0000000000000001",30,60,7) px(30,67,7))"},
+    {"one-off respects padding", R"(print("\#8\^;ff00000000000000",10,60,7) px(10,60,7) px(9,59,8) px(17,67,8))"},
+    {"repeat paints background", R"(print("\#8\*3x",10,10,7) px(21,10,8) px(20,10,7))"},
+    {"repeat sets line height", R"(print("\^y9\*2a\nb",0,0,7) px(0,9,7))"},
+    {"repeat newline", R"(print("\*3\nb",0,0,7) px(0,18,7))"},
+    {"decorate repeated character", R"(print("\*2a\v0b",0,20,7) px(2,12,7))"},
+    {"decorate one-off character", R"(print("\^:0000000000000000\v0b",10,20,7) px(8,12,7))"},
+    {"decoration restores cursor", R"(eq(print("a\v5zb",0,10),8))"},
+    {"repeat keeps outline", R"(print("\^o8ff\*2a",10,30,7) px(9,29,8) px(15,31,8))"},
+    {"one-off keeps outline", R"(print("\^o8ff\^:0100000000000000",10,50,7) px(10,50,7) px(9,49,8))"},
+    {"black outline", R"(rectfill(0,0,30,30,5) print("\^o0ffa",10,10,7) px(9,9,0) px(10,10,7) px(11,11,0))"},
+    {"outline in the current colour", R"(print("\^o$ffa",10,40,12) px(9,39,12) print("\f8\^o$ffa",30,40) px(29,39,8))"},
+    {"outline without interior", R"(rectfill(10,60,30,80,5) print("\^o!ffa",12,62,7) px(11,61,7) px(12,62,5) px(13,63,7))"},
+    {"outline over a background", R"(print("\#9\^o8ff.",10,90,7) px(9,90,9) px(14,90,0) px(10,93,8) px(11,94,7))"},
+    {"outline colour is taken when set", R"(print("\^o$ff\f8a",10,40,7) px(9,39,7) px(10,40,8))"},
+    {"outline keeps invert", R"(print("\^i\^o8ffa",10,20,7) px(8,18,8) px(9,19,7))"},
+    {"underline width and start", R"(print("\^-b\^ua",10,0,7) px(9,6,0) px(14,6,7) print("\^w\^ua",20,20,7) px(18,26,7) px(22,26,7) px(23,26,0))"},
+    {"outline stays one pixel thick", R"(print("\^w\^o8ffa",40,10,7) px(39,9,8) px(38,9,0))"},
+    {"custom draw offsets", R"(poke(0x5600,8,8,8) poke(0x5600+97*8,1)
+poke(0x5603,2) poke(0x5604,3) print("\014a",10,10,7) px(12,13,7) px(10,10,0)
+poke(0x5603,0xff) poke(0x5604,0xff) print("\014a",10,20,7) px(9,19,0))"},
+    {"custom high characters", R"(poke(0x5600,8,10,8) poke(0x5600+200*8,0x80)
+eq(print("\014\200",10,30,7),20) px(17,30,7))"},
+    {"custom width adjustments", R"(poke(0x5600,8,8,8) poke(0x5605,1)
+poke(0x5608+40,0x70) eq(print("\014a",0,0),7) poke(0x5608+40,0x40) eq(print("\014a",0,0),4)
+poke(0x5608+40,0x30) eq(print("\014a",0,0),11) poke(0x5608+41,0x02) eq(print("\014b",0,0),10)
+poke(0x5608,0x01) eq(print("\014\16",0,0),9) poke(0x5605,0) eq(print("\014a",0,0),8))"},
+    {"custom width adjust scales when wide", R"(poke(0x5600,8,8,8) poke(0x5605,1)
+poke(0x5608+40,0x70) eq(print("\014\^wa",0,0),14))"},
+    {"custom raised character", R"(poke(0x5600,8,8,8) poke(0x5600+97*8,1) poke(0x5605,1)
+poke(0x5608+40,0x80) print("\014a",10,40,7) px(10,39,7) px(10,40,0))"},
+    {"wrap moves the overflowing character", R"(print("\^r2abc",0,0,7) px(1,6,7) eq(peek(0x5f27),12))"},
+    {"wrap leaves an exact fit alone", R"(print("\^r2ab",0,0,7) eq(peek(0x5f27),6))"},
+    {"wrap returns home", R"(print("ab\^h\^r4cde",0,0,7) px(9,6,7))"},
+    {"screen wrap flag", R"(print("aaa",120,0,7) px(120,6,0) poke(0x5f36,0x80) print("aaa",120,10,7) px(120,16,7) poke(0x5f36,0))"},
+    {"audio plays an existing sfx", R"(poke(0x3200+68*12,0x18,0x0a) poke(0x3200+68*12+65,32)
+print("\a12 ab",0,0,7) eq(stat(46),12) px(0,0,7))"},
+    {"audio skips note data", R"(print("\accc ab",0,0,7) eq(stat(46),-1) px(0,0,7))"},
+    {"underline can be disabled", R"(print("\^ua\^-ub",0,0,7) px(1,6,7) px(5,6,0))"},
+    {"second return is the lowest y", R"(local x,y=print("ab\ncd",10,20) eq(y,32)
+x,y=print("\|0a",10,20) eq(y,20) x,y=print("abc\0",10,20) eq(y,20))"},
+    {"print returns to the margin", R"(print("ab\^hcd",30,40,7) eq(peek(0x5f24),30) eq(peek(0x5f26),38)
+print("c") eq(peek(0x5f26),30)
+print("ab\0",30,40) print("c") eq(peek(0x5f26),30) cursor(9,0) eq(peek(0x5f24),9))"},
+    {"poke command ends the print", R"(print("ab\^!4300x",30,40,7) eq(peek(0x5f26),38) eq(peek(0x5f27),40)
+local x,y=print("ab\^!4300x",0,0) eq(x,8) eq(y,0))"},
+    {"stripes follow height when tall and wide", R"(print("\^w\^t\^=l",0,0,7) px(0,0,7) px(1,0,7) px(0,1,0))"},
+    {"pinball is its own state", R"(eq(print("\^p\^-wa",0,0),8) print("\^p\^-=l",0,0,7) px(0,0,0) px(1,0,7) px(1,1,0))"},
+    {"padded cells scale and reach the last row", R"(print("\#8 ",10,20) px(13,25,8) px(14,25,0)
+print("\^w\#9 ",30,20) px(28,19,9) px(27,19,0) print("\^t\#a ",50,40) px(49,38,10) px(49,37,0))"},
+    {"cls resets clip and ignores pal", R"(clip(10,10,20,20) pal(5,8) cls(5) eq(peek(0x5f20),0) eq(peek(0x5f22),128)
+px(0,0,5) pal() rectfill(0,0,3,3,1) px(1,1,1) pal(1,9) print("\^c1",0,0) px(9,9,1))"},
+    {"blank lines ignore tall", R"(print("\^t\n\nb",0,0,7) px(0,12,7) print("\^t",0,0) eq(peek(0x5f27),6))"},
+    {"print argument conversion", R"(eq(print(nil,0,0),20) eq(print({},0,0),28) print("a",nil) eq(peek(0x5f25),0)
+local x,y=print() eq(x,nil))"},
+    {"foreground keeps the raw parameter", R"(print("\fga",0,0) eq(peek(0x5f25),16) px(0,0,0))"},
+    {"repeat re-runs any code", R"(eq(print("\*3\tb",0,0),52) eq(print("\*2\*3x",0,0),12) print("\*3\f8x",0,0) eq(peek(0x5f25),8))"},
+    {"truncated code ends the print", R"(print("\#",10,20) eq(peek(0x5f27),20) print("\-",10,20) eq(peek(0x5f26),250)
+print("\^j",10,20) eq(peek(0x5f26),0) eq(peek(0x5f27),0))"},
+    {"decoration starts from the last character", R"(local x,y=print("\v5z",-10,-20) eq(x,-1) eq(y,-7)
+print("\v5z",10,20,7) px(11,13,0))"},
+    {"glyphs are cut to their advance", R"(poke(0x5f5a,1) print("\130",10,0,7) px(11,1,0) px(10,1,7) poke(0x5f5a,0)
+poke(0x5600,8,8,8) poke(0x5600+97*8,0x80) poke(0x5605,1) poke(0x5608+40,0x70) print("\014a",20,0,7) px(27,0,0))"},
+    {"default attributes skip custom fonts", R"(poke(0x5f59,5) poke(0x5600,6,9,7) eq(print("\014ab",0,0),12) poke(0x5f59,0))"},
+    {"attributes stop at the font codes", R"(poke(0x5f59,5) poke(0x5600,6,9,7) print("ab\014\015",0,0) eq(print("\014\015ab",0,0),8))"},
+    {"attribute offsets skip custom fonts", R"(poke(0x5f5b,1) poke(0x5600,8,8,8) poke(0x5600+97*8,1) print("\014a",10,10,7) px(10,10,7))"},
+    {"attribute font with an empty header", R"(poke(0x5f58,0x81) eq(print("ab",0,0),16) poke(0x5f58,0))"},
+    {"underline stops at eight rows", R"(poke(0x5600,8,8,12) print("\014\^ua",0,0,7) px(1,8,7) px(1,12,0))"},
+    {"underline follows offsets and raised", R"(poke(0x5f5b,0x10) print("\^ua",0,0,7) px(1,7,7) poke(0x5f5b,0))"},
+    {"invert stops at eight rows", R"(print("\^y9\^ia",10,10,7) px(12,17,7) px(12,18,0))"},
+    {"wrap uses the unscaled width and never scrolls", R"(eq(print("\^r0ab",10,0),14) poke(0x5f36,0x80) local x=print("\^waa",116,0) eq(x,132) poke(0x5f36,0)
+cursor(0,118) print("\^r3a\tb",7) eq(peek(0x5f27),122))"},
+    {"decoration uses the position before a wrap", R"(print("\^r3a\v5z",10,20,7) px(11,13,7))"},
+    {"audio stops at control characters", R"(eq(print("\a12\nab",0,0),8))"},
+    {"truncated one-off and outline", R"(eq(print("\^:",0,0),0) eq(peek(0x5f27),6) print("\^.\1",0,0) eq(peek(0x5f27),0) print("\^o",0,0) eq(peek(0x5f27),6) print("\^o8f",0,0) eq(peek(0x5f27),0))"},
+    {"flag 4 keeps the cursor on the line", R"(poke(0x5f36,4) print("ab",10,20) eq(peek(0x5f26),18) eq(peek(0x5f27),20) poke(0x5f36,0))"},
+    {"cursor without arguments goes home", R"(cursor(9,9) cursor() eq(peek(0x5f24),0) eq(peek(0x5f26),0) eq(peek(0x5f27),0))"},
+    {"explicit nil colour and function names", R"(color(9) print("a",10,20,nil) eq(peek(0x5f25),0) eq(print(print,0,0),40))"},
+    {"delays make print return nothing", R"(eq(print("a\^1b",0,0),nil) eq(print("\^d1a",0,0),nil) eq(print("a\^d1",0,0),4)
+eq(print("\^d0a",0,0),4) print("a\^1b",10,20,7) px(14,20,7))"},
+    {"short hex prints as text", R"(eq(print("\^:ff",0,0),8) print("\^:ff",0,0,7) px(0,1,7))"},
+    {"flag 4 skips the final scroll", R"(poke(0x5f36,4) cursor(0,120) print("a",7) eq(peek(0x5f27),120) poke(0x5f36,0))"},
+    /* end of print cases */
+};
+
+static void p8scii_print_cases(void) {
+    static const char cart_format[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "function eq(a,b) if a~=b then bad=true end end\n"
+        "function px(x,y,c) eq(pget(x,y),c) end\n"
+        "function _draw() cls()\n%s\ncls(bad and 8 or 11) end\n";
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    if (!runtime)
+        return;
+    for (const print_case_t &print_case : print_cases) {
+        char text[4096];
+        int length = snprintf(text, sizeof(text), cart_format, print_case.body);
+        p8p_cart_t cart = {};
+        int ok = length > 0 && (size_t)length < sizeof(text) &&
+                 p8p_cart_load_text_memory((const uint8_t *)text, (size_t)length,
+                                           &cart) == 0 &&
+                 p8p_runtime_load(runtime, &cart) == 0 &&
+                 p8p_runtime_step(runtime, 0) == 0 &&
+                 p8p_runtime_framebuffer(runtime)[0] == 11;
+        if (!ok) {
+            fprintf(stderr, "FAIL print case: %s (%s)\n", print_case.label,
+                    p8p_runtime_error(runtime));
+            ++failures;
+        }
+        p8p_cart_destroy(&cart);
+    }
+    p8p_runtime_destroy(runtime);
+}
+
 /** @brief Run host runtime contracts and embedded cartridge regression cases.
  * Checks API state and rendered pixel markers, including all(t) traversal
  * through deletion, growth, collection and mixed values. Returns nonzero on
  * failed checks so iterator changes are covered by the normal test target.
  */
 int main(void) {
+    p8scii_print_cases();
     test_terminal_nul_source();
     test_incompatible_carts();
     palette_leaf_contracts();
@@ -832,6 +1039,8 @@ int main(void) {
         "if C.x==1 and C.y==2 and C.z==nil and F.q==\"q!\" and H[0.5]==\"half\" and D.x==1 and inenv() then pset(18,2,7) end\n"
         "lc=5 do local lc*=2 local ls=\"a\" local ls..=\"b\" if lc==10 and ls==\"ab\" then pset(14,2,7) end end\n"
         "if lc~=5 then pset(14,2,0) end\n"
+        "print(\"\\6y7a\\6y3\\n\\n\\f8b\",40,100,7) local row=0\n"
+        "for x=40,43 do if pget(x,110)==8 then row+=1 end end if row>0 then pset(19,2,7) end\n"
         "end\n";
     CHECK(p8p_cart_load_text_memory(text_engine_source,
                                     sizeof(text_engine_source) - 1,
@@ -1130,7 +1339,7 @@ int main(void) {
             fprintf(stderr, "text engine load: %s\n", p8p_runtime_error(runtime));
         CHECK(loaded == 0);
         CHECK(p8p_runtime_step(runtime, 0) == 0);
-        for (int check = 1; check <= 18; ++check) {
+        for (int check = 1; check <= 19; ++check) {
             if (p8p_runtime_framebuffer(runtime)[2 * 128 + check] != 7)
                 fprintf(stderr, "text engine check %d failed\n", check);
             CHECK(p8p_runtime_framebuffer(runtime)[2 * 128 + check] == 7);
