@@ -3274,8 +3274,6 @@ extern "C" int p8p_runtime_load_context(p8p_runtime_t *runtime,
     runtime->draw_target = 0x6000;
     runtime->ram[0x5f56] = 0x20;
     runtime->ram[0x5f57] = 128;
-    runtime->ram[0x5f5c] = 15;
-    runtime->ram[0x5f5d] = 4;
     runtime->ram[0x5f5e] = 0xff;
     for (int i = 0; i < 16; ++i) {
         runtime->draw_palette[i] = (uint8_t)i;

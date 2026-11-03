@@ -386,6 +386,34 @@ static void hidden_builtins_match_pico8(void) {
     p8p_cart_destroy(&cart);
 }
 
+static void btnp_repeat_bytes_start_at_zero(void) {
+    /* Each case was checked against PICO-8 0.2.7. */
+    static const char source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "r={}\n"
+        "function is(c) add(r,c) end\n"
+        "function _draw()\n"
+        " is(peek(0x5f5c)==0 and peek(0x5f5d)==0)\n"
+        " cls() for i=1,#r do pset(i-1,0,r[i] and 11 or 8) end\n"
+        "end\n"
+        ;
+    p8p_cart_t cart = {};
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                    sizeof(source) - 1, &cart) == 0);
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    const uint8_t *fb = p8p_runtime_framebuffer(runtime);
+    for (int index = 0; index < 1; ++index) {
+        if (fb[index] != 11)
+            fprintf(stderr, "FAIL btnp repeat byte case %d\n", index + 1);
+        CHECK(fb[index] == 11);
+    }
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+}
+
 static void draw_palette_transitions(void) {
     struct PaletteCase {
         const char *name;
@@ -632,6 +660,7 @@ int main(void) {
     palette_leaf_contracts();
     palette_fast_path_semantics();
     draw_palette_transitions();
+    btnp_repeat_bytes_start_at_zero();
     hidden_builtins_match_pico8();
     stat_values_match_pico8();
     audio_chunk_boundaries();

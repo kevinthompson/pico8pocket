@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The `btnp()` repeat delay and interval at `0x5f5c` and `0x5f5d` start at 0,
+  which means PICO-8's defaults of 15 and 4 frames, instead of holding 15 and
+  4. Repeat timing is unchanged; carts that peek these bytes now read 0 as in
+  PICO-8 0.2.7.
+
 - Add PICO-8's undocumented built-ins `_set_fps`, `_update_buttons`,
   `_get_menu_item_selected`, `_map_display`, `_mark_cpu`, `_startframe`,
   `__trace`, `holdframe`, `_update_framerate` and `set_draw_slice`. Carts that
