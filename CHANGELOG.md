@@ -59,6 +59,9 @@
   `btnp(6)` does not repeat.
 - Menu text uses the PICO-8 font data instead of a separate hand-drawn font, in
   which letters such as `M` and `N` were hard to tell apart.
+- `circfill` draws the same shape as PICO-8 0.2.7: each row is filled out to
+  the outline `circ` draws. Rows near the top and bottom of a circle were
+  previously too narrow, so small filled circles looked pinched.
 
 ## 0.0.35 — 2026-10-21
 

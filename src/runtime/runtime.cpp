@@ -1098,6 +1098,38 @@ static int api_rrectfill(lua_State *lua) {
     return 0;
 }
 
+/* One clipped filled-circle row pair (above and below the centre). */
+struct circle_fill {
+    p8p_runtime_t *runtime;
+    int sx, sy;
+    int clip_x0, clip_x1, clip_y0, clip_y1;
+    int color;
+    int patterned;
+    uint8_t mapped;
+};
+
+static void fill_circle_rows(const circle_fill *circle, int offset_y,
+                             int half_width) {
+    int x0 = circle->sx - half_width;
+    int x1 = circle->sx + half_width;
+    if (x0 < circle->clip_x0) x0 = circle->clip_x0;
+    if (x1 > circle->clip_x1) x1 = circle->clip_x1;
+    if (x0 > x1)
+        return;
+    for (int side = 0; side < (offset_y ? 2 : 1); ++side) {
+        int y = side ? circle->sy + offset_y : circle->sy - offset_y;
+        if (y < circle->clip_y0 || y > circle->clip_y1)
+            continue;
+        uint8_t *row = circle->runtime->framebuffer + y * 128;
+        if (circle->patterned)
+            fill_pattern_span(row, x0, x1,
+                              fill_pattern_row(circle->runtime, y,
+                                               circle->color));
+        else
+            fill_solid_span(row, x0, x1, circle->mapped);
+    }
+}
+
 static int api_circfill(lua_State *lua) {
     profile_api(P8P_API_GRAPHICS);
     p8p_runtime_t *runtime = active_runtime;
@@ -1110,38 +1142,38 @@ static int api_circfill(lua_State *lua) {
     /* Work in screen coordinates and clip once: circles are often mostly
      * off screen or behind clip(), and a draw_hspan call per row (about
      * 110 circles a frame in Celeste 2) cost more than the filling. */
-    int sx = cx - runtime->camera_x;
-    int sy = cy - runtime->camera_y;
-    int clip_x0 = runtime->clip_x0, clip_x1 = runtime->clip_x1 - 1;
-    int clip_y0 = runtime->clip_y0, clip_y1 = runtime->clip_y1 - 1;
-    if (sx + radius < clip_x0 || sx - radius > clip_x1 ||
-        sy + radius < clip_y0 || sy - radius > clip_y1 ||
-        clip_x0 > clip_x1 || clip_y0 > clip_y1)
+    circle_fill circle;
+    circle.runtime = runtime;
+    circle.sx = cx - runtime->camera_x;
+    circle.sy = cy - runtime->camera_y;
+    circle.clip_x0 = runtime->clip_x0;
+    circle.clip_x1 = runtime->clip_x1 - 1;
+    circle.clip_y0 = runtime->clip_y0;
+    circle.clip_y1 = runtime->clip_y1 - 1;
+    if (circle.sx + radius < circle.clip_x0 ||
+        circle.sx - radius > circle.clip_x1 ||
+        circle.sy + radius < circle.clip_y0 ||
+        circle.sy - radius > circle.clip_y1 ||
+        circle.clip_x0 > circle.clip_x1 || circle.clip_y0 > circle.clip_y1)
         return 0;
-    uint8_t mapped = runtime->draw_palette[color & 15] & 15;
-    int patterned = runtime->fill_pattern_active;
-    int extent = radius;
-    int radius_squared = radius * radius;
-    /* Past this offset both rows are outside the clip rectangle. */
-    int last_offset = sy - clip_y0 > clip_y1 - sy ? sy - clip_y0 : clip_y1 - sy;
-    if (last_offset > radius) last_offset = radius;
-    for (int offset_y = 0; offset_y <= last_offset; ++offset_y) {
-        while (extent * extent + offset_y * offset_y > radius_squared)
-            --extent;
-        int x0 = sx - extent < clip_x0 ? clip_x0 : sx - extent;
-        int x1 = sx + extent > clip_x1 ? clip_x1 : sx + extent;
-        if (x0 > x1)
-            continue;
-        for (int side = 0; side < (offset_y ? 2 : 1); ++side) {
-            int y = side ? sy + offset_y : sy - offset_y;
-            if (y < clip_y0 || y > clip_y1)
-                continue;
-            uint8_t *row = runtime->framebuffer + y * 128;
-            if (patterned)
-                fill_pattern_span(row, x0, x1,
-                                  fill_pattern_row(runtime, y, color));
-            else
-                fill_solid_span(row, x0, x1, mapped);
+    circle.color = color;
+    circle.mapped = runtime->draw_palette[color & 15] & 15;
+    circle.patterned = runtime->fill_pattern_active;
+    /* Fill out to the outline circ() draws: the same midpoint walk over one
+     * octant, as PICO-8 does.  Each step fills the row at offset y out to x;
+     * when x steps in, the row at offset x is complete out to the last y. */
+    int x = radius;
+    int y = 0;
+    int error = 1 - radius;
+    while (x >= y) {
+        fill_circle_rows(&circle, y, x);
+        ++y;
+        if (error < 0) {
+            error += 2 * y + 1;
+        } else {
+            fill_circle_rows(&circle, x, y - 1);
+            --x;
+            error += 2 * (y - x) + 1;
         }
     }
     runtime->screen_ram_dirty = 1;
