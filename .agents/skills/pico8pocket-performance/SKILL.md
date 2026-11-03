@@ -1,7 +1,7 @@
 ---
 name: pico8pocket-performance
 description: Measure and optimize Pico8Pocket's frame time on the Analogue Pocket (RV32 openfpgaOS) - reading the profiler overlay, reproducing a slow scene, counting RV32 instructions, BRAM placement and the frame-skip scheduler. Use when a cart runs slowly on the Pocket, when the user sends overlay screenshots, or before changing the interpreter, drawing or audio hot paths.
-argument-hint: "[harness: path or host:path of a zenibako/pocket-harness checkout]"
+argument-hint: "[harness: path or host:path of a zenibako/pocket-dev-tools checkout]"
 ---
 
 # Pico8Pocket performance
@@ -91,7 +91,12 @@ argument-hint: "[harness: path or host:path of a zenibako/pocket-harness checkou
 
 - `make celeste` compares Celeste carts against `build/celeste-baseline`:
   frame hash plus callgrind instructions per frame.
-  `make celeste-baseline` records the baseline.
+  `make celeste-baseline` records or replaces it: run that only when explicitly
+  establishing a new accepted reference, preserving the old directory/digest.
+  Never use it during a routine candidate comparison. `make celeste` is a
+  diagnostic, not a gate: changed hashes, missing carts or missing references
+  can still exit zero. Require the complete matched roster and inspect every
+  output; report missing evidence rather than PASS.
 - Carts live only in `assets/cards/`, which is gitignored; never commit them.
   A fresh workspace has none, and the Lexaloffle site may be unreachable
   from a cloud session, so ask the user for their cards zip (68 carts as of
@@ -161,6 +166,12 @@ package identity, screenshot-backed device summaries and comparison modes.
 Keep per-cart hashes/routes, logical rates, V estimates, separately measured
 presentation rates, render divisor and audio settings separate. Collection complements every native, package and device check
 above; importing a summary neither certifies transcription nor adds RTL support.
+
+For recurring checks, use the project's
+[preserved-baseline workflow](../../../docs/BENCHMARKING.md#routine-regression-checks):
+keep accepted evidence unchanged, create independent fixed-seed cases and require
+native-output agreement. The shared Butterscotch `regression.py` is not a Pico8
+runner; channel hashes do not establish raw byte equality.
 
 ## Simulated runs: use the bounded os20 adapter
 
