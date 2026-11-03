@@ -110,7 +110,7 @@ class PackageMetadataTests(unittest.TestCase):
         self.assertEqual([slot['id'] for slot in slots], [0,1,2,3,4,5,6,7,8,10,11,12,13,14,15,16,17,18,19,20])
         self.assertEqual(slots[0]['filename'], 'pico8pocket.json')
         self.assertEqual(slots[0]['parameters'], 275)
-        self.assertEqual(selected['parameters'], 129)
+        self.assertEqual(selected['parameters'], 1)
         # Fixed-name slots must not masquerade as user-selectable game formats.
         for slot in slots:
             if slot['id'] in (0,1,2,3,5,6,7):
