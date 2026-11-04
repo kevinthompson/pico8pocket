@@ -1,7 +1,7 @@
 ---
 name: pico8pocket-performance
 description: Measure and optimize Pico8Pocket's frame time on the Analogue Pocket (RV32 openfpgaOS) - reading the profiler overlay, reproducing a slow scene, counting RV32 instructions, BRAM placement and the frame-skip scheduler. Use when a cart runs slowly on the Pocket, when the user sends overlay screenshots, or before changing the interpreter, drawing or audio hot paths.
-argument-hint: "[harness: path or host:path of a zenibako/pocket-harness checkout]"
+argument-hint: "[harness: path or host:path of a zenibako/pocket-dev-tools checkout]"
 ---
 
 # Pico8Pocket performance
@@ -51,8 +51,9 @@ argument-hint: "[harness: path or host:path of a zenibako/pocket-harness checkou
   compared metric rosters matched. Other displayed timings retain millisecond
   rounding even if converted to microseconds.
 - **Scheduler** (`src/app/scheduler.c`): it keeps R1 while F + A + P fits the
-  budget, 32 ms at 30 FPS or 15 ms at 60 FPS. Update cost is only measured on
-  skipped frames. At R1 and over budget, one draw in 15 is skipped to
+  budget, 32 ms at 30 FPS or 15 ms at 60 FPS, and allows 16.5 ms per 60 FPS
+  frame once it skips draws. If no divisor fits, it takes the lowest one within
+  a fifth of the fastest step. Update cost is only measured on skipped frames. At R1 and over budget, one draw in 15 is skipped to
   re-measure it.
 - A screenshot showing R02 with U + D + A + P under budget means F is larger.
   Ask for F before optimizing anything.
@@ -91,7 +92,12 @@ argument-hint: "[harness: path or host:path of a zenibako/pocket-harness checkou
 
 - `make celeste` compares Celeste carts against `build/celeste-baseline`:
   frame hash plus callgrind instructions per frame.
-  `make celeste-baseline` records the baseline.
+  `make celeste-baseline` records or replaces it: run that only when explicitly
+  establishing a new accepted reference, preserving the old directory/digest.
+  Never use it during a routine candidate comparison. `make celeste` is a
+  diagnostic, not a gate: changed hashes, missing carts or missing references
+  can still exit zero. Require the complete matched roster and inspect every
+  output; report missing evidence rather than PASS.
 - Carts live only in `assets/cards/`, which is gitignored; never commit them.
   A fresh workspace has none, and the Lexaloffle site may be unreachable
   from a cloud session, so ask the user for their cards zip (68 carts as of
@@ -161,6 +167,12 @@ package identity, screenshot-backed device summaries and comparison modes.
 Keep per-cart hashes/routes, logical rates, V estimates, separately measured
 presentation rates, render divisor and audio settings separate. Collection complements every native, package and device check
 above; importing a summary neither certifies transcription nor adds RTL support.
+
+For recurring checks, use the project's
+[preserved-baseline workflow](../../../docs/BENCHMARKING.md#routine-regression-checks):
+keep accepted evidence unchanged, create independent fixed-seed cases and require
+native-output agreement. The shared Butterscotch `regression.py` is not a Pico8
+runner; channel hashes do not establish raw byte equality.
 
 ## Simulated runs: use the bounded os20 adapter
 

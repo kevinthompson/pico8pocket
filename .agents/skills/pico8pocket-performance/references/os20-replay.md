@@ -5,8 +5,11 @@
 The harness is the private repository
 [zenibako/pocket-dev-tools](https://github.com/zenibako/pocket-dev-tools); this
 adapter lives in its `pico8/` directory (os20 support since `7e747e7`). Take
-the checkout's location from the **harness** argument, then
-`OS25_HARNESS_ROOT`; ask once if neither is set, and don't hunt for it.
+the checkout's location from the **harness** argument or explicit session root,
+then `POCKET_DEV_TOOLS_ROOT`, then legacy `POCKET_HARNESS_ROOT` or
+`OS25_HARNESS_ROOT`. Resolve conflicting explicit roots; ask once if none is
+available. Follow the [project baseline contract](../../../../docs/BENCHMARKING.md#routine-regression-checks)
+for recurring checks; keep accepted cases unchanged and candidates independent.
 Read its `README.md`, `AGENTS.md`, canonical
 `.agents/skills/os25-harness/SKILL.md` and `pico8/README.md`. The local benchmark
 router also supports shared checkout discovery for collection. Carts, cases and

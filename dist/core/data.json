@@ -37,7 +37,7 @@
                 "id": 4,
                 "name": "Cartridge",
                 "required": true,
-                "parameters": 129,
+                "parameters": 1,
                 "extensions": ["p8", "png"],
                 "deferload": true
             },

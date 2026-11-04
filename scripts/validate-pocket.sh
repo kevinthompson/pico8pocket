@@ -121,7 +121,7 @@ for padding_file in p8p_pad5.bin p8p_pad6.bin p8p_pad7.ofsf; do
     }
 done
 
-jq -e '.data.data_slots[] | select(.id == 4 and .required == true and .parameters == 129)' \
+jq -e '.data.data_slots[] | select(.id == 4 and .required == true and .parameters == 1)' \
     "$CORE_DIR/data.json" >/dev/null
 
 # The offline bundle is an optional read-only tail slot. Never insert it before
