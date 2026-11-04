@@ -86,8 +86,7 @@ static void update_palette_default_flags(p8p_runtime_t *runtime) {
     int palettes_default = 1;
     int transparency_default = runtime->transparent[0] != 0;
     for (int i = 0; i < 16; ++i) {
-        if (runtime->draw_palette[i] != i ||
-            runtime->screen_palette[i] != i)
+        if (runtime->draw_palette[i] != i || runtime->ram[0x5f10 + i] != i)
             palettes_default = 0;
         if (i && runtime->transparent[i])
             transparency_default = 0;
@@ -498,11 +497,24 @@ static void draw_state_to_ram(p8p_runtime_t *runtime) {
     runtime->ram[0x5f33] = runtime->fill_pattern_flags;
 }
 
-static void palette_entry_to_ram(p8p_runtime_t *runtime, int color) {
+static void draw_palette_entry_to_ram(p8p_runtime_t *runtime, int color) {
     runtime->ram[0x5f00 + color] =
         (uint8_t)(runtime->draw_palette[color] |
                   (runtime->transparent[color] ? 0x10 : 0));
-    runtime->ram[0x5f10 + color] = runtime->screen_palette[color];
+}
+
+/* pal(c, v, 1) keeps v's low byte at 0x5f10 + c and returns the byte it
+ * replaced, as PICO-8 does; the display uses the colour bits (0x8f). */
+static int set_screen_palette_entry(p8p_runtime_t *runtime, int color,
+                                    int value) {
+    uint8_t raw = (uint8_t)value;
+    int previous = runtime->ram[0x5f10 + color];
+    if (previous != raw) {
+        runtime->ram[0x5f10 + color] = raw;
+        runtime->screen_palette[color] = raw & 0x8f;
+        runtime->palettes_default = 0;
+    }
+    return previous;
 }
 
 static void cursor_to_ram(p8p_runtime_t *runtime) {
@@ -533,8 +545,6 @@ static void draw_state_defaults_to_ram(p8p_runtime_t *runtime) {
     ram[0x5f55] = 0x60;
     ram[0x5f56] = 0x20;
     ram[0x5f57] = 128;
-    ram[0x5f5c] = 15;
-    ram[0x5f5d] = 4;
     ram[0x5f5e] = 0xff;
     reset_secondary_palette(runtime);
 }
@@ -1867,7 +1877,8 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
             for (int i = 0; i < 16; ++i) {
                 runtime->draw_palette[i] = (uint8_t)i;
                 runtime->screen_palette[i] = (uint8_t)i;
-                palette_entry_to_ram(runtime, i);
+                runtime->ram[0x5f10 + i] = (uint8_t)i;
+                draw_palette_entry_to_ram(runtime, i);
             }
             reset_secondary_palette(runtime);
             runtime->palettes_default = 1;
@@ -1880,16 +1891,19 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
         while (lua_next(lua, 1) != 0) {
             if (lua_isnumber(lua, -2) && lua_isnumber(lua, -1)) {
                 int from = (int)lua_tonumber(lua, -2) & 15;
-                int to = (int)lua_tonumber(lua, -1) &
-                         (target == 2 ? 0xff : screen ? 0x8f : 15);
-                uint8_t *entry =
-                    target == 2 ? &runtime->ram[P8P_SECONDARY_PALETTE + from] :
-                    screen ? &runtime->screen_palette[from] :
-                             &runtime->draw_palette[from];
-                if (*entry != (uint8_t)to) {
-                    *entry = (uint8_t)to;
+                int value = (int)lua_tonumber(lua, -1);
+                if (target == 2) {
+                    uint8_t *entry = &runtime->ram[P8P_SECONDARY_PALETTE + from];
+                    if (*entry != (uint8_t)value) {
+                        *entry = (uint8_t)value;
+                        runtime->palettes_default = 0;
+                    }
+                } else if (screen) {
+                    set_screen_palette_entry(runtime, from, value);
+                } else if (runtime->draw_palette[from] != (value & 15)) {
+                    runtime->draw_palette[from] = (uint8_t)(value & 15);
                     runtime->palettes_default = 0;
-                    palette_entry_to_ram(runtime, from);
+                    draw_palette_entry_to_ram(runtime, from);
                 }
             }
             lua_pop(lua, 1);
@@ -1902,14 +1916,15 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
             reset_secondary_palette(runtime);
             update_palette_default_flags(runtime);
         } else if (palette == 0 || palette == 1) {
-            uint8_t *entries = palette ? runtime->screen_palette
-                                       : runtime->draw_palette;
             for (int i = 0; i < 16; ++i) {
-                if (entries[i] != i) {
-                    entries[i] = (uint8_t)i;
-                    palette_entry_to_ram(runtime, i);
+                if (palette) {
+                    set_screen_palette_entry(runtime, i, i);
+                } else if (runtime->draw_palette[i] != i) {
+                    runtime->draw_palette[i] = (uint8_t)i;
+                    draw_palette_entry_to_ram(runtime, i);
                 }
             }
+            update_palette_default_flags(runtime);
             if (palette == 0)
                 reset_transparency(runtime);
         }
@@ -1929,16 +1944,16 @@ extern "C" __attribute__((noinline)) int p8p_api_pal_full(lua_State *lua) {
             push_int(lua, previous);
             return 1;
         }
-        int to = arg_int(lua, 2, 0) & (screen ? 0x8f : 15);
-        int previous = screen ? runtime->screen_palette[from]
-                              : runtime->draw_palette[from];
-        if (previous != to) {
-            if (screen)
-                runtime->screen_palette[from] = (uint8_t)to;
-            else
-                runtime->draw_palette[from] = (uint8_t)to;
+        int value = arg_int(lua, 2, 0);
+        if (screen) {
+            push_int(lua, set_screen_palette_entry(runtime, from, value));
+            return 1;
+        }
+        int previous = runtime->draw_palette[from];
+        if (previous != (value & 15)) {
+            runtime->draw_palette[from] = (uint8_t)(value & 15);
             runtime->palettes_default = 0;
-            palette_entry_to_ram(runtime, from);
+            draw_palette_entry_to_ram(runtime, from);
         }
         push_int(lua, previous);
         return 1;
@@ -2975,8 +2990,21 @@ static int api_stat(lua_State *lua) {
         lua_pushstring(lua, runtime->params);
         break;
     case 5:
-        push_int(lua, 42);
+        push_int(lua, 43);  /* PICO-8 0.2.7's version number */
         break;
+    case 9:
+        /* The display's refresh rate. */
+        push_int(lua, 60);
+        break;
+    case 11:
+        /* One display; _map_display() selects nothing else. */
+        push_int(lua, 1);
+        break;
+    /* The pause menu's rectangle, as PICO-8 reports it. */
+    case 12: push_int(lua, 23); break;
+    case 13: push_int(lua, 39); break;
+    case 14: push_int(lua, 104); break;
+    case 15: push_int(lua, 88); break;
     case 7:
     case 8:
         push_int(lua, runtime->target_fps);
@@ -3005,6 +3033,8 @@ static int api_stat(lua_State *lua) {
         break;
     case 28:
     case 30:
+    case 104:
+    case 110: /* frame-by-frame mode */
     case 120:
     case 121:
     case 122:
@@ -3042,8 +3072,19 @@ static int api_stat(lua_State *lua) {
         else
             lua_pushnil(lua);
         break;
+    case 64: case 65: case 66: case 67:
+    case 68: case 69: case 70: case 71:
     case 101:
         lua_pushnil(lua);
+        break;
+    case 109:
+    case 111:
+        /* PICO-8 reports 256 for both. */
+        push_int(lua, 256);
+        break;
+    case 124:
+        /* The current directory. */
+        lua_pushliteral(lua, "/");
         break;
     case 108:
         /* PCM samples still queued from serial(0x808). */
@@ -3056,7 +3097,8 @@ static int api_stat(lua_State *lua) {
         push_int(lua, p8p_audio_channel_note(runtime->audio, item - 50));
         break;
     default:
-        lua_pushnil(lua);
+        /* PICO-8 returns 0 for every other code, including unused ones. */
+        push_int(lua, 0);
         break;
     }
     return 1;
@@ -3444,6 +3486,33 @@ static const luaL_Reg runtime_api[] = {
     {"foreach", api_foreach}, {NULL, NULL}
 };
 
+/*
+ * _set_fps(n) sets the frame rate for flip() loops in top-level code.  PICO-8
+ * steps time() by 1/30 s at 30 and by 1/60 s for any other rate, and its main
+ * loop picks the rate from _update60 again once it starts.  A later call in
+ * PICO-8 changes only how often frames are drawn, never the game speed, so
+ * from the main loop on it keeps the rate.  The frame count is rescaled so
+ * time() continues smoothly, as in PICO-8.
+ */
+static int api_set_fps(lua_State *lua) {
+    p8p_runtime_t *runtime = active_runtime;
+    int fps = arg_int(lua, 1, 0) == 30 ? 30 : 60;
+    if (runtime->cart_thread_kind == 0 && fps != runtime->target_fps) {
+        runtime->frame_count = (uint32_t)((uint64_t)runtime->frame_count *
+                                          (uint32_t)fps /
+                                          (uint32_t)runtime->target_fps);
+        runtime->target_fps = fps;
+    }
+    return 0;
+}
+
+/* _map_display(n) selects the display that drawing goes to.  The Pocket
+ * has one, so as in PICO-8 with a single display, only n < 1 succeeds. */
+static int api_map_display(lua_State *lua) {
+    lua_pushboolean(lua, arg_int(lua, 1, 0) < 1);
+    return 1;
+}
+
 /* reset() returns the draw state to its boot values, as PICO-8 does, but
  * keeps the cursor and print's left margin.  The poke path then updates the
  * draw fields and the draw target. */
@@ -3472,6 +3541,13 @@ static const luaL_Reg late_runtime_api[] = {
     /* Not PICO-8 API, but Yarn calls exit() while drawing its score panel
      * once all levels are unlocked; a no-op lets it finish the frame. */
     {"exit", api_stub}, {"reset", api_reset},
+    /* PICO-8 0.2.7 defines these undocumented functions.  The frame and
+     * CPU hooks are no-ops here, and __trace matches trace. */
+    {"_set_fps", api_set_fps}, {"_update_buttons", api_stub},
+    {"_get_menu_item_selected", api_stub}, {"_map_display", api_map_display},
+    {"_mark_cpu", api_stub}, {"_startframe", api_stub},
+    {"__trace", api_trace}, {"holdframe", api_stub},
+    {"_update_framerate", api_stub}, {"set_draw_slice", api_stub},
     {NULL, NULL}
 };
 
@@ -3525,7 +3601,7 @@ static const char bootstrap_lua[] =
     "rawset(debug.getregistry(),'__PICO8_SANDBOX',_G)\n"
     "eris.__p8p_perm={} eris.__p8p_unperm={} eris.__p8p_original={}\n"
     "function eris.__p8p_init()\n"
-    " local late={'cstore','trace','menuitem','exit','rrect','rrectfill','reset'} local skip={} for _,k in ipairs(late) do skip[k]=true end\n"
+    " local late={'cstore','trace','menuitem','exit','rrect','rrectfill','reset','_set_fps','_update_buttons','_get_menu_item_selected','_map_display','_mark_cpu','_startframe','__trace','holdframe','_update_framerate','set_draw_slice'} local skip={} for _,k in ipairs(late) do skip[k]=true end\n"
     " local keys={} for k in pairs(_G) do if not skip[k] then keys[#keys+1]=k end end table.sort(keys)\n"
     " local seen={} local n=0 local function permanent(v) local t=type(v)\n"
     "  if t~='table' and t~='function' and t~='userdata' and t~='thread' then return end\n"
@@ -3926,6 +4002,7 @@ extern "C" int p8p_runtime_load_context(p8p_runtime_t *runtime,
     p8p_audio_reset(runtime->audio, runtime->ram);
     runtime->error[0] = '\0';
     runtime->frame_count = 0;
+    runtime->target_fps = 30;  /* until _set_fps or the main loop */
     runtime->buttons = runtime->previous_buttons = runtime->frame_buttons = 0;
     memset(runtime->held_frames, 0, sizeof(runtime->held_frames));
     runtime->lua = lua_newstate(lua_pool_alloc, NULL);
@@ -4005,8 +4082,8 @@ extern "C" int p8p_runtime_load_context(p8p_runtime_t *runtime,
         return 0;
     }
     if (cart_status == LUA_YIELD) {
+        /* Top-level flip() loops run at 30 fps unless _set_fps changed it. */
         runtime->cart_thread_active = 1;
-        runtime->target_fps = 30;
     } else if (cart_status == LUA_OK) {
         release_cart_thread(runtime);
         if (finish_cart_load(runtime) != 0)

@@ -1097,6 +1097,177 @@ static void reset_restores_boot_draw_state(void) {
     p8p_cart_destroy(&cart);
 }
 
+static void stat_values_match_pico8(void) {
+    /* Each case was checked against PICO-8 0.2.7. */
+    static const char source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "r={}\n"
+        "function is(c) add(r,c) end\n"
+        "function zeros(a,b) for i=a,b do if stat(i)~=0 then return false end end return true end\n"
+        "function nils(a,b) for i=a,b do if stat(i)~=nil then return false end end return true end\n"
+        "function _draw()\n"
+        " is(stat(3)==0 and stat(5)==43 and stat(10)==0 and stat(11)==1)\n"
+        " is(stat(12)==23 and stat(13)==39 and stat(14)==104 and stat(15)==88)\n"
+        " is(zeros(40,45) and zeros(58,63) and zeros(72,79) and zeros(86,89) and zeros(96,98))\n"
+        " is(nils(64,71) and stat(64.5)==nil and stat(100)==nil and stat(101)==nil)\n"
+        " is(stat(104)==false and stat(110)==false and stat(105)==0 and stat(107)==0)\n"
+        " is(stat(109)==256 and stat(111)==256 and stat(124)==\"/\")\n"
+        " is(zeros(112,119) and stat(123)==0 and zeros(125,255))\n"
+        " is(stat(-1)==0 and stat(256)==0 and stat(1000)==0 and stat(27)==0 and stat(37)==0)\n"
+        " memset(0x4300,128,512) for i=0,7 do serial(0x808,0x4300+i*64,64) end is(stat(108)==512)\n"
+        " cls() for i=1,#r do pset(i-1,0,r[i] and 11 or 8) end\n"
+        "end\n"
+        ;
+    p8p_cart_t cart = {};
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                    sizeof(source) - 1, &cart) == 0);
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    const uint8_t *fb = p8p_runtime_framebuffer(runtime);
+    for (int index = 0; index < 9; ++index) {
+        if (fb[index] != 11)
+            fprintf(stderr, "FAIL stat case %d\n", index + 1);
+        CHECK(fb[index] == 11);
+    }
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+}
+
+static void hidden_builtins_match_pico8(void) {
+    /* Each case was checked against PICO-8 0.2.7. */
+    static const char source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "r={}\n"
+        "function is(c) add(r,c) end\n"
+        "function n(...) return select(\"#\",...) end\n"
+        "names=split(\"_set_fps,_update_buttons,_get_menu_item_selected,_map_display,_mark_cpu,_startframe,__trace,holdframe,_update_framerate,set_draw_slice\",\",\",false)\n"
+        "function _draw()\n"
+        " local ok=true for k in all(names) do if type(_ENV[k])~=\"function\" then ok=false end end is(ok)\n"
+        " is(n(_set_fps(60))==0 and n(_set_fps\"60\")==0)\n"
+        " is(n(_update_buttons())==0 and n(_mark_cpu())==0 and n(_startframe())==0 and n(holdframe())==0)\n"
+        " is(n(_get_menu_item_selected())==0 and n(_update_framerate())==0 and n(set_draw_slice(0))==0)\n"
+        " is(_map_display()==true and _map_display(0)==true and _map_display(-1)==true)\n"
+        " is(_map_display(1)==false and _map_display(2)==false)\n"
+        " is(type(__trace())==\"string\")\n"
+        " cls() for i=1,#r do pset(i-1,0,r[i] and 11 or 8) end\n"
+        "end\n"
+        ;
+    p8p_cart_t cart = {};
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                    sizeof(source) - 1, &cart) == 0);
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    const uint8_t *fb = p8p_runtime_framebuffer(runtime);
+    for (int index = 0; index < 7; ++index) {
+        if (fb[index] != 11)
+            fprintf(stderr, "FAIL hidden built-in case %d\n", index + 1);
+        CHECK(fb[index] == 11);
+    }
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+}
+
+static void btnp_repeat_bytes_start_at_zero(void) {
+    /* Each case was checked against PICO-8 0.2.7. */
+    static const char source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "r={}\n"
+        "function is(c) add(r,c) end\n"
+        "function _draw()\n"
+        " is(peek(0x5f5c)==0 and peek(0x5f5d)==0)\n"
+        " cls() for i=1,#r do pset(i-1,0,r[i] and 11 or 8) end\n"
+        "end\n"
+        ;
+    p8p_cart_t cart = {};
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                    sizeof(source) - 1, &cart) == 0);
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    const uint8_t *fb = p8p_runtime_framebuffer(runtime);
+    for (int index = 0; index < 1; ++index) {
+        if (fb[index] != 11)
+            fprintf(stderr, "FAIL btnp repeat byte case %d\n", index + 1);
+        CHECK(fb[index] == 11);
+    }
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+}
+
+static void screen_palette_keeps_raw_bytes(void) {
+    /* Each case was checked against PICO-8 0.2.7. */
+    static const char source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "r={}\n"
+        "function is(c) add(r,c) end\n"
+        "function _draw()\n"
+        " is(pal(9,-7,1)==9 and @0x5f19==0xf9)\n"
+        " is(pal(9,0x99,1)==0xf9 and @0x5f19==0x99)\n"
+        " is(pal(9,0x1c3,1)==0x99 and @0x5f19==0xc3)\n"
+        " pal({[9]=0xf9,[3]=0x75},1) is(@0x5f19==0xf9 and @0x5f13==0x75)\n"
+        " pal(9,9,1) pal(3,3,1)\n"
+        " is(pal(9,0x1c)==9 and @0x5f09==0xc and pal(9,-7)==0xc and @0x5f09==9)\n"
+        " pal(9,0x99,1) pal() is(@0x5f19==9 and @0x5f09==9)\n"
+        " poke(0x5f19,0x19) pal() is(@0x5f19==9)\n"
+        " poke(0x5f19,0xf9) is(pal(9,9,1)==0xf9 and @0x5f19==9)\n"
+        " cls() for i=1,#r do pset(i-1,0,r[i] and 11 or 8) end\n"
+        "end\n"
+        ;
+    p8p_cart_t cart = {};
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                    sizeof(source) - 1, &cart) == 0);
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    const uint8_t *fb = p8p_runtime_framebuffer(runtime);
+    for (int index = 0; index < 8; ++index) {
+        if (fb[index] != 11)
+            fprintf(stderr, "FAIL screen palette byte case %d\n", index + 1);
+        CHECK(fb[index] == 11);
+    }
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+}
+
+static void set_fps_paces_top_level_flips(void) {
+    /* Measured in PICO-8 0.2.7: _set_fps(60) before the main loop makes each
+     * flip() advance time() by 1/60 s, _set_fps(30) by 1/30 s with time()
+     * continuing smoothly, and the main loop then picks the rate from
+     * _update60 again. */
+    static const char source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "_set_fps(60) for i=1,60 do flip() end t1=time() s1=stat(7)\n"
+        "_set_fps(30) for i=1,30 do flip() end t2=time() s2=stat(7)\n"
+        "function _update() end\n"
+        "function _draw() cls()\n"
+        " pset(0,0,(t1>0.98 and t1<1.05) and 11 or 8)\n"
+        " pset(1,0,(t2-t1>0.96 and t2-t1<1.04) and 11 or 8)\n"
+        " pset(2,0,(s1==60 and s2==30 and stat(7)==30) and 11 or 8)\n"
+        "end\n";
+    p8p_cart_t cart = {};
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                    sizeof(source) - 1, &cart) == 0);
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    for (int step = 0; step < 100; ++step)
+        CHECK(p8p_runtime_step(runtime, 0) == 0);
+    const uint8_t *fb = p8p_runtime_framebuffer(runtime);
+    for (int index = 0; index < 3; ++index) {
+        if (fb[index] != 11)
+            fprintf(stderr, "FAIL _set_fps case %d\n", index + 1);
+        CHECK(fb[index] == 11);
+    }
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+}
+
 static void draw_palette_transitions(void) {
     struct PaletteCase {
         const char *name;
@@ -1599,6 +1770,11 @@ int main(void) {
     palette_leaf_contracts();
     palette_fast_path_semantics();
     draw_palette_transitions();
+    set_fps_paces_top_level_flips();
+    screen_palette_keeps_raw_bytes();
+    btnp_repeat_bytes_start_at_zero();
+    hidden_builtins_match_pico8();
+    stat_values_match_pico8();
     reset_restores_boot_draw_state();
     line_pen_matches_pico8();
     map_default_size_matches_pico8();

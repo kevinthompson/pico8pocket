@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- `_set_fps(60)` in top-level code makes `flip()` loops there run at 60 fps,
+  as in PICO-8 0.2.7, and `time()` stays continuous when the rate changes.
+  Carts that run their title screen or whole game from top-level code used to
+  run at half speed after calling it.
+
+- `pal(c, v, 1)` keeps the low byte of `v` at `0x5f10 + c` and returns the
+  byte it replaced, as PICO-8 0.2.7 does, instead of storing `v & 0x8f`. The
+  display still uses the colour bits, so only peeks and return values change.
+
+- The `btnp()` repeat delay and interval at `0x5f5c` and `0x5f5d` start at 0,
+  which means PICO-8's defaults of 15 and 4 frames, instead of holding 15 and
+  4. Repeat timing is unchanged; carts that peek these bytes now read 0 as in
+  PICO-8 0.2.7.
+
+- Add PICO-8's undocumented built-ins `_set_fps`, `_update_buttons`,
+  `_get_menu_item_selected`, `_map_display`, `_mark_cpu`, `_startframe`,
+  `__trace`, `holdframe`, `_update_framerate` and `set_draw_slice`. Carts that
+  call them, such as ones that run their own main loop, used to stop at load.
+
+- `stat()` returns 0 for codes the core does not model, as PICO-8 0.2.7 does,
+  instead of `nil`; codes 64-71, 100 and 101 still return `nil`. It also
+  reports PICO-8's values for `stat(5)` (43), `stat(11)`-`stat(15)`,
+  `stat(104)`, `stat(109)`-`stat(111)` and `stat(124)`. Carts that compared
+  `stat(108)` with `stat(109)` stopped with an arithmetic error.
+
 - Add `reset()`, which returns the draw state at `0x5f00`-`0x5f7f` (palettes,
   clip, camera, pen colour, fill pattern, screen mode and memory mapping) to
   its boot values while keeping the cursor, as in PICO-8 0.2.7. Carts that
