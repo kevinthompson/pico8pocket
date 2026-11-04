@@ -1268,6 +1268,44 @@ static void set_fps_paces_top_level_flips(void) {
     p8p_cart_destroy(&cart);
 }
 
+static void peek_operators_match_pico8(void) {
+    /* Each case was checked against PICO-8 0.2.7. */
+    static const char source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "r={}\n"
+        "function is(v,e) add(r,v==e) end\n"
+        "function _init()\n"
+        " cls(7) is($0x6000,0x7777.7777)\n"
+        " cls() rectfill(0,0,7,0,7) is(@0x6000,119) is(%0x6000,0x7777)\n"
+        " pset(127,127,9) is(@0x7fff,0x90)\n"
+        " pset(124,127,1) pset(125,127,2) is($0x7ffe,0x0000.9021)\n"
+        " cls() pset(0,0,12) is(%0x5fff,0x0c00)\n"
+        " poke(0xffff,9) poke(0,1) poke(1,2) poke(2,3)\n"
+        " is(%-1,265) is($-1,0x0302.0109) is($0xfffe,0x0201.0900)\n"
+        " poke(0x5f55,0) pset(1,0,5) is(@0,0x51) poke(0x5f55,0x60)\n"
+        " cls(3) is(@0x6000,0x33) pset(0,0,4) is(@0x6000,0x34)\n"
+        "end\n"
+        "function _draw()\n"
+        " cls() for i=1,#r do pset(i-1,0,r[i] and 11 or 8) end\n"
+        "end\n"
+        ;
+    p8p_cart_t cart = {};
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                    sizeof(source) - 1, &cart) == 0);
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    const uint8_t *fb = p8p_runtime_framebuffer(runtime);
+    for (int index = 0; index < 12; ++index) {
+        if (fb[index] != 11)
+            fprintf(stderr, "FAIL peek_operators case %d\n", index + 1);
+        CHECK(fb[index] == 11);
+    }
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+}
+
 static void draw_palette_transitions(void) {
     struct PaletteCase {
         const char *name;
@@ -1770,6 +1808,7 @@ int main(void) {
     palette_leaf_contracts();
     palette_fast_path_semantics();
     draw_palette_transitions();
+    peek_operators_match_pico8();
     set_fps_paces_top_level_flips();
     screen_palette_keeps_raw_bytes();
     btnp_repeat_bytes_start_at_zero();

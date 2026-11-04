@@ -2082,6 +2082,17 @@ static void flush_screen_for_peek(int address, int count, int size) {
         screen_to_ram(active_runtime);
 }
 
+/* The @, % and $ operators read RAM directly; z8lua calls this first when
+ * a read overlaps the draw target while it has pixels that RAM has not
+ * caught up with. */
+static void sync_screen_for_peek_operator(lua_State *lua, int address,
+                                          int count) {
+    (void)lua;
+    (void)address;
+    (void)count;
+    screen_to_ram(active_runtime);
+}
+
 static int api_peek(lua_State *lua) {
     profile_api(P8P_API_MEMORY);
     int address = arg_int(lua, 1, 0) & 0xffff;
@@ -4017,6 +4028,8 @@ extern "C" int p8p_runtime_load_context(p8p_runtime_t *runtime,
     active_runtime = runtime;
     luaL_openlibs(runtime->lua);
     lua_setpico8memory(runtime->lua, runtime->ram);
+    lua_setpico8peekhook(runtime->lua, &runtime->screen_ram_dirty,
+                         &runtime->draw_target, sync_screen_for_peek_operator);
     register_api(runtime->lua);
     register_pico8_button_constants(runtime->lua);
     api_srand(runtime->lua);

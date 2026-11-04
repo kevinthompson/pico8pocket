@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The `@`, `%` and `$` peek operators read the current screen, as `peek()`
+  does and as in PICO-8 0.2.7. They used to return whatever screen memory was
+  last copied back to RAM, often 0 after drawing. They also wrap past
+  `0xffff`, so `%0xffff` reads `0xffff` and `0x0000` instead of treating the
+  second byte as 0.
+
 - `_set_fps(60)` in top-level code makes `flip()` loops there run at 60 fps,
   as in PICO-8 0.2.7, and `time()` stays continuous when the rate changes.
   Carts that run their title screen or whole game from top-level code used to
