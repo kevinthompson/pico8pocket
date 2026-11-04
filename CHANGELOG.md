@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add `reset()`, which returns the draw state at `0x5f00`-`0x5f7f` (palettes,
+  clip, camera, pen colour, fill pattern, screen mode and memory mapping) to
+  its boot values while keeping the cursor, as in PICO-8 0.2.7. Carts that
+  called it stopped at load with "attempt to call global 'reset'".
 - `line(x, y)` and `line(x, y, c)` continue from the previous line's endpoint,
   and `line()` starts a new polyline, as in PICO-8 0.2.7. They used to draw a
   single point, or read the colour as a coordinate. The pen is kept in

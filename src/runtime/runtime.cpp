@@ -519,6 +519,26 @@ static void camera_to_ram(p8p_runtime_t *runtime) {
 
 static void sync_draw_target(p8p_runtime_t *runtime);
 
+/* The draw state at 0x5f00-0x5f7f as a cartridge starts. */
+static void draw_state_defaults_to_ram(p8p_runtime_t *runtime) {
+    uint8_t *ram = runtime->ram;
+    memset(ram + 0x5f00, 0, 0x80);
+    for (int i = 0; i < 16; ++i) {
+        ram[0x5f00 + i] = (uint8_t)i;
+        ram[0x5f10 + i] = (uint8_t)i;
+    }
+    ram[0x5f00] |= 0x10;  /* colour 0 is transparent */
+    ram[0x5f22] = ram[0x5f23] = 128;
+    ram[0x5f25] = 6;
+    ram[0x5f55] = 0x60;
+    ram[0x5f56] = 0x20;
+    ram[0x5f57] = 128;
+    ram[0x5f5c] = 15;
+    ram[0x5f5d] = 4;
+    ram[0x5f5e] = 0xff;
+    reset_secondary_palette(runtime);
+}
+
 static void draw_state_from_ram(p8p_runtime_t *runtime) {
     sync_draw_target(runtime);
     for (int i = 0; i < 16; ++i) {
@@ -3424,6 +3444,24 @@ static const luaL_Reg runtime_api[] = {
     {"foreach", api_foreach}, {NULL, NULL}
 };
 
+/* reset() returns the draw state to its boot values, as PICO-8 does, but
+ * keeps the cursor and print's left margin.  The poke path then updates the
+ * draw fields and the draw target. */
+static int api_reset(lua_State *lua) {
+    (void)lua;
+    profile_api(P8P_API_DRAW_STATE);
+    p8p_runtime_t *runtime = active_runtime;
+    uint8_t *ram = runtime->ram;
+    uint8_t margin = ram[0x5f24], cursor_x = ram[0x5f26],
+            cursor_y = ram[0x5f27];
+    draw_state_defaults_to_ram(runtime);
+    ram[0x5f24] = margin;
+    ram[0x5f26] = cursor_x;
+    ram[0x5f27] = cursor_y;
+    draw_state_from_ram(runtime);
+    return 0;
+}
+
 /* Added after 0.0.33's first save-state format: numbered last by
  * eris.__p8p_init so existing permanent-object IDs do not move. Keep in
  * sync with the list in that function.  menuitem used to share api_stub,
@@ -3433,7 +3471,7 @@ static const luaL_Reg late_runtime_api[] = {
     {"rrect", api_rrect}, {"rrectfill", api_rrectfill},
     /* Not PICO-8 API, but Yarn calls exit() while drawing its score panel
      * once all levels are unlocked; a no-op lets it finish the frame. */
-    {"exit", api_stub},
+    {"exit", api_stub}, {"reset", api_reset},
     {NULL, NULL}
 };
 
@@ -3487,7 +3525,7 @@ static const char bootstrap_lua[] =
     "rawset(debug.getregistry(),'__PICO8_SANDBOX',_G)\n"
     "eris.__p8p_perm={} eris.__p8p_unperm={} eris.__p8p_original={}\n"
     "function eris.__p8p_init()\n"
-    " local late={'cstore','trace','menuitem','exit','rrect','rrectfill'} local skip={} for _,k in ipairs(late) do skip[k]=true end\n"
+    " local late={'cstore','trace','menuitem','exit','rrect','rrectfill','reset'} local skip={} for _,k in ipairs(late) do skip[k]=true end\n"
     " local keys={} for k in pairs(_G) do if not skip[k] then keys[#keys+1]=k end end table.sort(keys)\n"
     " local seen={} local n=0 local function permanent(v) local t=type(v)\n"
     "  if t~='table' and t~='function' and t~='userdata' and t~='thread' then return end\n"
@@ -3881,30 +3919,9 @@ extern "C" int p8p_runtime_load_context(p8p_runtime_t *runtime,
     memset(runtime->ram, 0, sizeof(runtime->ram));
     memcpy(runtime->cart_rom, cart->rom, sizeof(runtime->cart_rom));
     memcpy(runtime->ram, cart->rom, sizeof(runtime->cart_rom));
-    runtime->ram[0x5f54] = 0x00;
-    runtime->ram[0x5f55] = 0x60;
+    draw_state_defaults_to_ram(runtime);
     runtime->draw_target = 0x6000;
-    runtime->ram[0x5f56] = 0x20;
-    runtime->ram[0x5f57] = 128;
-    runtime->ram[0x5f5c] = 15;
-    runtime->ram[0x5f5d] = 4;
-    runtime->ram[0x5f5e] = 0xff;
-    reset_secondary_palette(runtime);
-    for (int i = 0; i < 16; ++i) {
-        runtime->draw_palette[i] = (uint8_t)i;
-        runtime->screen_palette[i] = (uint8_t)i;
-    }
-    memset(runtime->transparent, 0, sizeof(runtime->transparent));
-    runtime->transparent[0] = 1;
-    runtime->palettes_default = 1;
-    runtime->transparency_default = 1;
-    runtime->camera_x = runtime->camera_y = 0;
-    runtime->clip_x0 = runtime->clip_y0 = 0;
-    runtime->clip_x1 = runtime->clip_y1 = 128;
-    runtime->draw_color = 6;
-    runtime->cursor_x = runtime->cursor_y = 0;
-    set_fill_pattern(runtime, 0, 0);
-    draw_state_to_ram(runtime);
+    draw_state_from_ram(runtime);
     ram_to_screen(runtime);
     p8p_audio_reset(runtime->audio, runtime->ram);
     runtime->error[0] = '\0';

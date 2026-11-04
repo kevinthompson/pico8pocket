@@ -1054,6 +1054,49 @@ static void line_pen_matches_pico8(void) {
     p8p_cart_destroy(&cart);
 }
 
+static void reset_restores_boot_draw_state(void) {
+    /* Each case was checked against PICO-8 0.2.7.  reset() keeps the
+     * cursor (0x5f26-0x5f27) and print's margin (0x5f24); the RNG state at
+     * 0x5f44-0x5f4b is left out. */
+    static const char source[] =
+        "pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+        "r={}\n"
+        "function is(c) add(r,c) end\n"
+        "function rng(a) return a>=0x5f44 and a<=0x5f4b end\n"
+        "function _draw()\n"
+        " local boot={} for a=0x5f00,0x5f7f do boot[a]=@a end\n"
+        " for a=0x5f00,0x5f7f do if not rng(a) then poke(a,0x5a) end end\n"
+        " reset()\n"
+        " local bad=0 for a=0x5f00,0x5f7f do\n"
+        "  local want=(a==0x5f24 or a==0x5f26 or a==0x5f27) and 0x5a or boot[a]\n"
+        "  if not rng(a) and @a~=want then bad+=1 end\n"
+        " end\n"
+        " is(bad==0)\n"
+        " color(5) camera(3,4) pal(6,2) palt(0,false) fillp(0x5a5a) clip(1,2,3,4) cursor(9,9)\n"
+        " reset() is(@0x5f26==9 and @0x5f27==9)\n"
+        " cls() rectfill(0,0,3,3) is(pget(0,0)==6 and pget(1,0)==6 and pget(3,3)==6)\n"
+        " pset(127,127) is(pget(127,127)==6)\n"
+        " cls(1) spr(0,0,0) is(pget(0,0)==1)\n"
+        " cls() for i=1,#r do pset(i-1,0,r[i] and 11 or 8) end\n"
+        "end\n"
+        ;
+    p8p_cart_t cart = {};
+    CHECK(p8p_cart_load_text_memory((const uint8_t *)source,
+                                    sizeof(source) - 1, &cart) == 0);
+    p8p_runtime_t *runtime = p8p_runtime_create();
+    CHECK(runtime != NULL);
+    CHECK(p8p_runtime_load(runtime, &cart) == 0);
+    CHECK(p8p_runtime_step(runtime, 0) == 0);
+    const uint8_t *fb = p8p_runtime_framebuffer(runtime);
+    for (int index = 0; index < 5; ++index) {
+        if (fb[index] != 11)
+            fprintf(stderr, "FAIL reset case %d\n", index + 1);
+        CHECK(fb[index] == 11);
+    }
+    p8p_runtime_destroy(runtime);
+    p8p_cart_destroy(&cart);
+}
+
 static void draw_palette_transitions(void) {
     struct PaletteCase {
         const char *name;
@@ -1556,6 +1599,7 @@ int main(void) {
     palette_leaf_contracts();
     palette_fast_path_semantics();
     draw_palette_transitions();
+    reset_restores_boot_draw_state();
     line_pen_matches_pico8();
     map_default_size_matches_pico8();
     multi_value_peek_poke_matches_pico8();
